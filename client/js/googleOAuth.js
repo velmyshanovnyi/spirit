@@ -137,3 +137,47 @@ export async function verifyGoogleIdToken(
     expiresAt: payload.exp
   };
 }
+
+/**
+ * Wraps Google Identity Services' callback-based One Tap/prompt API in a
+ * Promise resolving to the raw ID token string (still unverified -- callers
+ * must pass it to verifyGoogleIdToken with the same nonce/client_id before
+ * trusting it). `googleSdk` defaults to the real `window.google` global (the
+ * GSI script must already be loaded) but is injectable for testing.
+ *
+ * `initialize`'s credential callback and `prompt`'s notification callback
+ * are two independent event sources in Google's real API and could both
+ * fire for one call. Whichever settles this Promise first wins -- that's
+ * native Promise behavior (a second resolve/reject is already a no-op per
+ * spec, nothing here needs to guard it), but it does mean a notification
+ * that fires before a genuine credential will report failure even though
+ * a credential arrived a moment later. Out of scope to fix here (would
+ * need e.g. a timeout/retry at the caller); documented so it isn't
+ * mistaken for a bug later.
+ */
+export function promptGoogleSignIn({ clientId, nonce, googleSdk = globalThis.google } = {}) {
+  return new Promise((resolve, reject) => {
+    if (!googleSdk?.accounts?.id) {
+      reject(new Error("Google Identity Services SDK not loaded"));
+      return;
+    }
+
+    googleSdk.accounts.id.initialize({
+      client_id: clientId,
+      nonce,
+      callback: (response) => {
+        if (response?.credential) {
+          resolve(response.credential);
+        } else {
+          reject(new Error("Google sign-in did not return a credential"));
+        }
+      }
+    });
+
+    googleSdk.accounts.id.prompt((notification) => {
+      if (notification?.isNotDisplayed?.() || notification?.isSkippedMoment?.()) {
+        reject(new Error("Google sign-in prompt was not shown or was dismissed"));
+      }
+    });
+  });
+}

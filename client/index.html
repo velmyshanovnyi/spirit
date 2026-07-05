@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Spirit</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
   <main>
@@ -13,6 +14,13 @@
       <h2>Акаунт</h2>
       <button id="btn-generate" type="button">Створити акаунт</button>
       <div>Ваш ID: <span id="pub-key-display">не згенеровано</span></div>
+    </section>
+
+    <section>
+      <h2>Верифікація</h2>
+      <label>Google Client ID: <input id="google-client-id" type="text"></label>
+      <button id="btn-google-verify" type="button">Підтвердити через Google</button>
+      <div id="google-verify-status"></div>
     </section>
 
     <section>

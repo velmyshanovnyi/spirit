@@ -19,12 +19,13 @@
 
 ## Секція 2: UI-дротування (кнопка "Підтвердити через Google")
 
-- [ ] **Tests**: `client/tests/app.test.js` (доповнення, jsdom, моки `googleOAuth.js` та `window.google.accounts.id`) —
-  - Клік "Підтвердити через Google" обчислює `nonce = fingerprint(identityKeyPair.publicKey)` і викликає Google Identity Services SDK з цим `nonce` і налаштованим `client_id`.
-  - Отриманий credential передається у `verifyGoogleIdToken` з тим самим `nonce`/`aud`; успіх → статус "Підтверджено через Google: email" у DOM.
-  - Помилка верифікації (підроблений/протермінований токен) → статус з повідомленням помилки, не кидає необроблений виняток.
-- [ ] **Impl**: `client/index.html` (кнопка, поле для `GOOGLE_CLIENT_ID`), `client/js/app.js` (дротування).
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/app.test.js` (доповнення, jsdom, моки `googleOAuth.js`) + `client/tests/googleOAuth.test.js` (`promptGoogleSignIn`, 5 тестів) —
+  - Клік "Підтвердити через Google" відмовляє без акаунта чи без Client ID; інакше обчислює `nonce = state.senderKey` (той самий fingerprint) і викликає `promptGoogleSignIn({clientId, nonce})`.
+  - Отриманий credential передається у `verifyGoogleIdToken` з тим самим `nonce`/`aud` (снапшот в локальну змінну, без гонки при зміні акаунта під час відкритого popup); успіх → статус "Підтверджено через Google: email" у DOM.
+  - Помилка верифікації → статус `помилка: <причина>`, не кидає необроблений виняток.
+  - `promptGoogleSignIn`: обгортає callback-based Google SDK у Promise; відхиляє при незавантаженому SDK, відсутньому credential, "not displayed"/"skipped" сповіщенні; перша подія з двох незалежних джерел (`initialize`-callback, `prompt`-notification) визначає результат (нативна поведінка Promise, без потреби в ручному guard).
+- [x] **Impl**: `client/index.html` (кнопка, поле `google-client-id`, статус, `<script>` GSI), `client/js/app.js` (дротування), `client/js/googleOAuth.js` (`promptGoogleSignIn`).
+- [x] **Exec review**: 2 ітерації, конвергенція — [iter1](../reviews/google-oauth-section-2-ui-wiring-iter1.md), [iter2](../reviews/google-oauth-section-2-ui-wiring-iter2.md). Ітерація 1 хибно діагностувала "подвійний settle" як баг, що вимагає guard; ітерація 2 виправила це на точний коментар без зайвого коду (нативні Promise вже settle-once). Відкладено як UX-полірування: кнопка лишається заблокованою, якщо користувач покине відкритий Google popup без взаємодії.
 
 ## Відкрите питання — реальний live-тест
 

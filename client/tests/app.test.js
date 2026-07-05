@@ -25,16 +25,24 @@ vi.mock("../js/e2ee.js", () => ({
   encryptMessage: vi.fn(),
   decryptMessage: vi.fn()
 }));
+vi.mock("../js/googleOAuth.js", () => ({
+  promptGoogleSignIn: vi.fn(),
+  verifyGoogleIdToken: vi.fn()
+}));
 
 import { generateIdentityKeyPair, generateEcdhKeyPair, fingerprint } from "../js/identity.js";
 import { startAsInitiator, startAsJoiner, applyRemoteAnswer } from "../js/webrtc.js";
 import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer } from "../js/signalingClient.js";
 import { encryptMessage, deriveSessionKey } from "../js/e2ee.js";
+import { promptGoogleSignIn, verifyGoogleIdToken } from "../js/googleOAuth.js";
 import { initApp } from "../js/app.js";
 
 const HTML = `
   <button id="btn-generate" type="button">Створити акаунт</button>
   <div>Ваш ID: <span id="pub-key-display">не згенеровано</span></div>
+  <input id="google-client-id" type="text" value="test-client-id">
+  <button id="btn-google-verify" type="button">Підтвердити через Google</button>
+  <div id="google-verify-status"></div>
   <input id="server-url" type="text" value="http://node.example/index.php">
   <input id="stun-url" type="text" value="stun:stun.example:19302">
   <input id="room-id" type="text">
@@ -74,6 +82,71 @@ describe("btn-generate", () => {
 
     expect(generateIdentityKeyPair).toHaveBeenCalled();
     expect(fingerprint).toHaveBeenCalledWith(keyPair.publicKey);
+  });
+});
+
+describe("btn-google-verify", () => {
+  it("refuses to start Google verification before an account exists", async () => {
+    initApp(document);
+    document.getElementById("btn-google-verify").click();
+    await vi.waitFor(() =>
+      expect(document.getElementById("google-verify-status").textContent).toMatch(/спочатку створіть акаунт/)
+    );
+    expect(promptGoogleSignIn).not.toHaveBeenCalled();
+  });
+
+  it("uses the identity fingerprint as the nonce and shows the verified email on success", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    promptGoogleSignIn.mockResolvedValue("FAKE_ID_TOKEN");
+    verifyGoogleIdToken.mockResolvedValue({ sub: "123", email: "user@gmail.com", emailVerified: true });
+
+    initApp(document);
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
+
+    document.getElementById("btn-google-verify").click();
+    await vi.waitFor(() =>
+      expect(document.getElementById("google-verify-status").textContent).toMatch(/user@gmail\.com/)
+    );
+
+    expect(promptGoogleSignIn).toHaveBeenCalledWith({ clientId: "test-client-id", nonce: "sender-fp" });
+    expect(verifyGoogleIdToken).toHaveBeenCalledWith("FAKE_ID_TOKEN", {
+      expectedNonce: "sender-fp",
+      expectedAudience: "test-client-id"
+    });
+  });
+
+  it("surfaces a verification failure as a status message instead of an unhandled rejection", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    promptGoogleSignIn.mockResolvedValue("FAKE_ID_TOKEN");
+    verifyGoogleIdToken.mockRejectedValue(new Error("Nonce mismatch: token was not issued for this identity key"));
+
+    initApp(document);
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
+
+    document.getElementById("btn-google-verify").click();
+    await vi.waitFor(() =>
+      expect(document.getElementById("google-verify-status").textContent).toMatch(/Nonce mismatch/)
+    );
+  });
+
+  it("requires a Google Client ID to be filled in", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+
+    initApp(document);
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
+    document.getElementById("google-client-id").value = "";
+
+    document.getElementById("btn-google-verify").click();
+    await vi.waitFor(() =>
+      expect(document.getElementById("google-verify-status").textContent).toMatch(/Client ID/)
+    );
+    expect(promptGoogleSignIn).not.toHaveBeenCalled();
   });
 });
 

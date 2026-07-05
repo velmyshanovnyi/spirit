@@ -8,6 +8,7 @@ import {
 import { startAsInitiator, startAsJoiner, applyRemoteAnswer } from "./webrtc.js";
 import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer } from "./signalingClient.js";
 import { deriveSessionKey, encryptMessage, decryptMessage } from "./e2ee.js";
+import { promptGoogleSignIn, verifyGoogleIdToken } from "./googleOAuth.js";
 
 const DEFAULT_ICE_TIMEOUT_MS = 15000;
 const DEFAULT_ANSWER_WAIT_TIMEOUT_MS = 5 * 60 * 1000; // matches the signaling node's default session TTL
@@ -24,6 +25,9 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
   const el = (id) => doc.getElementById(id);
   const setStatus = (text) => {
     el("connection-status").textContent = text;
+  };
+  const setGoogleStatus = (text) => {
+    el("google-verify-status").textContent = text;
   };
   const appendChat = (text) => {
     el("chat-log").textContent += text + "\n";
@@ -79,6 +83,33 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
     state.identityKeyPair = await generateIdentityKeyPair();
     state.senderKey = await fingerprint(state.identityKeyPair.publicKey);
     el("pub-key-display").textContent = state.senderKey;
+  });
+
+  withBusyButton(el("btn-google-verify"), async () => {
+    if (!state.senderKey) {
+      setGoogleStatus("спочатку створіть акаунт");
+      return;
+    }
+    const clientId = el("google-client-id").value;
+    if (!clientId) {
+      setGoogleStatus("вкажіть Google Client ID");
+      return;
+    }
+    // Snapshotted once so the nonce used to start the Google prompt and the
+    // nonce checked at verification time are provably the same value, even
+    // if the user re-generates an account (changing state.senderKey) while
+    // the popup is open -- matches the pattern already used in btn-initiate.
+    const senderKey = state.senderKey;
+    try {
+      // The identity fingerprint doubles as the OIDC nonce, cryptographically
+      // binding the returned ID token to this specific identity key
+      // (docs/oauth-verification.md).
+      const idToken = await promptGoogleSignIn({ clientId, nonce: senderKey });
+      const claims = await verifyGoogleIdToken(idToken, { expectedNonce: senderKey, expectedAudience: clientId });
+      setGoogleStatus(`Підтверджено через Google: ${claims.email}`);
+    } catch (err) {
+      setGoogleStatus(`помилка: ${err.message}`);
+    }
   });
 
   withBusyButton(el("btn-initiate"), async () => {

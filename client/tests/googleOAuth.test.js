@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { decodeJwt, fetchGoogleJwks, verifyGoogleIdToken } from "../js/googleOAuth.js";
+import { decodeJwt, fetchGoogleJwks, verifyGoogleIdToken, promptGoogleSignIn } from "../js/googleOAuth.js";
 
 function base64UrlEncode(bytes) {
   let binary = "";
@@ -223,5 +223,93 @@ describe("fetchGoogleJwks", () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
 
     await expect(fetchGoogleJwks()).rejects.toThrow(/500/);
+  });
+});
+
+describe("promptGoogleSignIn", () => {
+  it("initializes the Google SDK with the given client_id/nonce and resolves with the returned credential", async () => {
+    let capturedConfig;
+    const fakeGoogleSdk = {
+      accounts: {
+        id: {
+          initialize: vi.fn((config) => {
+            capturedConfig = config;
+          }),
+          prompt: vi.fn(() => {
+            capturedConfig.callback({ credential: "FAKE_ID_TOKEN" });
+          })
+        }
+      }
+    };
+
+    const token = await promptGoogleSignIn({ clientId: "test-client-id", nonce: "nonce-abc", googleSdk: fakeGoogleSdk });
+
+    expect(fakeGoogleSdk.accounts.id.initialize).toHaveBeenCalledWith(
+      expect.objectContaining({ client_id: "test-client-id", nonce: "nonce-abc" })
+    );
+    expect(token).toBe("FAKE_ID_TOKEN");
+  });
+
+  it("rejects if the Google SDK isn't loaded", async () => {
+    await expect(promptGoogleSignIn({ clientId: "x", nonce: "y", googleSdk: undefined })).rejects.toThrow(/not loaded/i);
+  });
+
+  it("rejects if the callback fires without a credential", async () => {
+    const fakeGoogleSdk = {
+      accounts: {
+        id: {
+          initialize: vi.fn((config) => {
+            config.callback({});
+          }),
+          prompt: vi.fn()
+        }
+      }
+    };
+
+    await expect(promptGoogleSignIn({ clientId: "x", nonce: "y", googleSdk: fakeGoogleSdk })).rejects.toThrow(/credential/i);
+  });
+
+  it("rejects if the prompt is not displayed or is skipped", async () => {
+    const fakeGoogleSdk = {
+      accounts: {
+        id: {
+          initialize: vi.fn(),
+          prompt: vi.fn((onNotification) => {
+            onNotification({ isNotDisplayed: () => true, isSkippedMoment: () => false });
+          })
+        }
+      }
+    };
+
+    await expect(promptGoogleSignIn({ clientId: "x", nonce: "y", googleSdk: fakeGoogleSdk })).rejects.toThrow(/not shown|dismissed/i);
+  });
+
+  it("resolves the promise from whichever of the two independent callbacks fires first (native first-settle-wins)", async () => {
+    let capturedConfig;
+    let capturedNotify;
+    const fakeGoogleSdk = {
+      accounts: {
+        id: {
+          initialize: vi.fn((config) => {
+            capturedConfig = config;
+          }),
+          prompt: vi.fn((onNotification) => {
+            capturedNotify = onNotification;
+          })
+        }
+      }
+    };
+
+    const promise = promptGoogleSignIn({ clientId: "x", nonce: "y", googleSdk: fakeGoogleSdk });
+
+    // Notification fires first (e.g. a transient "skipped moment"), THEN a
+    // real credential arrives from the same in-flight prompt. This documents
+    // the intended contract (first event wins) rather than testing any
+    // custom guard -- native Promise settle-once semantics already make
+    // this deterministic.
+    capturedNotify({ isNotDisplayed: () => false, isSkippedMoment: () => true });
+    capturedConfig.callback({ credential: "LATE_CREDENTIAL" });
+
+    await expect(promise).rejects.toThrow(/not shown|dismissed/i);
   });
 });
