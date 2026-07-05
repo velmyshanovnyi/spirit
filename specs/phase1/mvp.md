@@ -86,21 +86,25 @@ phpunit.xml
 
 ## Секція 4: WebRTC-оркестрація
 
-- [ ] **Tests**: `client/tests/webrtc.test.js` з тонким власноручним **fake `RTCPeerConnection`** (jsdom/Node не мають реальної WebRTC-реалізації; юніт-тести перевіряють оркестрацію логіки — послідовність викликів, а не реальну мережеву поведінку) —
+- [x] **Tests**: `client/tests/webrtc.test.js` з тонким власноручним **fake `RTCPeerConnection`** (jsdom/Node не мають реальної WebRTC-реалізації; юніт-тести перевіряють оркестрацію логіки — послідовність викликів, а не реальну мережеву поведінку) —
   - Ініціатор: `startAsInitiator()` створює `RTCPeerConnection`, `createDataChannel`, викликає `createOffer`/`setLocalDescription`, і після `icecandidate` з `candidate === null` викликає переданий callback `onLocalOfferReady(sdp)`.
   - Учасник: `startAsJoiner(offerSdp)` викликає `setRemoteDescription`, `createAnswer`, `setLocalDescription`, і після завершення ICE-збору викликає `onLocalAnswerReady(sdp)`.
   - `ondatachannel`/`channel.onopen`/`channel.onmessage` коректно прокидаються у передані callbacks.
+  - Помилка в будь-якому кроці хендшейку (обох ролей) викликає `onError`, а не залишається unhandled rejection.
+  - `applyRemoteAnswer(pc, answerSdp)` викликає `pc.setRemoteDescription` і завершує хендшейк ініціатора.
   - Явно **не** тестується реальне встановлення з'єднання (мережа/ICE/STUN) — це верифікується вручну в браузері (два вкладки/два клієнти) під час exec review секції, а не автоматичним тестом.
-- [ ] **Impl**: `client/js/webrtc.js` — тонка обгортка над `RTCPeerConnection`/`RTCDataChannel` з callback-інтерфейсом, що приймає `rtcConfig` (STUN/TURN, задається користувачем — жодних хардкоджених серверів).
-- [ ] **Exec review**: —
+- [x] **Impl**: `client/js/webrtc.js` — тонка обгортка над `RTCPeerConnection`/`RTCDataChannel` з callback-інтерфейсом (`onLocalOfferReady`/`onLocalAnswerReady`/`onChannelOpen`/`onMessage`/`onChannelClose`/`onError`), що приймає `rtcConfig` (STUN/TURN, задається користувачем — жодних хардкоджених серверів); `applyRemoteAnswer` — окремий експорт для завершення хендшейку ініціатора з Секції 5.
+- [x] **Exec review**: 2 ітерації, конвергенція — [iter1](../reviews/mvp-section-4-webrtc-iter1.md), [iter2](../reviews/mvp-section-4-webrtc-iter2.md).
 
 ## Секція 5: Мінімальний UI (wiring)
 
 - [ ] **Tests**: `client/tests/app.test.js` (environment `jsdom`, окремо від інших файлів через `// @vitest-environment jsdom`) —
   - Натискання "Створити акаунт" викликає `generateIdentityKeyPair` і оновлює DOM з fingerprint.
   - Натискання "Ініціювати чат" викликає ланцюжок `webrtc.startAsInitiator` → `signalingClient.createInvite`/`createOffer` (перевіряється через моки модулів, не реальні мережеві виклики).
+  - Отримана через `checkAnswer`/`pollForAnswer` відповідь застосовується через `webrtc.applyRemoteAnswer` (замикає хендшейк ініціатора — перенесено сюди з Секції 4, де було свідомо залишено як відповідальність UI-рівня).
   - Надіслане в полі вводу повідомлення проходить через `e2ee.encryptMessage` перед відправкою в DataChannel (перевіряється, що сирий plaintext ніколи не потрапляє напряму в `channel.send`).
-- [ ] **Impl**: `client/index.html`, `client/js/app.js` — з'єднує секції 1-4, мінімальний UI (текстове поле сигнального вузла/STUN, кнопки, чат-вивід), без CSS-фреймворків.
+  - **Відкладено з Секції 4** (exec review, знахідка #2): відсутній тайм-аут очікування завершення ICE-gathering — якщо `onLocalOfferReady`/`onLocalAnswerReady` ніколи не спрацьовують (немає доступного STUN/TURN), UI має показати користувачу стан "не вдалося встановити з'єднання" після розумного тайм-ауту, а не залишати користувача перед вічним спінером.
+- [ ] **Impl**: `client/index.html`, `client/js/app.js` — з'єднує секції 1-4, мінімальний UI (текстове поле сигнального вузла/STUN, кнопки, чат-вивід), без CSS-фреймворків; включає тайм-аут очікування ICE-gathering.
 - [ ] **Exec review**: —
 
 ---
