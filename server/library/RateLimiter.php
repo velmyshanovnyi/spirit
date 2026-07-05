@@ -17,19 +17,22 @@ class RateLimiter
     private int $maxRequestsPerWindow;
     private int $roomCreationWindowSeconds;
     private int $maxRoomCreationsPerWindow;
+    private int $maxTrackedIps;
 
     public function __construct(
         string $rateLimitFile,
         int $requestWindowSeconds = 60,
         int $maxRequestsPerWindow = 20,
         int $roomCreationWindowSeconds = 3600,
-        int $maxRoomCreationsPerWindow = 10
+        int $maxRoomCreationsPerWindow = 10,
+        int $maxTrackedIps = 10000
     ) {
         $this->rateLimitFile = $rateLimitFile;
         $this->requestWindowSeconds = $requestWindowSeconds;
         $this->maxRequestsPerWindow = $maxRequestsPerWindow;
         $this->roomCreationWindowSeconds = $roomCreationWindowSeconds;
         $this->maxRoomCreationsPerWindow = $maxRoomCreationsPerWindow;
+        $this->maxTrackedIps = $maxTrackedIps;
     }
 
     /**
@@ -91,6 +94,19 @@ class RateLimiter
             } else {
                 $data['ips'][$ip] = ['requests' => $requests, 'room_creations' => $roomCreations];
             }
+        }
+
+        // Hard cap on distinct tracked IPs (independent of window TTL), evicting
+        // whichever IPs have the oldest most-recent activity first -- protects
+        // the file from unbounded growth under high-cardinality traffic (e.g. a
+        // botnet/large NAT range) between natural window expirations.
+        if (count($data['ips']) > $this->maxTrackedIps) {
+            uasort($data['ips'], static function ($a, $b) {
+                $lastA = max(array_merge($a['requests'] ?? [], $a['room_creations'] ?? [], [0]));
+                $lastB = max(array_merge($b['requests'] ?? [], $b['room_creations'] ?? [], [0]));
+                return $lastA <=> $lastB;
+            });
+            $data['ips'] = array_slice($data['ips'], -$this->maxTrackedIps, null, true);
         }
     }
 

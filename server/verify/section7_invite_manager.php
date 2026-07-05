@@ -2,6 +2,12 @@
 /**
  * Live verification harness for specs/phase1/mvp.md, Section 7 (InviteManager).
  * Not part of the production signaling node -- delete after use.
+ *
+ * Updated for Section 10's refactor: InviteManager no longer owns Storage
+ * internally (it's a pure state-manipulator on a $db array so the
+ * controller can lock the whole load->validate->markUsed->save sequence).
+ * This harness now drives Storage explicitly, matching how the real
+ * controller will use it.
  */
 
 require __DIR__ . '/../library/Storage.php';
@@ -21,9 +27,12 @@ try {
     }
 
     $storage = new Storage($dbFile, 300);
-    $manager = new InviteManager($storage);
+    $manager = new InviteManager();
 
-    $invite = $manager->createInvite('sender-key-1');
+    $db = $storage->load();
+    $invite = $manager->createInvite($db, 'sender-key-1');
+    $storage->save($db);
+
     $results['create_invite_returns_room_and_token'] =
         is_string($invite['roomId']) && strlen($invite['roomId']) === 32 &&
         is_string($invite['inviteToken']) && strlen($invite['inviteToken']) === 32;
@@ -37,12 +46,12 @@ try {
     $results['unknown_room_rejected'] = $manager->isTokenValid($db, 'nonexistent-room', $invite['inviteToken']) === false;
 
     $manager->markInviteUsed($db, $invite['roomId']);
+    $storage->save($db);
     $results['token_rejected_after_use'] = $manager->isTokenValid($db, $invite['roomId'], $invite['inviteToken']) === false;
 
     $dbReloaded = $storage->load();
     $results['used_flag_persisted_to_disk'] = $dbReloaded['sessions'][$invite['roomId']]['invite_used'] === true;
 
-    // Whitelist mode
     $results['global_access_allows_anyone'] = $manager->isSenderAllowed('anyone', true, []);
     $results['whitelist_allows_listed_key'] = $manager->isSenderAllowed('key-a', false, ['key-a', 'key-b']);
     $results['whitelist_rejects_unlisted_key'] = $manager->isSenderAllowed('key-z', false, ['key-a', 'key-b']) === false;

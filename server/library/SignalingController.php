@@ -1,0 +1,417 @@
+<?php
+
+namespace Spirit;
+
+/**
+ * Orchestrates a single signaling request: CORS, auth (whitelist), rate
+ * limiting, and the five wire actions from docs/signaling-protocol.md, plus
+ * the optional fetch_proof proxy. Wraps every action that touches
+ * database.json in a single exclusive file lock spanning the whole
+ * load -> validate -> mutate -> save sequence -- this is what actually
+ * closes the invite-token check-then-use TOCTOU race carried forward from
+ * Section 7's exec review (InviteManager itself holds no locks by design).
+ */
+class SignalingController
+{
+    private array $config;
+    private Storage $storage;
+    private InviteManager $inviteManager;
+    private RateLimiter $rateLimiter;
+
+    public function __construct(array $config)
+    {
+        $this->config = $config;
+        $this->storage = new Storage($config['DB_FILE'], $config['SESSION_TTL_SECONDS']);
+        $this->inviteManager = new InviteManager();
+
+        $rl = $config['RATE_LIMIT'];
+        $this->rateLimiter = new RateLimiter(
+            $config['RATE_LIMIT_FILE'],
+            $rl['REQUEST_WINDOW_SECONDS'],
+            $rl['MAX_REQUESTS_PER_WINDOW'],
+            $rl['ROOM_CREATION_WINDOW_SECONDS'],
+            $rl['MAX_ROOM_CREATIONS_PER_WINDOW'],
+            $rl['MAX_TRACKED_IPS']
+        );
+    }
+
+    /**
+     * @return array{status: int, body: array|null}
+     */
+    public function handle(string $method, ?string $origin, string $clientIp, array $input): array
+    {
+        Cors::applyHeaders($origin, $this->config['ALLOWED_ORIGINS']);
+
+        // CORS preflight must be short-circuited here, BEFORE the generic
+        // "405 on non-POST" rule below -- otherwise a real preflight request
+        // gets rejected and the browser never sends the actual POST.
+        if ($method === 'OPTIONS') {
+            return ['status' => 204, 'body' => null];
+        }
+        if ($method !== 'POST') {
+            return $this->error(405, 'Method Not Allowed');
+        }
+
+        $action = $input['action'] ?? null;
+        $senderKey = $input['sender_key'] ?? null;
+        if (!is_string($action) || $action === '' || !is_string($senderKey) || $senderKey === '') {
+            return $this->error(400, 'Bad Request: Missing arguments');
+        }
+
+        if (!$this->inviteManager->isSenderAllowed($senderKey, $this->config['GLOBAL_ACCESS'], $this->config['WHITE_LIST'])) {
+            return $this->error(403, 'Access Denied: Public key not in white-list');
+        }
+
+        // General per-IP throttle applies to every action, including
+        // fetch_proof, before that action's own (stateless) handling.
+        if (!$this->rateLimiter->checkAndRecordRequest($clientIp)) {
+            return $this->error(429, 'Too Many Requests');
+        }
+
+        if ($action === 'fetch_proof') {
+            return $this->handleFetchProof($input);
+        }
+
+        // Stricter bucket only for room-creating actions, and only checked
+        // after the general throttle already passed -- avoids burning a
+        // room-creation slot on a request that was going to be denied
+        // anyway (Section 9 exec review carry-forward).
+        if (in_array($action, ['create_invite', 'create_offer'], true)
+            && !$this->rateLimiter->checkAndRecordRoomCreation($clientIp)
+        ) {
+            return $this->error(429, 'Too Many Requests');
+        }
+
+        try {
+            return $this->withLock(fn () => $this->dispatchAction($action, $input, $senderKey));
+        } catch (\RuntimeException $e) {
+            // Covers Storage::load() throwing on a corrupted/unreadable
+            // database.json (the documented load-or-abort contract) and
+            // lock-acquisition failures -- never caught-and-saved with an
+            // empty state, per Storage's contract.
+            return $this->error(500, 'Internal Server Error');
+        }
+    }
+
+    private function dispatchAction(string $action, array $input, string $senderKey): array
+    {
+        $db = $this->storage->load();
+        $this->storage->gcSessions($db);
+        $this->storage->enforceMaxSessions($db, $this->config['MAX_SESSIONS']);
+
+        switch ($action) {
+            case 'create_invite':
+                $result = $this->inviteManager->createInvite($db, $senderKey);
+                if (!$this->storage->save($db)) {
+                    return $this->error(500, 'Internal Server Error: failed to persist session');
+                }
+                return $this->success(['room_id' => $result['roomId'], 'invite_token' => $result['inviteToken']]);
+
+            case 'create_offer':
+                $fields = $this->requireFields($input, ['room_id', 'invite_token', 'sdp_data', 'ecdh_pubkey']);
+                if ($fields === null) {
+                    return $this->error(400, 'Bad Request: Missing arguments');
+                }
+                [$roomId, $inviteToken, $sdpData, $ecdhPubkey] = $fields;
+                if (!isset($db['sessions'][$roomId])) {
+                    return $this->error(404, 'Session room not found or expired');
+                }
+                if (!$this->inviteManager->isTokenValid($db, $roomId, $inviteToken)) {
+                    return $this->error(403, 'Access Denied: invalid invite token');
+                }
+                $db['sessions'][$roomId]['offer'] = $sdpData;
+                $db['sessions'][$roomId]['offer_ecdh_pubkey'] = $ecdhPubkey;
+                if (!$this->storage->save($db)) {
+                    return $this->error(500, 'Internal Server Error: failed to persist offer');
+                }
+                return $this->success([]);
+
+            case 'get_offer':
+                $fields = $this->requireFields($input, ['room_id', 'invite_token']);
+                if ($fields === null) {
+                    return $this->error(400, 'Bad Request: Missing arguments');
+                }
+                [$roomId, $inviteToken] = $fields;
+                if (!isset($db['sessions'][$roomId])) {
+                    return $this->error(404, 'Session room not found or expired');
+                }
+                if (!$this->inviteManager->isTokenValid($db, $roomId, $inviteToken)) {
+                    return $this->error(403, 'Access Denied: invalid invite token');
+                }
+                $session = $db['sessions'][$roomId];
+                if ($session['offer'] === null) {
+                    return $this->error(404, 'Offer not published yet');
+                }
+                return $this->success(['offer' => $session['offer'], 'ecdh_pubkey' => $session['offer_ecdh_pubkey']]);
+
+            case 'submit_answer':
+                $fields = $this->requireFields($input, ['room_id', 'invite_token', 'sdp_data', 'ecdh_pubkey']);
+                if ($fields === null) {
+                    return $this->error(400, 'Bad Request: Missing arguments');
+                }
+                [$roomId, $inviteToken, $sdpData, $ecdhPubkey] = $fields;
+                if (!isset($db['sessions'][$roomId])) {
+                    return $this->error(404, 'Session room not found');
+                }
+                if (!$this->inviteManager->isTokenValid($db, $roomId, $inviteToken)) {
+                    return $this->error(403, 'Access Denied: invalid or already-used invite token');
+                }
+                $db['sessions'][$roomId]['answer'] = $sdpData;
+                $db['sessions'][$roomId]['answer_ecdh_pubkey'] = $ecdhPubkey;
+                $this->inviteManager->markInviteUsed($db, $roomId);
+                if (!$this->storage->save($db)) {
+                    return $this->error(500, 'Internal Server Error: failed to persist answer');
+                }
+                return $this->success([]);
+
+            case 'check_answer':
+                $fields = $this->requireFields($input, ['room_id']);
+                if ($fields === null) {
+                    return $this->error(400, 'Bad Request: Missing arguments');
+                }
+                [$roomId] = $fields;
+                if (!isset($db['sessions'][$roomId])) {
+                    return $this->error(404, 'Room expired or closed');
+                }
+                $session = $db['sessions'][$roomId];
+                return $this->success(['answer' => $session['answer'], 'ecdh_pubkey' => $session['answer_ecdh_pubkey']]);
+
+            default:
+                return $this->error(400, 'Unknown action');
+        }
+    }
+
+    private function handleFetchProof(array $input): array
+    {
+        if (!($this->config['ENABLE_PROOF_PROXY'] ?? false)) {
+            return $this->error(403, 'fetch_proof is disabled on this node');
+        }
+        $targetUrl = $input['target_url'] ?? null;
+        if (!is_string($targetUrl) || $targetUrl === '') {
+            return $this->error(400, 'Bad Request: Missing arguments');
+        }
+
+        $fp = $this->config['FETCH_PROOF'];
+        $result = $this->fetchProofUrl($targetUrl, $fp['TIMEOUT_SECONDS'], $fp['MAX_BYTES'], $fp['MAX_REDIRECTS']);
+
+        if (!$result['ok']) {
+            // Explicit flag rather than matching on the message text -- a
+            // future wording edit shouldn't silently reclassify a rejection
+            // as an upstream failure or vice versa.
+            return $this->error($result['reject'] ? 403 : 502, $result['error']);
+        }
+
+        return $this->success(['body' => $result['body'], 'content_type' => $result['contentType']]);
+    }
+
+    /**
+     * SSRF-guarded single-shot GET, per docs/signaling-protocol.md's
+     * fetch_proof spec: http(s) only, private/reserved IPs blocked, limited
+     * redirects (each hop re-validated), timeout, response size cap.
+     *
+     * DNS-rebinding note: resolving the host ourselves and then letting
+     * curl resolve it AGAIN when connecting would leave a TOCTOU window (an
+     * attacker's DNS could answer differently the second time). We close
+     * that with CURLOPT_RESOLVE, which pins curl's actual connection to the
+     * IP we already validated -- the IP we checked is the IP we connect to.
+     *
+     * IP-literal canonicalization: a literal-IP host is resolved through
+     * inet_pton()/inet_ntop() rather than trusted as typed. inet_pton() is
+     * the strict, authoritative parser -- it rejects decimal-integer
+     * (2130706433), hex (0x7f000001), and octal-per-octet (0177.0.0.1)
+     * encodings that some resolvers/libraries accept as "127.0.0.1" but
+     * that filter_var()/naive string checks might not reject the same way.
+     * Canonicalizing also guarantees the exact string we validated is the
+     * exact string handed to CURLOPT_RESOLVE, with no room for the two to
+     * disagree.
+     *
+     * IPv6: both A and AAAA records are resolved and validated (rejecting
+     * ::1/fc00::/7/etc per the spec), but only an IPv4 address is ever
+     * pinned for the actual connection -- an IPv6-only target is refused
+     * rather than attempting the (differently-formatted) CURLOPT_RESOLVE
+     * IPv6 syntax, an honest limitation rather than a silent gap.
+     */
+    private function fetchProofUrl(string $url, int $timeoutSeconds, int $maxBytes, int $maxRedirects): array
+    {
+        if (!function_exists('curl_init')) {
+            return ['ok' => false, 'reject' => false, 'error' => 'curl extension not available on this node'];
+        }
+
+        for ($hop = 0; $hop <= $maxRedirects; $hop++) {
+            $parts = parse_url($url);
+            if ($parts === false || !isset($parts['scheme'], $parts['host'])
+                || !in_array($parts['scheme'], ['http', 'https'], true)
+            ) {
+                return ['ok' => false, 'reject' => true, 'error' => 'invalid URL'];
+            }
+            $host = $parts['host'];
+            $port = $parts['port'] ?? ($parts['scheme'] === 'https' ? 443 : 80);
+            // parse_url() leaves a bracketed IPv6 host as literally "[::1]",
+            // which inet_pton() rejects outright (it expects "::1") --
+            // strip the brackets so IPv6 literals are actually recognized
+            // and validated instead of falling through to DNS resolution.
+            $hostForIpCheck = trim($host, '[]');
+
+            $v4 = [];
+            $v6 = [];
+            $literal = @inet_pton($hostForIpCheck);
+            if ($literal !== false) {
+                $canonical = inet_ntop($literal);
+                if (strpos($canonical, ':') !== false) {
+                    $v6[] = $canonical;
+                } else {
+                    $v4[] = $canonical;
+                }
+            } else {
+                foreach (@dns_get_record($host, DNS_A + DNS_AAAA) ?: [] as $record) {
+                    if (isset($record['ip'])) {
+                        $v4[] = $record['ip'];
+                    }
+                    if (isset($record['ipv6'])) {
+                        $v6[] = $record['ipv6'];
+                    }
+                }
+                if (!$v4 && !$v6) {
+                    $resolved = gethostbyname($host);
+                    if ($resolved !== $host) {
+                        $v4[] = $resolved;
+                    }
+                }
+            }
+            if (!$v4 && !$v6) {
+                return ['ok' => false, 'reject' => false, 'error' => 'DNS resolution failed'];
+            }
+            foreach (array_merge($v4, $v6) as $ip) {
+                $packed = @inet_pton($ip);
+                if ($packed === false
+                    || !filter_var(inet_ntop($packed), FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)
+                ) {
+                    return ['ok' => false, 'reject' => true, 'error' => 'target resolves to a private/reserved IP'];
+                }
+            }
+            if (!$v4) {
+                return ['ok' => false, 'reject' => false, 'error' => 'IPv6-only targets are not supported'];
+            }
+            $pinnedIp = $v4[0];
+
+            $ch = curl_init();
+            curl_setopt_array($ch, [
+                CURLOPT_URL => $url,
+                CURLOPT_RESOLVE => ["{$host}:{$port}:{$pinnedIp}"],
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HEADER => true,
+                CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_TIMEOUT => $timeoutSeconds,
+                CURLOPT_RANGE => '0-' . $maxBytes,
+                CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+                CURLOPT_USERAGENT => 'SpiritSignalingNode-fetch_proof/1',
+            ]);
+            $raw = curl_exec($ch);
+            if ($raw === false) {
+                $curlError = curl_error($ch);
+                curl_close($ch);
+                return ['ok' => false, 'reject' => false, 'error' => "fetch failed: {$curlError}"];
+            }
+            $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+            $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+            $contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+            curl_close($ch);
+
+            $headers = substr($raw, 0, $headerSize);
+            $body = substr($raw, $headerSize);
+
+            if (in_array($status, [301, 302, 303, 307, 308], true)) {
+                if (!preg_match('/^Location:\s*(\S+)/mi', $headers, $m)) {
+                    return ['ok' => false, 'reject' => false, 'error' => 'redirect with no Location header'];
+                }
+                // Location is very commonly relative (absolute-path or
+                // protocol-relative) in the wild; resolving it ourselves
+                // means those redirects work instead of failing "invalid
+                // URL" on the next loop iteration's parse_url().
+                $url = $this->resolveRedirectLocation($url, trim($m[1]));
+                continue;
+            }
+
+            if (strlen($body) > $maxBytes) {
+                $body = substr($body, 0, $maxBytes);
+            }
+
+            return ['ok' => true, 'body' => $body, 'contentType' => $contentType];
+        }
+
+        return ['ok' => false, 'reject' => false, 'error' => 'too many redirects'];
+    }
+
+    /**
+     * Resolves a Location header value against the URL it was received on.
+     * Handles absolute URLs, protocol-relative ("//host/path"),
+     * absolute-path ("/path"), and simple relative ("path") forms -- the
+     * common cases seen in the wild. The result is re-parsed and
+     * re-validated on the next loop iteration exactly like the original URL.
+     */
+    private function resolveRedirectLocation(string $base, string $location): string
+    {
+        if (preg_match('#^https?://#i', $location)) {
+            return $location;
+        }
+        $baseParts = parse_url($base);
+        if ($baseParts === false || !isset($baseParts['scheme'], $baseParts['host'])) {
+            return $location;
+        }
+        $portPart = isset($baseParts['port']) ? ':' . $baseParts['port'] : '';
+        if (str_starts_with($location, '//')) {
+            return $baseParts['scheme'] . ':' . $location;
+        }
+        if (str_starts_with($location, '/')) {
+            return $baseParts['scheme'] . '://' . $baseParts['host'] . $portPart . $location;
+        }
+        $basePath = $baseParts['path'] ?? '/';
+        $baseDir = substr($basePath, 0, (int) strrpos($basePath, '/') + 1) ?: '/';
+        return $baseParts['scheme'] . '://' . $baseParts['host'] . $portPart . $baseDir . $location;
+    }
+
+    /**
+     * Returns validated string values for $fieldNames in order, or null if
+     * any is missing/empty -- callers destructure only on non-null.
+     */
+    private function requireFields(array $input, array $fieldNames): ?array
+    {
+        $values = [];
+        foreach ($fieldNames as $name) {
+            $value = $input[$name] ?? null;
+            if (!is_string($value) || $value === '') {
+                return null;
+            }
+            $values[] = $value;
+        }
+        return $values;
+    }
+
+    private function success(array $extra): array
+    {
+        return ['status' => 200, 'body' => array_merge(['status' => 'success'], $extra)];
+    }
+
+    private function error(int $status, string $message): array
+    {
+        return ['status' => $status, 'body' => ['error' => $message]];
+    }
+
+    private function withLock(callable $fn)
+    {
+        $handle = fopen($this->config['LOCK_FILE'], 'c');
+        if ($handle === false) {
+            throw new \RuntimeException('Unable to open lock file');
+        }
+        if (!flock($handle, LOCK_EX)) {
+            fclose($handle);
+            throw new \RuntimeException('Unable to acquire lock');
+        }
+        try {
+            return $fn();
+        } finally {
+            flock($handle, LOCK_UN);
+            fclose($handle);
+        }
+    }
+}

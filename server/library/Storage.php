@@ -87,4 +87,22 @@ class Storage
         }
         return $cleaned;
     }
+
+    /**
+     * Hard cap on total session records, independent of TTL (the spec's
+     * "максимальний розмір database.json — примусовий GC найстаріших
+     * записів при перевищенні"). Evicts the oldest-by-timestamp records
+     * first once the count exceeds $maxSessions. Mutates $db in place and
+     * persists only if something was actually evicted.
+     */
+    public function enforceMaxSessions(array &$db, int $maxSessions): bool
+    {
+        if (count($db['sessions']) <= $maxSessions) {
+            return false;
+        }
+        uasort($db['sessions'], static fn ($a, $b) => ($a['timestamp'] ?? 0) <=> ($b['timestamp'] ?? 0));
+        $db['sessions'] = array_slice($db['sessions'], -$maxSessions, null, true);
+        $this->save($db);
+        return true;
+    }
 }

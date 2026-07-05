@@ -7,26 +7,26 @@ namespace Spirit;
  * docs/signaling-protocol.md). Replaces the earlier draft's hardcoded
  * public-key whitelist with a dynamic, one-time invite token per room,
  * plus an optional static whitelist for private nodes.
+ *
+ * This class is a pure state-manipulator: it never loads or saves Storage
+ * itself. The controller (SignalingController, Section 10) is responsible
+ * for loading $db, calling these methods, and saving -- all under a single
+ * exclusive lock spanning the whole check-then-use sequence. That lock is
+ * what actually closes the TOCTOU race a caller could otherwise hit by
+ * loading/saving independently around each call (see the Section 7 exec
+ * review carry-forward recorded in specs/phase1/mvp.md).
  */
 class InviteManager
 {
-    private Storage $storage;
-
-    public function __construct(Storage $storage)
-    {
-        $this->storage = $storage;
-    }
-
     /**
-     * Creates a new room with a fresh invite token. The caller (controller)
-     * is responsible for later populating 'offer' via create_offer.
+     * Creates a new room with a fresh invite token in $db. Does not persist
+     * -- the caller saves once, after the whole request's mutations are
+     * applied, inside its own lock.
      *
      * @return array{roomId: string, inviteToken: string}
      */
-    public function createInvite(string $senderKey): array
+    public function createInvite(array &$db, string $senderKey): array
     {
-        $db = $this->storage->load();
-
         $roomId = bin2hex(random_bytes(16));
         $inviteToken = bin2hex(random_bytes(16));
 
@@ -40,8 +40,6 @@ class InviteManager
             'answer_ecdh_pubkey' => null,
             'timestamp' => time(),
         ];
-
-        $this->storage->save($db);
 
         return ['roomId' => $roomId, 'inviteToken' => $inviteToken];
     }
@@ -62,15 +60,15 @@ class InviteManager
     }
 
     /**
-     * Marks the invite token for $roomId as consumed so it cannot be reused,
-     * independent of TTL. Per docs/signaling-protocol.md, this happens
-     * immediately after a successful submit_answer.
+     * Marks the invite token for $roomId as consumed in $db so it cannot be
+     * reused, independent of TTL. Per docs/signaling-protocol.md, this
+     * happens immediately after a successful submit_answer. Does not
+     * persist -- see class docblock.
      */
     public function markInviteUsed(array &$db, string $roomId): void
     {
         if (isset($db['sessions'][$roomId])) {
             $db['sessions'][$roomId]['invite_used'] = true;
-            $this->storage->save($db);
         }
     }
 
