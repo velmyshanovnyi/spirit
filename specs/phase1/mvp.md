@@ -114,9 +114,9 @@ phpunit.xml
 
 ## Секція 6: Сигнальний вузол — файлове сховище і GC
 
-- [ ] **Verify** (замість PHPUnit — див. waiver вище): деплой на kibr і/або kolomedi через FTP, живі HTTP-запити перевіряють `save_db`/`load_db` round-trip, `gc_sessions` видаляє записи старші за TTL і залишає свіжі.
-- [ ] **Impl**: `server/library/Storage.php`.
-- [ ] **Exec review**: —
+- [x] **Verify** (замість PHPUnit — див. waiver вище): деплой на `spirit.kibr.com.ua` через FTP, живі HTTP-запити (`server/verify/section6_storage.php`) підтвердили `save`/`load` round-trip, `gcSessions` видаляє застарілі й лишає свіжі записи, `load()` кидає виняток на пошкодженому вмісті замість мовчазного спорожнення, версія PHP на хості ≥7.4.
+- [x] **Impl**: `server/library/Storage.php` — атомарний запис через temp-file+`rename()` (замість покладання на сам лише `LOCK_EX`), `load()` розрізняє "відсутньо" (легітимно порожньо) від "пошкоджено/нечитабельно" (кидає `RuntimeException`), `json_encode`-guard у `save()`.
+- [x] **Exec review**: 2 ітерації, конвергенція — [iter1](../reviews/mvp-section-6-storage-iter1.md), [iter2](../reviews/mvp-section-6-storage-iter2.md).
 
 ## Секція 7: Сигнальний вузол — invite-токени й контроль доступу
 
