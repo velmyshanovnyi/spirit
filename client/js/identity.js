@@ -1,3 +1,5 @@
+import { bytesToBase64, base64ToBytes } from "./e2ee.js";
+
 export async function generateIdentityKeyPair() {
   return crypto.subtle.generateKey(
     { name: "ECDSA", namedCurve: "P-256" },
@@ -21,6 +23,15 @@ export async function exportPrivateKeyRaw(privateKey) {
 export async function importPrivateKeyRaw(rawKey, algorithm, extractable = false) {
   const usages = algorithm.name === "ECDSA" ? ["sign"] : ["deriveBits", "deriveKey"];
   return crypto.subtle.importKey("pkcs8", rawKey, algorithm, extractable, usages);
+}
+
+export async function exportEcdhPublicKeyForWire(publicKey) {
+  const spki = await crypto.subtle.exportKey("spki", publicKey);
+  return bytesToBase64(new Uint8Array(spki));
+}
+
+export async function importEcdhPublicKeyFromWire(base64) {
+  return crypto.subtle.importKey("spki", base64ToBytes(base64), { name: "ECDH", namedCurve: "P-256" }, true, []);
 }
 
 export async function fingerprint(publicKey) {

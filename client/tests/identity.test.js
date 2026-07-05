@@ -4,7 +4,9 @@ import {
   generateEcdhKeyPair,
   exportPrivateKeyRaw,
   importPrivateKeyRaw,
-  fingerprint
+  fingerprint,
+  exportEcdhPublicKeyForWire,
+  importEcdhPublicKeyFromWire
 } from "../js/identity.js";
 
 describe("generateIdentityKeyPair", () => {
@@ -77,6 +79,30 @@ describe("exportPrivateKeyRaw / importPrivateKeyRaw", () => {
       256
     );
     expect(new Uint8Array(secretFromRestored)).toEqual(new Uint8Array(secretFromOriginal));
+  });
+});
+
+describe("exportEcdhPublicKeyForWire / importEcdhPublicKeyFromWire", () => {
+  it("round-trips an ECDH public key through the wire format so shared-secret derivation still matches", async () => {
+    const alice = await generateEcdhKeyPair();
+    const bob = await generateEcdhKeyPair();
+
+    const wireForm = await exportEcdhPublicKeyForWire(bob.publicKey);
+    expect(typeof wireForm).toBe("string");
+
+    const restoredBobPublicKey = await importEcdhPublicKeyFromWire(wireForm);
+
+    const secretViaOriginal = await crypto.subtle.deriveBits(
+      { name: "ECDH", public: bob.publicKey },
+      alice.privateKey,
+      256
+    );
+    const secretViaWireRoundTrip = await crypto.subtle.deriveBits(
+      { name: "ECDH", public: restoredBobPublicKey },
+      alice.privateKey,
+      256
+    );
+    expect(new Uint8Array(secretViaWireRoundTrip)).toEqual(new Uint8Array(secretViaOriginal));
   });
 });
 

@@ -98,14 +98,17 @@ phpunit.xml
 
 ## Секція 5: Мінімальний UI (wiring)
 
-- [ ] **Tests**: `client/tests/app.test.js` (environment `jsdom`, окремо від інших файлів через `// @vitest-environment jsdom`) —
+- [x] **Tests**: `client/tests/app.test.js` (environment `jsdom`, окремо від інших файлів через `// @vitest-environment jsdom`), 14 тестів —
   - Натискання "Створити акаунт" викликає `generateIdentityKeyPair` і оновлює DOM з fingerprint.
-  - Натискання "Ініціювати чат" викликає ланцюжок `webrtc.startAsInitiator` → `signalingClient.createInvite`/`createOffer` (перевіряється через моки модулів, не реальні мережеві виклики).
-  - Отримана через `checkAnswer`/`pollForAnswer` відповідь застосовується через `webrtc.applyRemoteAnswer` (замикає хендшейк ініціатора — перенесено сюди з Секції 4, де було свідомо залишено як відповідальність UI-рівня).
-  - Надіслане в полі вводу повідомлення проходить через `e2ee.encryptMessage` перед відправкою в DataChannel (перевіряється, що сирий plaintext ніколи не потрапляє напряму в `channel.send`).
-  - **Відкладено з Секції 4** (exec review, знахідка #2): відсутній тайм-аут очікування завершення ICE-gathering — якщо `onLocalOfferReady`/`onLocalAnswerReady` ніколи не спрацьовують (немає доступного STUN/TURN), UI має показати користувачу стан "не вдалося встановити з'єднання" після розумного тайм-ауту, а не залишати користувача перед вічним спінером.
-- [ ] **Impl**: `client/index.html`, `client/js/app.js` — з'єднує секції 1-4, мінімальний UI (текстове поле сигнального вузла/STUN, кнопки, чат-вивід), без CSS-фреймворків; включає тайм-аут очікування ICE-gathering.
-- [ ] **Exec review**: —
+  - Натискання "Ініціювати чат"/"Приєднатися" відмовляє без акаунта (guard), інакше запускає повний ланцюжок `webrtc.startAsInitiator`/`startAsJoiner` → `signalingClient.*` (через моки модулів).
+  - Отримана відповідь застосовується через `webrtc.applyRemoteAnswer` (замикає хендшейк ініціатора).
+  - Надіслане повідомлення проходить через `e2ee.encryptMessage` перед `channel.send`; без активного з'єднання (`channel`/`sessionKey` відсутні) — відмова замість помилки.
+  - ICE-gathering тайм-аут (окремий від тайм-ауту очікування відповіді через `AbortSignal` у `pollForAnswer`, 5 хв) — обидва не конфліктують; `onError` коректно знешкоджує ICE-таймер, щоб застаріле спрацювання не перезаписало реальну помилку.
+  - Внутрішній try/catch у відв'язаних колбеках (`onLocalOfferReady`/`onLocalAnswerReady`) сурфейсить помилки сигналінгу як статус, а не unhandled rejection.
+  - Re-entrancy guard: подвійний клік на "Ініціювати чат" під час активного запиту ігнорується.
+  - `client/tests/identity.test.js`: round-trip `exportEcdhPublicKeyForWire`/`importEcdhPublicKeyFromWire` через `deriveBits`.
+- [x] **Impl**: `client/index.html`, `client/js/app.js` — з'єднує секції 1-4, мінімальний UI (сигнальний вузол/STUN/room-id/invite-token, кнопки, чат-вивід, статус з'єднання), без CSS-фреймворків; два незалежні тайм-аути (ICE-gathering, очікування відповіді); `client/js/identity.js` доповнено `exportEcdhPublicKeyForWire`/`importEcdhPublicKeyFromWire` для передачі ECDH-ключів через сигнальний канал.
+- [x] **Exec review**: 3 ітерації (гранична кількість), конвергенція — [iter1](../reviews/mvp-section-5-ui-wiring-iter1.md), [iter2](../reviews/mvp-section-5-ui-wiring-iter2.md), [iter3](../reviews/mvp-section-5-ui-wiring-iter3.md).
 
 ---
 
