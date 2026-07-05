@@ -1,0 +1,75 @@
+# Спека: Фаза 2 — Профілі, backup та мультипристрій
+
+Реалізація [accounts.md](../../docs/accounts.md): перманентні зашифровані профілі в IndexedDB, backup identity-ключа (мнемоніка + keyfile — одне кодування секрету), мультипристрій через device-linking сертифікати.
+
+Джерело істини: [docs/accounts.md](../../docs/accounts.md), [docs/decisions.md](../../docs/decisions.md) (D8, D9).
+
+## Технічні рішення (узгоджено з користувачем)
+
+- **KDF: PBKDF2**, не Argon2 — нативний у Web Crypto API, без WASM-залежності, узгоджено з підходом проєкту (жодних зовнішніх крипто-бібліотек у Фазі 1). Рекомендована кількість ітерацій — 600 000+ (сучасна рекомендація OWASP для PBKDF2-HMAC-SHA256).
+- **Тестування IndexedDB**: jsdom не має нативної реалізації IndexedDB — додається `fake-indexeddb` як devDependency (лише для тестів, не в продакшн-бандл).
+- **Мнемоніка**: пряме кодування сирих pkcs8-байт приватного ключа як BIP39-подібний word list (не детермінована деривація — D8). Потрібен офіційний список 2048 англійських слів BIP39 (публічний домен, широко перевірений) як статичний дата-файл.
+
+## Секція 1: IndexedDB-обгортка (загальне зашифроване сховище)
+
+- [ ] **Tests**: `client/tests/db.test.js` (з `fake-indexeddb`) — відкриття БД створює потрібні object stores; `put`/`get` round-trip для довільного значення; `get` неіснуючого ключа повертає `undefined`/`null`; `delete` видаляє запис; `listKeys` повертає всі ключі стору.
+- [ ] **Impl**: `client/js/db.js` — тонка Promise-обгортка над IndexedDB (`openDatabase`, `put`, `get`, `delete`, `listKeys`), object stores: `profile`, `contacts`, `messages`.
+- [ ] **Exec review**: —
+
+## Секція 2: Passphrase-шифрування сховища (vault)
+
+- [ ] **Tests**: `client/tests/vault.test.js` — `deriveVaultKey(passphrase, salt)` детермінований для тих самих вхідних даних, різний для різних passphrase/salt; `encryptForVault`/`decryptForVault` round-trip довільних байтів; невірний passphrase при розшифровці кидає помилку (GCM auth failure), не повертає сміття.
+- [ ] **Impl**: `client/js/vault.js` — `deriveVaultKey` (PBKDF2-HMAC-SHA256, 600k ітерацій, довільна сіль → AES-256-GCM `CryptoKey`), `encryptForVault`/`decryptForVault` (перевикористовує формат `iv||ciphertext` та `bytesToBase64`/`base64ToBytes` з [e2ee.js](../../client/js/e2ee.js)).
+- [ ] **Exec review**: —
+
+## Секція 3: Модель профілю (створення/завантаження перманентного профілю)
+
+- [ ] **Tests**: `client/tests/profile.test.js` — `createPermanentProfile(passphrase)` генерує identity-keypair (`extractable: true`, на відміну від ефемерного режиму), зберігає зашифрований приватний ключ у `db`; `loadPermanentProfile(passphrase)` відновлює той самий keypair (перевірка через sign/verify); невірний passphrase при завантаженні — чітка помилка.
+- [ ] **Impl**: `client/js/profile.js` — `createPermanentProfile`, `loadPermanentProfile`, `hasStoredProfile()`.
+- [ ] **Exec review**: —
+
+## Секція 4: Backup — мнемоніка (BIP39-подібне кодування)
+
+- [ ] **Tests**: `client/tests/mnemonic.test.js` — `bytesToMnemonic(bytes)` для 32-байтного входу повертає 24 слова зі списку BIP39; `mnemonicToBytes(words)` — точний round-trip; невірна контрольна сума чи слово поза списком — чітка помилка, не мовчазне пошкодження даних.
+- [ ] **Impl**: `client/js/mnemonic.js` — `bytesToMnemonic`/`mnemonicToBytes` (SHA-256 checksum за специфікацією BIP39, локальний data-файл `client/js/bip39-wordlist-en.js` — офіційний список 2048 слів).
+- [ ] **Exec review**: —
+
+## Секція 5: Backup — keyfile
+
+- [ ] **Tests**: `client/tests/keyfile.test.js` — `createKeyfile(rawKeyBytes, passphrase)` повертає JSON-структуру з сіллю/iv/ciphertext; `restoreFromKeyfile(keyfileJson, passphrase)` — точний round-trip сирих байтів; невірний passphrase — чітка помилка.
+- [ ] **Impl**: `client/js/keyfile.js` — перевикористовує `vault.js` для шифрування, серіалізує у стабільний JSON-формат для завантаження/збереження файлу.
+- [ ] **Exec review**: —
+
+## Секція 6: Відновлення профілю з backup
+
+- [ ] **Tests**: `client/tests/profile.test.js` (доповнення) — `restoreProfileFromMnemonic(words, passphrase)` і `restoreProfileFromKeyfile(json, passphrase)` відновлюють identity-keypair, здатний підписувати верифіковано, і зберігають його в `db` як перманентний профіль.
+- [ ] **Impl**: `client/js/profile.js` (доповнення) — з'єднує Секції 3-5.
+- [ ] **Exec review**: —
+
+## Секція 7: UI — створення профілю, вибір backup, перемикання ефемерний/перманентний
+
+- [ ] **Tests**: `client/tests/app.test.js` (доповнення) — вибір "Створити профіль" (не "Швидкий чат") показує крок passphrase + вибір backup (мнемоніка/keyfile/обидва/пропустити); "Пропустити" залишає постійний банер-нагадування; відображена мнемоніка/keyfile відповідає реально згенерованому ключу.
+- [ ] **Impl**: `client/index.html`, `client/js/app.js` — розширення UI, не заміна ефемерного шляху (Фаза 1 лишається робочою).
+- [ ] **Exec review**: —
+
+## Секція 8: Мультипристрій — device keypair та сертифікат
+
+- [ ] **Tests**: `client/tests/deviceLinking.test.js` — `generateDeviceKeyPair()` — окремий від identity ECDSA keypair; `signDeviceCertificate(identityPrivateKey, devicePublicKey)` створює перевірюваний підпис over `devicePublicKey + timestamp`; `verifyDeviceCertificate` приймає валідний сертифікат і відхиляє підроблений/протермінований.
+- [ ] **Impl**: `client/js/deviceLinking.js` — `generateDeviceKeyPair`, `signDeviceCertificate`, `verifyDeviceCertificate`.
+- [ ] **Exec review**: —
+
+## Секція 9: Мультипристрій — flow приєднання пристрою (перевикористання P2P-інфраструктури)
+
+- [ ] **Tests**: `client/tests/app.test.js`/`deviceLinking.test.js` (моки `webrtc.js`/`signalingClient.js`/`e2ee.js`) — "Приєднати цей пристрій" генерує device keypair, запускає invite-based P2P хендшейк (той самий шлях, що й звичайний чат), новий пристрій отримує device certificate + identity private key + знімок контактів через E2EE-канал.
+- [ ] **Impl**: `client/js/deviceLinking.js` (доповнення), `client/js/app.js`/`client/index.html` (UI).
+- [ ] **Exec review**: —
+
+## Секція 10: Мультипристрій — відкликання та синхронізація
+
+- [ ] **Tests**: `client/tests/deviceLinking.test.js` (доповнення) — відкликання пристрою оновлює підписаний список дозволених device certificates, збільшує версію; контакти, що отримають оновлений список, відхиляють повідомлення від відкликаного сертифіката.
+- [ ] **Impl**: `client/js/deviceLinking.js` (доповнення) — `revokeDevice`, керування версійним списком сертифікатів.
+- [ ] **Exec review**: —
+
+## Верифікація
+
+Секції 1-8 — повністю test-first, без зовнішніх залежностей (як Фаза 1 Секції 1-5). Секції 9-10 (P2P-флоу мультипристрою) — юніт-тестовані з моками WebRTC/signaling (як Секція 4-5 Фази 1); реальна перевірка "два браузери, один профіль" — ручна верифікація користувачем, аналогічно до живого тесту Google OAuth.
