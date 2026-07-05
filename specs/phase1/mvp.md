@@ -120,9 +120,9 @@ phpunit.xml
 
 ## Секція 7: Сигнальний вузол — invite-токени й контроль доступу
 
-- [ ] **Verify**: живі HTTP-запити — токен одноразовий (другий `submit_answer` тим самим токеном відхиляється), TTL-протермінований токен відхиляється, whitelist-режим (опційний) відхиляє непрописані ключі.
-- [ ] **Impl**: `server/library/InviteManager.php`.
-- [ ] **Exec review**: —
+- [x] **Verify**: живі HTTP-запити на `spirit.kibr.com.ua` (`server/verify/section7_invite_manager.php`, 11 перевірок) — створення invite (roomId/token 128 біт), персистентність, валідний/невалідний/невідомий токен, одноразовість (rejection after use, персистентність прапорця на диску), whitelist-режим (global/allowed/rejected).
+- [x] **Impl**: `server/library/InviteManager.php` — `createInvite`, `isTokenValid`, `markInviteUsed` (усі `hash_equals` для порівняння токенів/ключів, з явним `(string)`-кастом на елементах whitelist проти помилок конфігурації), `isSenderAllowed`.
+- [x] **Exec review**: 2 ітерації, конвергенція — [iter1](../reviews/mvp-section-7-invite-manager-iter1.md), [iter2](../reviews/mvp-section-7-invite-manager-iter2.md). TOCTOU check-then-use під конкуренцією свідомо перенесено до Секції 10 (не виправно на цьому рівні без контролера-оркестратора).
 
 ## Секція 8: Сигнальний вузол — CORS
 
@@ -139,6 +139,9 @@ phpunit.xml
 ## Секція 10: Сигнальний вузол — actions і `fetch_proof`
 
 - [ ] **Verify**: живий повний happy-path (`create_invite → create_offer → get_offer → submit_answer → check_answer`) між двома реальними клієнтами (kibr/kolomedi), коди помилок (400/403/404/405/429/500) за специфікацією; `fetch_proof` — SSRF-блок приватних IP-діапазонів, ліміт розміру/timeout, вимкнено за замовчуванням.
+  - **Перенесено з Секції 7 review**: check-then-use для invite-токена (`isTokenValid` → `markInviteUsed`) має бути атомарним у контролері (наприклад, `LOCK_EX` навколо всієї послідовності load→validate→markUsed→save), інакше два конкурентні `submit_answer` можуть обидва пройти валідацію до того, як токен позначиться використаним.
+  - **Перенесено з Секції 7 review**: живий verify для цієї секції має включати конкурентний пробник (два паралельні запити `submit_answer` з одним токеном), що явно перевіряє "рівно один встигає" — послідовний verify-скрипт цього виявити не може.
+  - **Перенесено з Секції 6 review**: контролер має дотримуватись контракту Storage "load-or-abort" — ловити `RuntimeException` від `load()` лише щоб повернути чисту `500`-відповідь за форматом специфікації, ніколи не catch-і-save з порожнім станом.
 - [ ] **Impl**: `server/public/index.php`, `server/library/SignalingController.php`.
 - [ ] **Exec review**: —
 
