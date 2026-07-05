@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "client-static",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["--yes", "serve", "client", "-l", "5500"],
+      "port": 5500
+    }
+  ]
+}
