@@ -32,7 +32,7 @@ vitest.config.js
 
 server/
   public/index.php      # Секція 6 (entrypoint)
-  src/
+  library/
     Storage.php
     InviteManager.php
     Cors.php
@@ -76,13 +76,13 @@ phpunit.xml
 
 ## Секція 3: Signaling client (long-polling обгортка)
 
-- [ ] **Tests**: `client/tests/signalingClient.test.js` (з мокнутим `global.fetch`) —
+- [x] **Tests**: `client/tests/signalingClient.test.js` (з мокнутим `global.fetch`) —
   - `createInvite(baseUrl, senderKey)` формує коректний POST-запит (`action: "create_invite"`) і повертає `{roomId, inviteToken}` з відповіді.
   - `createOffer`, `getOffer`, `submitAnswer`, `checkAnswer` аналогічно формують правильні payload і парсять відповідь за протоколом з `signaling-protocol.md`.
-  - Мережева помилка (`fetch` реджектиться) чи HTTP-помилка (4xx/5xx) не кидає необроблений виняток нагору — повертає структуровану помилку, яку викликач може обробити.
-  - `pollForAnswer(baseUrl, senderKey, roomId, {intervalMs, timeoutMs})` зупиняється після отримання ненульової відповіді і не робить зайвих запитів після зупинки.
-- [ ] **Impl**: `client/js/signalingClient.js` — по одній функції на кожну дію з [signaling-protocol.md](../../docs/signaling-protocol.md) (`create_invite`, `create_offer`, `get_offer`, `submit_answer`, `check_answer`), спільна `apiRequest` обгортка, `pollForAnswer` з `clearInterval`/`AbortController` для зупинки.
-- [ ] **Exec review**: —
+  - Мережева помилка (`fetch` реджектиться), HTTP-помилка (4xx/5xx) і non-JSON тіло помилки — жодне не кидає необроблений виняток нагору, всі дають структурований `SignalingError`.
+  - `pollForAnswer` зупиняється після отримання ненульової відповіді, при reject від `checkAnswer`, і при `AbortSignal.abort()` — включно з гонкою, коли abort стається під час активного запиту (abort перемагає, пізня відповідь ігнорується) — і в жодному випадку не робить зайвих запитів після зупинки.
+- [x] **Impl**: `client/js/signalingClient.js` — по одній функції на кожну дію з [signaling-protocol.md](../../docs/signaling-protocol.md) (`create_invite`, `create_offer`, `get_offer`, `submit_answer`, `check_answer`), спільна `apiRequest` обгортка з `SignalingError`, `pollForAnswer` з `setTimeout`-циклом і підтримкою `AbortSignal` (прокинутий аж до `fetch`).
+- [x] **Exec review**: 2 ітерації, конвергенція — [iter1](../reviews/mvp-section-3-signaling-client-iter1.md), [iter2](../reviews/mvp-section-3-signaling-client-iter2.md).
 
 ## Секція 4: WebRTC-оркестрація
 
@@ -108,7 +108,7 @@ phpunit.xml
 ## Секція 6: Сигнальний вузол — файлове сховище і GC ⚠️ ЗАБЛОКОВАНО
 
 - [ ] **Tests**: `server/tests/StorageTest.php` (PHPUnit) — `save_db`/`load_db` round-trip, `gc_sessions` видаляє записи старші за TTL і залишає свіжі, конкурентний запис не губить дані (симуляція `LOCK_EX`).
-- [ ] **Impl**: `server/src/Storage.php`.
+- [ ] **Impl**: `server/library/Storage.php`.
 - [ ] **Exec review**: —
 
 *Не починати без PHP+Composer у середовищі виконання (див. "Відкрите питання").*
@@ -116,25 +116,25 @@ phpunit.xml
 ## Секція 7: Сигнальний вузол — invite-токени й контроль доступу ⚠️ ЗАБЛОКОВАНО
 
 - [ ] **Tests**: `server/tests/InviteManagerTest.php` — токен одноразовий (другий `submit_answer` тим самим токеном відхиляється), TTL-протермінований токен відхиляється, whitelist-режим (опційний) відхиляє непрописані ключі.
-- [ ] **Impl**: `server/src/InviteManager.php`.
+- [ ] **Impl**: `server/library/InviteManager.php`.
 - [ ] **Exec review**: —
 
 ## Секція 8: Сигнальний вузол — CORS ⚠️ ЗАБЛОКОВАНО
 
 - [ ] **Tests**: `server/tests/CorsTest.php` — дозволений origin отримує `Access-Control-Allow-Origin` з точним значенням (не `*`), недозволений — без заголовка, `ALLOWED_ORIGINS = []` (same-origin режим) — без заголовка взагалі.
-- [ ] **Impl**: `server/src/Cors.php`.
+- [ ] **Impl**: `server/library/Cors.php`.
 - [ ] **Exec review**: —
 
 ## Секція 9: Сигнальний вузол — rate limiting ⚠️ ЗАБЛОКОВАНО
 
 - [ ] **Tests**: `server/tests/RateLimiterTest.php` — N запитів проходять, N+1 у вікні повертає 429, вікно скидається за TTL, файл лічильника самоочищується.
-- [ ] **Impl**: `server/src/RateLimiter.php`.
+- [ ] **Impl**: `server/library/RateLimiter.php`.
 - [ ] **Exec review**: —
 
 ## Секція 10: Сигнальний вузол — actions і `fetch_proof` ⚠️ ЗАБЛОКОВАНО
 
 - [ ] **Tests**: `server/tests/SignalingControllerTest.php` — повний happy-path (`create_invite → create_offer → get_offer → submit_answer → check_answer`), коди помилок (400/403/404/405/429/500) за специфікацією; `fetch_proof` — SSRF-блок приватних IP-діапазонів, ліміт розміру/timeout, вимкнено за замовчуванням.
-- [ ] **Impl**: `server/public/index.php`, `server/src/SignalingController.php`.
+- [ ] **Impl**: `server/public/index.php`, `server/library/SignalingController.php`.
 - [ ] **Exec review**: —
 
 ---
