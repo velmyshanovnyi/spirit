@@ -126,9 +126,9 @@ phpunit.xml
 
 ## Секція 8: Сигнальний вузол — CORS
 
-- [ ] **Verify**: живі HTTP-запити з різних `Origin` — дозволений отримує `Access-Control-Allow-Origin` з точним значенням (не `*`), недозволений — без заголовка, `ALLOWED_ORIGINS = []` (same-origin режим) — без заголовка взагалі.
-- [ ] **Impl**: `server/library/Cors.php`.
-- [ ] **Exec review**: —
+- [x] **Verify**: живі HTTP-запити з різних `Origin` на `spirit.kibr.com.ua` — дозволений origin отримує `Access-Control-Allow-Origin` з точним значенням + `Vary`/`Allow-Methods`/`Allow-Headers` (не `*`), недозволений — без жодного CORS-заголовка, `ALLOWED_ORIGINS = []` (same-origin режим) і відсутність `Origin` — теж без заголовків. Усі 4 сценарії підтверджено `curl -D -`.
+- [x] **Impl**: `server/library/Cors.php` — `Cors::applyHeaders`, статичний метод без побічних залежностей, викликається контролером (Секція 10).
+- [x] **Exec review**: 1 ітерація, конвергенція без правок коду — [iter1](../reviews/mvp-section-8-cors-iter1.md).
 
 ## Секція 9: Сигнальний вузол — rate limiting
 
@@ -142,6 +142,7 @@ phpunit.xml
   - **Перенесено з Секції 7 review**: check-then-use для invite-токена (`isTokenValid` → `markInviteUsed`) має бути атомарним у контролері (наприклад, `LOCK_EX` навколо всієї послідовності load→validate→markUsed→save), інакше два конкурентні `submit_answer` можуть обидва пройти валідацію до того, як токен позначиться використаним.
   - **Перенесено з Секції 7 review**: живий verify для цієї секції має включати конкурентний пробник (два паралельні запити `submit_answer` з одним токеном), що явно перевіряє "рівно один встигає" — послідовний verify-скрипт цього виявити не може.
   - **Перенесено з Секції 6 review**: контролер має дотримуватись контракту Storage "load-or-abort" — ловити `RuntimeException` від `load()` лише щоб повернути чисту `500`-відповідь за форматом специфікації, ніколи не catch-і-save з порожнім станом.
+  - **Перенесено з Секції 8 review**: живий verify має перевірити реальний шлях завантаження `ALLOWED_ORIGINS` з конфігурації (не хардкоджений масив, як у verify-скрипті Секції 8), і що `OPTIONS`-запит (CORS preflight) отримує короткий `200`/`204` з `Cors::applyHeaders` **до** загального правила "405 на не-POST", а не потрапляє під нього.
 - [ ] **Impl**: `server/public/index.php`, `server/library/SignalingController.php`.
 - [ ] **Exec review**: —
 
