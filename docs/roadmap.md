@@ -4,15 +4,14 @@
 
 Документація в `docs/`: компоненти, протокол сигналінгу, дизайн E2EE, журнал рішень. Коду немає.
 
-## Фаза 1 — MVP
+## Фаза 1 — MVP ✅ ЗАВЕРШЕНО
 
-- Клієнт: генерація identity (ECDSA P-256) та ECDH (P-256) ключів через Web Crypto API.
-- Сигнальний вузол: PHP-скрипт за оновленою специфікацією ([signaling-protocol.md](signaling-protocol.md)) — invite-токени замість хардкодженого whitelist, обмежений CORS, файловий rate-limiting.
-- WebRTC: встановлення `RTCPeerConnection`/`RTCDataChannel` через сигнальний вузол.
-- E2EE: ECDH → HKDF → AES-256-GCM за [e2ee.md](e2ee.md), обов'язково для будь-якого повідомлення в DataChannel.
-- UI: мінімальний — генерація акаунта, введення адреси сигнального вузла та STUN/TURN, створення/приєднання до чату, текстовий чат.
-- Персистентність: відсутня — суто ефемерна сесія в пам'яті вкладки.
-- Тестування (коли почнеться імплементація, за `CLAUDE.md`-дисципліною): PHPUnit для логіки сигнального вузла (GC, invite-токени, rate limit), легкий JS test runner з мокнутими `Web Crypto`/`RTCPeerConnection` для клієнтської логіки.
+Повна специфікація та історія review — [specs/phase1/mvp.md](../specs/phase1/mvp.md).
+
+- Клієнт (Секції 1-5, test-first, Vitest): identity/ECDH keygen, E2EE (ECDH → HKDF → AES-256-GCM), signaling client, WebRTC-оркестрація, мінімальний UI. `client/`.
+- Сигнальний вузол (Секції 6-10, PHP, верифіковано живим деплоєм на `spirit.kibr.com.ua` — PHP/Composer недоступні локально, explicit test-first waiver): файлове сховище з атомарним записом і GC, invite-токени, CORS, rate-limiting, повний контролер дій + опційний `fetch_proof` (SSRF-захищений). `server/`.
+- Живо верифіковано: повний P2P-хендшейк, одноразовість invite-токенів під конкурентним навантаженням (3/3 рази), коди помилок, CORS preflight, rate limiting, SSRF-блокування (decimal/hex/octal/IPv6-кодування).
+- Персистентність: відсутня — суто ефемерна сесія в пам'яті вкладки (за задумом MVP).
 
 ## Фаза 2 — Профілі, backup та мультипристрій
 
@@ -36,6 +35,13 @@
 - Опційна `fetch_proof` proxy-дія на сигнальному вузлі (вимкнена за замовчуванням) — оновлення [signaling-protocol.md](signaling-protocol.md).
 - Email/DKIM-доказ — не в цій фазі, можливе майбутнє розширення.
 - Деталі — [identity-verification.md](identity-verification.md).
+
+### Фаза 2d — OAuth-верифікація (Google/Yandex зараз, Telegram/FB — заплановано)
+
+- Автоматизована, криптографічно сильніша версія [identity-verification.md](identity-verification.md): замість ручної публікації proof-тексту, підписаний провайдером ID-токен (JWT) прив'язується до Spirit-ключа через `nonce`.
+- Google, Yandex: чистий клієнтський OIDC-флоу (без бекенду Spirit) — деталі в [oauth-verification.md](oauth-verification.md).
+- Telegram, Facebook: вимагають server-side перевірки (bot-токен/app-secret не можна тримати в браузері) — заплановано як опційний endpoint на сигнальному вузлі, за тією ж моделлю підвищеного ризику, що й `fetch_proof`.
+- Не замінює анонімний identity-ключ (D3 лишається чинним) — виключно опційний шар "визнаності" поверх нього.
 
 ## Фаза 3 — Десктоп (Tauri)
 
