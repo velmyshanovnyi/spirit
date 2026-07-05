@@ -65,13 +65,14 @@ phpunit.xml
 
 ## Секція 2: E2EE (ECDH → HKDF → AES-GCM)
 
-- [ ] **Tests**: `client/tests/e2ee.test.js` —
+- [x] **Tests**: `client/tests/e2ee.test.js` —
   - `deriveSessionKey(privA, pubB)` на стороні A і `deriveSessionKey(privB, pubA)` на стороні B дають ключі, що взаємно розшифровують повідомлення один одного (симетричність ECDH).
-  - `encryptMessage(key, plaintext)` → `decryptMessage(key, payload)` round-trip повертає вихідний текст.
+  - `encryptMessage(key, plaintext)` → `decryptMessage(key, payload)` round-trip повертає вихідний текст (включно з не-ASCII).
   - Кожен виклик `encryptMessage` генерує інший IV (два шифрування того самого тексту дають різний ciphertext).
   - Підроблений/пошкоджений ciphertext → `decryptMessage` кидає помилку (GCM authentication failure), не повертає сміття мовчки.
-- [ ] **Impl**: `client/js/e2ee.js` — `deriveSessionKey` (ECDH shared secret → HKDF-SHA256 → AES-256-GCM `CryptoKey`), `encryptMessage`/`decryptMessage` (формат payload: `iv(12 байт) || ciphertext+tag`, base64 для передачі в DataChannel).
-- [ ] **Exec review**: —
+  - Повідомлення значно більше за ліміт аргументів спред-оператора (300 000 символів) кодується/декодується без помилки.
+- [x] **Impl**: `client/js/e2ee.js` — `deriveSessionKey` (ECDH shared secret → HKDF-SHA256 → AES-256-GCM `CryptoKey`), `encryptMessage`/`decryptMessage` (формат payload: `iv(12 байт) || ciphertext+tag`, base64), `bytesToBase64`/`base64ToBytes` — чанковане (0x8000 байт) кодування, уникає переповнення стека аргументів на великих повідомленнях.
+- [x] **Exec review**: 2 ітерації, конвергенція — [iter1](../reviews/mvp-section-2-e2ee-iter1.md), [iter2](../reviews/mvp-section-2-e2ee-iter2.md).
 
 ## Секція 3: Signaling client (long-polling обгортка)
 
