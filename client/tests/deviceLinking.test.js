@@ -7,7 +7,12 @@ import {
   verifyDeviceCertificate,
   createLinkRequest,
   createLinkGrant,
-  applyLinkGrant
+  applyLinkGrant,
+  signDeviceList,
+  verifyDeviceList,
+  revokeDevice,
+  isDeviceCertificateAllowed,
+  acceptNewerDeviceList
 } from "../js/deviceLinking.js";
 import { hasStoredProfile, loadPermanentProfile } from "../js/profile.js";
 import { get } from "../js/db.js";
@@ -210,6 +215,104 @@ describe("device linking protocol (link request / grant / apply)", () => {
     const device = await generateDeviceKeyPair();
     await expect(applyLinkGrant(null, "pass", { devicePublicKey: device.publicKey })).rejects.toThrow(/link grant/i);
     await expect(applyLinkGrant({ type: "device-link-grant" }, "pass", { devicePublicKey: device.publicKey })).rejects.toThrow(/link grant/i);
+  });
+});
+
+describe("versioned device list: sign / verify / revoke / membership / monotonicity", () => {
+  async function listSetup() {
+    const identity = await generateIdentityKeyPair();
+    const deviceA = await generateDeviceKeyPair();
+    const deviceB = await generateDeviceKeyPair();
+    const certA = await signDeviceCertificate(identity.privateKey, deviceA.publicKey);
+    const certB = await signDeviceCertificate(identity.privateKey, deviceB.publicKey);
+    const list = await signDeviceList(identity.privateKey, [certA, certB], { version: 1 });
+    return { identity, certA, certB, list };
+  }
+
+  it("signDeviceList produces a verifiable, JSON-serializable versioned list", async () => {
+    const { identity, certA, certB, list } = await listSetup();
+
+    expect(list.version).toBe(1);
+    expect(list.certificates).toEqual([certA, certB]);
+    expect(typeof list.signature).toBe("string");
+    expect(await verifyDeviceList(identity.publicKey, list)).toBe(true);
+    expect(await verifyDeviceList(identity.publicKey, JSON.parse(JSON.stringify(list)))).toBe(true);
+  });
+
+  it("verifyDeviceList rejects tampering: bumped version, added/removed/swapped certificate, foreign identity", async () => {
+    const { identity, certA, certB, list } = await listSetup();
+    const foreign = await generateIdentityKeyPair();
+
+    expect(await verifyDeviceList(identity.publicKey, { ...list, version: 2 })).toBe(false);
+    expect(await verifyDeviceList(identity.publicKey, { ...list, certificates: [certA] })).toBe(false);
+    expect(await verifyDeviceList(identity.publicKey, { ...list, certificates: [certB, certA] })).toBe(false);
+    expect(await verifyDeviceList(foreign.publicKey, list)).toBe(false);
+    expect(await verifyDeviceList(identity.publicKey, null)).toBe(false);
+    expect(await verifyDeviceList(identity.publicKey, {})).toBe(false);
+  });
+
+  it("revokeDevice removes the certificate, increments the version, and the new list verifies", async () => {
+    const { identity, certA, certB, list } = await listSetup();
+
+    const updated = await revokeDevice(identity.privateKey, list, certB.devicePubkey);
+
+    expect(updated.version).toBe(2);
+    expect(updated.certificates).toEqual([certA]);
+    expect(await verifyDeviceList(identity.publicKey, updated)).toBe(true);
+  });
+
+  it("revokeDevice removes ALL certificates bound to the revoked key (e.g. a re-issued one), not just the first", async () => {
+    const identity = await generateIdentityKeyPair();
+    const device = await generateDeviceKeyPair();
+    const other = await generateDeviceKeyPair();
+    // The same device key certified twice (re-issue: different validity window -> different signature).
+    const certOld = await signDeviceCertificate(identity.privateKey, device.publicKey, { now: 1_000 });
+    const certNew = await signDeviceCertificate(identity.privateKey, device.publicKey, { now: 2_000 });
+    const certOther = await signDeviceCertificate(identity.privateKey, other.publicKey);
+    expect(certOld.signature).not.toBe(certNew.signature);
+    const list = await signDeviceList(identity.privateKey, [certOld, certNew, certOther], { version: 1 });
+
+    const updated = await revokeDevice(identity.privateKey, list, certOld.devicePubkey);
+
+    expect(updated.certificates).toEqual([certOther]);
+    expect(isDeviceCertificateAllowed(updated, certOld)).toBe(false);
+    expect(isDeviceCertificateAllowed(updated, certNew)).toBe(false);
+  });
+
+  it("a contact holding the updated list rejects the revoked certificate and still accepts the remaining one", async () => {
+    const { identity, certA, certB, list } = await listSetup();
+    const updated = await revokeDevice(identity.privateKey, list, certB.devicePubkey);
+
+    // Before revocation both devices were allowed.
+    expect(isDeviceCertificateAllowed(list, certA)).toBe(true);
+    expect(isDeviceCertificateAllowed(list, certB)).toBe(true);
+    // After: messages signed by the revoked device's certificate must be rejected.
+    expect(isDeviceCertificateAllowed(updated, certA)).toBe(true);
+    expect(isDeviceCertificateAllowed(updated, certB)).toBe(false);
+  });
+
+  it("acceptNewerDeviceList applies only a verified, strictly-newer list (replay of an older list is ignored)", async () => {
+    const { identity, certB, list } = await listSetup();
+    const updated = await revokeDevice(identity.privateKey, list, certB.devicePubkey);
+
+    // Newer verified list wins.
+    expect(await acceptNewerDeviceList(identity.publicKey, list, updated)).toEqual(updated);
+    // Replaying the OLD list (attacker trying to resurrect the revoked device) is ignored.
+    expect(await acceptNewerDeviceList(identity.publicKey, updated, list)).toEqual(updated);
+    // Same version is not an update.
+    expect(await acceptNewerDeviceList(identity.publicKey, updated, updated)).toEqual(updated);
+  });
+
+  it("acceptNewerDeviceList ignores a newer-version list with an invalid signature", async () => {
+    const { identity, certA, certB, list } = await listSetup();
+    const forged = { version: 99, certificates: [certA, certB], signature: list.signature };
+
+    expect(await acceptNewerDeviceList(identity.publicKey, list, forged)).toEqual(list);
+  });
+
+  it("acceptNewerDeviceList accepts a first verified list when none is held yet", async () => {
+    const { identity, list } = await listSetup();
+    expect(await acceptNewerDeviceList(identity.publicKey, null, list)).toEqual(list);
   });
 });
 

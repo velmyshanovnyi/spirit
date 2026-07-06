@@ -96,6 +96,111 @@ export async function verifyDeviceCertificate(identityPublicKey, certificate, { 
   }
 }
 
+// Domain-separation prefix for the signed device list -- distinct from the
+// certificate prefix so a list signature can never be replayed as a
+// certificate or vice versa.
+const LIST_PAYLOAD_PREFIX = "spirit-device-list-v1";
+
+/**
+ * Canonical byte string the identity key signs for a device list. Each
+ * certificate contributes its four fields joined with ":" (absent from both
+ * base64 and decimal number strings), certificates are joined with "|" --
+ * the same injectivity argument as certificatePayload: no two distinct
+ * (version, certificates) pairs serialize identically.
+ */
+function deviceListPayload(version, certificates) {
+  const certParts = certificates.map(
+    (cert) => `${cert.devicePubkey}:${cert.issuedAt}:${cert.expiresAt}:${cert.signature}`
+  );
+  return new TextEncoder().encode(`${LIST_PAYLOAD_PREFIX}|${version}|${certParts.join("|")}`);
+}
+
+/**
+ * Signs the authoritative, versioned list of allowed device certificates
+ * (docs/accounts.md, Section 10). Contacts hold the newest verified list and
+ * reject traffic from certificates not on it -- so removing a certificate
+ * here IS revocation, and the monotonically growing version prevents an
+ * attacker from replaying an older list that still contained the revoked
+ * device (see acceptNewerDeviceList).
+ */
+export async function signDeviceList(identityPrivateKey, certificates, { version }) {
+  const signature = await crypto.subtle.sign(
+    SIGNING_ALGORITHM,
+    identityPrivateKey,
+    deviceListPayload(version, certificates)
+  );
+  return { version, certificates, signature: bytesToBase64(new Uint8Array(signature)) };
+}
+
+/**
+ * Pure predicate over peer-controlled input, same contract as
+ * verifyDeviceCertificate: false for anything invalid, never throws.
+ */
+export async function verifyDeviceList(identityPublicKey, list) {
+  if (
+    !list ||
+    typeof list.version !== "number" ||
+    !Array.isArray(list.certificates) ||
+    typeof list.signature !== "string" ||
+    list.certificates.some(
+      (cert) =>
+        !cert ||
+        typeof cert.devicePubkey !== "string" ||
+        typeof cert.issuedAt !== "number" ||
+        typeof cert.expiresAt !== "number" ||
+        typeof cert.signature !== "string"
+    )
+  ) {
+    return false;
+  }
+
+  try {
+    return await crypto.subtle.verify(
+      SIGNING_ALGORITHM,
+      identityPublicKey,
+      base64ToBytes(list.signature),
+      deviceListPayload(list.version, list.certificates)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Revokes a device: re-signs the list without any certificate bound to
+ * `devicePubkeyToRevoke`, with the version incremented so contacts prefer
+ * the new list over any replayed older one.
+ */
+export async function revokeDevice(identityPrivateKey, currentList, devicePubkeyToRevoke) {
+  const certificates = currentList.certificates.filter((cert) => cert.devicePubkey !== devicePubkeyToRevoke);
+  return signDeviceList(identityPrivateKey, certificates, { version: currentList.version + 1 });
+}
+
+/**
+ * Membership check a contact runs against its held (already-verified) list
+ * before accepting traffic from a device certificate. Synchronous: pure
+ * data comparison, no crypto -- the list's own signature was checked at
+ * acceptance time (acceptNewerDeviceList), and the certificate's at
+ * handshake time (verifyDeviceCertificate).
+ */
+export function isDeviceCertificateAllowed(list, certificate) {
+  return list.certificates.some(
+    (cert) => cert.devicePubkey === certificate.devicePubkey && cert.signature === certificate.signature
+  );
+}
+
+/**
+ * Monotonic update rule for the list a contact holds: adopt `incoming` only
+ * if it verifies AND is strictly newer than `current`. Everything else --
+ * invalid signature, same version, or an older (possibly replayed) list --
+ * leaves `current` in place. `current` may be null (first list ever seen).
+ */
+export async function acceptNewerDeviceList(identityPublicKey, current, incoming) {
+  if (!(await verifyDeviceList(identityPublicKey, incoming))) return current;
+  if (current !== null && current !== undefined && incoming.version <= current.version) return current;
+  return incoming;
+}
+
 /**
  * First message of the linking handshake, sent by the NEW device over the
  * already-established E2EE channel: announces the device public key the

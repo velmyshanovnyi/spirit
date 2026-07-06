@@ -70,9 +70,9 @@
 
 ## Секція 10: Мультипристрій — відкликання та синхронізація
 
-- [ ] **Tests**: `client/tests/deviceLinking.test.js` (доповнення) — відкликання пристрою оновлює підписаний список дозволених device certificates, збільшує версію; контакти, що отримають оновлений список, відхиляють повідомлення від відкликаного сертифіката.
-- [ ] **Impl**: `client/js/deviceLinking.js` (доповнення) — `revokeDevice`, керування версійним списком сертифікатів.
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/deviceLinking.test.js` (доповнення, 8 тестів) — `signDeviceList`/`verifyDeviceList` (round-trip, JSON round-trip, відхилення підміни version/складу/порядку сертифікатів/чужої identity/malformed); `revokeDevice` видаляє сертифікат(и) — включно з усіма сертифікатами двічі сертифікованого ключа — та інкрементує версію; `isDeviceCertificateAllowed` відхиляє відкликаний сертифікат, приймає решту; `acceptNewerDeviceList` — монотонність (replay старого списку з відкликаним пристроєм ігнорується, та сама версія — не оновлення, новіший-але-непідписаний — ігнорується, перший верифікований список приймається).
+- [x] **Impl**: `client/js/deviceLinking.js` (доповнення) — `signDeviceList`, `verifyDeviceList` (чистий предикат, як verifyDeviceCertificate), `revokeDevice`, `isDeviceCertificateAllowed` (синхронна перевірка членства по devicePubkey+signature), `acceptNewerDeviceList` (правило строго-новішої верифікованої версії). Канонічний payload `spirit-device-list-v1|<version>|<pubkey:issuedAt:expiresAt:sig>|...` — окремий доменний префікс від сертифікатного. Розповсюдження списку контактам (транспорт) — свідомо поза цією секцією.
+- [x] **Exec review**: 1 ітерація, конвергенція — [iter1](../reviews/phase2-section-10-revocation-iter1.md). Без знахідок проти імплементації ("паперові" вектори невалідованого base64/NaN-версії недосяжні ні для кого, крім власника identity — кожен шлях прийняття загейтований його підписом); за зауваженням покриття додано тест "revoke видаляє ВСІ сертифікати ключа".
 
 ## Верифікація
 
