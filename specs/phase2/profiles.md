@@ -18,13 +18,13 @@
 
 ## Секція 2: Passphrase-шифрування сховища (vault)
 
-- [ ] **Tests**: `client/tests/vault.test.js` — `deriveVaultKey(passphrase, salt)` детермінований для тих самих вхідних даних, різний для різних passphrase/salt; `encryptForVault`/`decryptForVault` round-trip довільних байтів; невірний passphrase при розшифровці кидає помилку (GCM auth failure), не повертає сміття.
-- [ ] **Impl**: `client/js/vault.js` — `deriveVaultKey` (PBKDF2-HMAC-SHA256, 600k ітерацій, довільна сіль → AES-256-GCM `CryptoKey`), `encryptForVault`/`decryptForVault` (перевикористовує формат `iv||ciphertext` та `bytesToBase64`/`base64ToBytes` з [e2ee.js](../../client/js/e2ee.js)).
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/vault.test.js`, 7 тестів — `deriveVaultKey(passphrase, salt)` детермінований для тих самих вхідних даних (доведено через cross-key encrypt/decrypt interop, бо ключі `extractable: false`), різний для різних passphrase/salt; `encryptForVault`/`decryptForVault` round-trip довільних байтів (включно з не-ASCII); свіжий IV на кожен виклик; невірний passphrase при розшифровці кидає помилку (GCM auth failure), не повертає сміття; підроблений ciphertext відхиляється.
+- [x] **Impl**: `client/js/vault.js` — `generateSalt` (16 байт), `deriveVaultKey` (PBKDF2-HMAC-SHA256, 600k ітерацій — актуальна межа OWASP 2023+), `encryptForVault`/`decryptForVault` (той самий формат `iv||ciphertext` і `bytesToBase64`/`base64ToBytes`, що й [e2ee.js](../../client/js/e2ee.js), без крос-контамінації з session-key механізмом E2EE — лише перевикористання чистих codec-функцій).
+- [x] **Exec review**: 1 ітерація, конвергенція без потреби змін логіки — [iter1](../reviews/phase2-section-2-vault-iter1.md). Персистентність солі — свідомо поза межами цієї секції, відповідальність Секції 3 (генерувати раз, зберігати поруч із зашифрованим сховищем, перевикористовувати при кожному завантаженні — інакше кожне "розблокування" виводило б інший ключ і завжди провалювалось би, невідрізненно від невірного passphrase).
 
 ## Секція 3: Модель профілю (створення/завантаження перманентного профілю)
 
-- [ ] **Tests**: `client/tests/profile.test.js` — `createPermanentProfile(passphrase)` генерує identity-keypair (`extractable: true`, на відміну від ефемерного режиму), зберігає зашифрований приватний ключ у `db`; `loadPermanentProfile(passphrase)` відновлює той самий keypair (перевірка через sign/verify); невірний passphrase при завантаженні — чітка помилка.
+- [ ] **Tests**: `client/tests/profile.test.js` — `createPermanentProfile(passphrase)` генерує identity-keypair (`extractable: true`, на відміну від ефемерного режиму), зберігає зашифрований приватний ключ **і сіль** у `db` (сіль генерується рівно один раз, при створенні); `loadPermanentProfile(passphrase)` відновлює той самий keypair (перевірка через sign/verify), **перевикористовуючи збережену сіль** (окремий тест: два послідовні `loadPermanentProfile` з тим самим passphrase успішні — захист від "нова сіль на кожне розблокування"); невірний passphrase при завантаженні — чітка, доменна помилка (не сира `DOMException` від `decryptForVault`).
 - [ ] **Impl**: `client/js/profile.js` — `createPermanentProfile`, `loadPermanentProfile`, `hasStoredProfile()`.
 - [ ] **Exec review**: —
 
@@ -38,6 +38,7 @@
 
 - [ ] **Tests**: `client/tests/keyfile.test.js` — `createKeyfile(rawKeyBytes, passphrase)` повертає JSON-структуру з сіллю/iv/ciphertext; `restoreFromKeyfile(keyfileJson, passphrase)` — точний round-trip сирих байтів; невірний passphrase — чітка помилка.
 - [ ] **Impl**: `client/js/keyfile.js` — перевикористовує `vault.js` для шифрування, серіалізує у стабільний JSON-формат для завантаження/збереження файлу.
+  - **Перенесено з Секції 2 review**: якщо ця секція стане третім споживачем `bytesToBase64`/`base64ToBytes` (після `e2ee.js` і `vault.js`), варто винести їх у нейтральний `client/js/codec.js`, щоб ні message-crypto, ні storage-crypto не "володіли" спільним кодеком.
 - [ ] **Exec review**: —
 
 ## Секція 6: Відновлення профілю з backup
