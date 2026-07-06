@@ -12,9 +12,9 @@
 
 ## Секція 1: IndexedDB-обгортка (загальне зашифроване сховище)
 
-- [ ] **Tests**: `client/tests/db.test.js` (з `fake-indexeddb`) — відкриття БД створює потрібні object stores; `put`/`get` round-trip для довільного значення; `get` неіснуючого ключа повертає `undefined`/`null`; `delete` видаляє запис; `listKeys` повертає всі ключі стору.
-- [ ] **Impl**: `client/js/db.js` — тонка Promise-обгортка над IndexedDB (`openDatabase`, `put`, `get`, `delete`, `listKeys`), object stores: `profile`, `contacts`, `messages`.
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/db.test.js` (з `fake-indexeddb`), 11 тестів — відкриття БД створює потрібні object stores; `put`/`get` round-trip для довільного значення (включно з перезаписом); `get` неіснуючого ключа повертає `undefined`; `remove` видаляє запис (і є no-op для неіснуючого); `listKeys` повертає всі ключі стору; відхилення при невідомому store; **реальна abort-після-success гонка** для `get` і `listKeys` (форсована через monkey-patch `IDBTransaction.prototype.objectStore`, підтверджена RED на старій реалізації).
+- [x] **Impl**: `client/js/db.js` — тонка Promise-обгортка над IndexedDB (`openDatabase`, `put`, `get`, `remove`, `listKeys`), object stores: `profile`, `contacts`, `messages`. Усі мутуючі й читальні операції резолвляться через `tx.oncomplete`/`tx.onabort`, не `request.onsuccess` — захист від гонки "запит успішний, транзакція пізніше абортувала".
+- [x] **Exec review**: 3 ітерації (гранична кількість), конвергенція — [iter1](../reviews/phase2-section-1-indexeddb-iter1.md), [iter2](../reviews/phase2-section-1-indexeddb-iter2.md), [iter3](../reviews/phase2-section-1-indexeddb-iter3.md). Ітерація 2 спростувала припущення ітерації 1, що abort-гонку неможливо практично протестувати — довела зворотне проб-скриптом і змусила додати справжній RED→GREEN тест.
 
 ## Секція 2: Passphrase-шифрування сховища (vault)
 
