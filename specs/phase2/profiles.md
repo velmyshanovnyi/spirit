@@ -32,9 +32,9 @@
 
 ## Секція 4: Backup — мнемоніка (BIP39-подібне кодування)
 
-- [ ] **Tests**: `client/tests/mnemonic.test.js` — `bytesToMnemonic(bytes)` для 32-байтного входу повертає 24 слова зі списку BIP39; `mnemonicToBytes(words)` — точний round-trip; невірна контрольна сума чи слово поза списком — чітка помилка, не мовчазне пошкодження даних.
-- [ ] **Impl**: `client/js/mnemonic.js` — `bytesToMnemonic`/`mnemonicToBytes` (SHA-256 checksum за специфікацією BIP39, локальний data-файл `client/js/bip39-wordlist-en.js` — офіційний список 2048 слів).
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/mnemonic.test.js` (8 тестів, включно з known-answer вектором, згенерованим незалежно через реальний пакет `bip39` перед його видаленням) + `client/tests/bip39-wordlist.test.js` (4 тести цілісності самого списку) — `bytesToMnemonic(bytes)` для 32-байтного входу повертає 24 слова зі списку BIP39, збігається з еталонним вектором; `mnemonicToBytes(words)` — точний round-trip; невірна довжина/контрольна сума/слово поза списком — чіткі помилки, не мовчазне пошкодження даних.
+- [x] **Impl**: `client/js/mnemonic.js` — `bytesToMnemonic`/`mnemonicToBytes` (SHA-256 checksum за специфікацією BIP39), `client/js/bip39-wordlist-en.js` — офіційний список 2048 слів (згенеровано з тимчасово встановленого npm-пакета `bip39`, без рантайм-залежності від нього).
+- [x] **Exec review**: 2 ітерації, конвергенція — [iter1](../reviews/phase2-section-4-mnemonic-iter1.md), [iter2](../reviews/phase2-section-4-mnemonic-iter2.md).
 
 ## Секція 5: Backup — keyfile
 
