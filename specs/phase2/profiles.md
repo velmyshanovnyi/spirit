@@ -38,9 +38,10 @@
 
 ## Секція 5: Backup — keyfile
 
-- [ ] **Tests**: `client/tests/keyfile.test.js` — `createKeyfile(rawKeyBytes, passphrase)` повертає JSON-структуру з сіллю/iv/ciphertext; `restoreFromKeyfile(keyfileJson, passphrase)` — точний round-trip сирих байтів; невірний passphrase — чітка помилка.
-- [ ] **Impl**: `client/js/keyfile.js` — перевикористовує `vault.js` для шифрування, серіалізує у стабільний JSON-формат для завантаження/збереження файлу. Base64-кодек уже винесено в `client/js/codec.js` (закрито достроково в Секції 3) — імпортувати звідти.
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/keyfile.test.js`, 7 тестів — `createKeyfile(rawKeyBytes, passphrase)` повертає JSON-серіалізовну структуру `{version, salt, ciphertext}` зі свіжою сіллю/IV на кожен виклик; `restoreFromKeyfile` — точний round-trip сирих байтів, переживає реальний `JSON.stringify`/`parse`; невірний passphrase → `IncorrectKeyfilePassphraseError`; невідома версія/відсутні поля/невалідний base64 у солі → чітка "malformed keyfile" помилка (не сирий виняток).
+- [x] **Impl**: `client/js/keyfile.js` — перевикористовує `vault.js` для шифрування й `client/js/codec.js` для base64. Окремий клас помилки `IncorrectKeyfilePassphraseError` (не `profile.js`'s) — свідомо, щоб уникнути циклічного імпорту напередодні Секції 6.
+- [x] **Exec review**: 2 ітерації, конвергенція — [iter1](../reviews/phase2-section-5-keyfile-iter1.md), [iter2](../reviews/phase2-section-5-keyfile-iter2.md).
+  - **Перенесено до Секції 6**: розглянути спільний `client/js/errors.js` для базового класу помилки невірного passphrase, коли `profile.js` і `keyfile.js` реально зійдуться в одному потоці відновлення.
 
 ## Секція 6: Відновлення профілю з backup
 
