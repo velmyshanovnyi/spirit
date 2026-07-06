@@ -52,9 +52,9 @@
 
 ## Секція 7: UI — створення профілю, вибір backup, перемикання ефемерний/перманентний
 
-- [ ] **Tests**: `client/tests/app.test.js` (доповнення) — вибір "Створити профіль" (не "Швидкий чат") показує крок passphrase + вибір backup (мнемоніка/keyfile/обидва/пропустити); "Пропустити" залишає постійний банер-нагадування; відображена мнемоніка/keyfile відповідає реально згенерованому ключу.
-- [ ] **Impl**: `client/index.html`, `client/js/app.js` — розширення UI, не заміна ефемерного шляху (Фаза 1 лишається робочою).
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/app.test.js` (доповнення, 8 тестів) — "Створити профіль" показує крок passphrase без побічних дій; порожній passphrase відхиляється; підтвердження викликає `createPermanentProfile`, показує fingerprint, відкриває backup-крок і очищує поле passphrase; мнемоніка кодує саме створений ключ (`exportPrivateKeyScalar` → `bytesToMnemonic`); keyfile створюється з реального ключа з окремим keyfile-passphrase; порожній keyfile-passphrase відхиляється; "Пропустити" ховає backup-крок і показує постійний банер-нагадування; ефемерний шлях (`btn-generate`) працює без змін і не показує профільний UI (регресійний guard).
+- [x] **Impl**: `client/index.html`, `client/js/app.js` — розширення UI, не заміна ефемерного шляху (Фаза 1 лишається робочою). Секрети очищуються з DOM-полів після використання; усі нові обробники загорнуті в наявний `withBusyButton` (error boundary + re-entrancy guard).
+- [x] **Exec review**: 1 ітерація, конвергенція без правок — [iter1](../reviews/phase2-section-7-profile-ui-iter1.md).
 
 ## Секція 8: Мультипристрій — device keypair та сертифікат
 

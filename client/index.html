@@ -12,8 +12,27 @@
 
     <section>
       <h2>Акаунт</h2>
-      <button id="btn-generate" type="button">Створити акаунт</button>
+      <button id="btn-generate" type="button">Швидкий чат (ефемерний)</button>
+      <button id="btn-create-profile" type="button">Створити профіль</button>
       <div>Ваш ID: <span id="pub-key-display">не згенеровано</span></div>
+
+      <div id="profile-setup" hidden>
+        <label>Passphrase профілю: <input id="profile-passphrase" type="password" autocomplete="new-password"></label>
+        <button id="btn-profile-confirm" type="button">Створити</button>
+        <div id="profile-status"></div>
+      </div>
+
+      <div id="backup-step" hidden>
+        <h3>Резервна копія ключа</h3>
+        <button id="btn-backup-mnemonic" type="button">Показати мнемоніку</button>
+        <label>Passphrase keyfile: <input id="keyfile-passphrase" type="password" autocomplete="new-password"></label>
+        <button id="btn-backup-keyfile" type="button">Створити keyfile</button>
+        <button id="btn-backup-skip" type="button">Пропустити</button>
+        <div id="mnemonic-display"></div>
+        <div id="keyfile-display"></div>
+      </div>
+
+      <div id="backup-reminder" hidden>⚠ Ви не зробили резервну копію ключа — без неї профіль неможливо відновити.</div>
     </section>
 
     <section>

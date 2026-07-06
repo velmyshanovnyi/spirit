@@ -3,8 +3,13 @@ import {
   generateEcdhKeyPair,
   fingerprint,
   exportEcdhPublicKeyForWire,
-  importEcdhPublicKeyFromWire
+  importEcdhPublicKeyFromWire,
+  exportPrivateKeyScalar,
+  exportPrivateKeyRaw
 } from "./identity.js";
+import { createPermanentProfile } from "./profile.js";
+import { bytesToMnemonic } from "./mnemonic.js";
+import { createKeyfile } from "./keyfile.js";
 import { startAsInitiator, startAsJoiner, applyRemoteAnswer } from "./webrtc.js";
 import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer } from "./signalingClient.js";
 import { deriveSessionKey, encryptMessage, decryptMessage } from "./e2ee.js";
@@ -83,6 +88,52 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
     state.identityKeyPair = await generateIdentityKeyPair();
     state.senderKey = await fingerprint(state.identityKeyPair.publicKey);
     el("pub-key-display").textContent = state.senderKey;
+  });
+
+  const setProfileStatus = (text) => {
+    el("profile-status").textContent = text;
+  };
+
+  el("btn-create-profile").addEventListener("click", () => {
+    el("profile-setup").hidden = false;
+  });
+
+  withBusyButton(el("btn-profile-confirm"), async () => {
+    const passphrase = el("profile-passphrase").value;
+    if (!passphrase) {
+      setProfileStatus("вкажіть passphrase для профілю");
+      return;
+    }
+    state.identityKeyPair = await createPermanentProfile(passphrase);
+    // Don't keep the secret sitting in a DOM input after it's been used.
+    el("profile-passphrase").value = "";
+    state.senderKey = await fingerprint(state.identityKeyPair.publicKey);
+    el("pub-key-display").textContent = state.senderKey;
+    setProfileStatus("");
+    el("backup-step").hidden = false;
+  });
+
+  withBusyButton(el("btn-backup-mnemonic"), async () => {
+    const scalar = await exportPrivateKeyScalar(state.identityKeyPair.privateKey);
+    const words = await bytesToMnemonic(scalar);
+    el("mnemonic-display").textContent = words.join(" ");
+  });
+
+  withBusyButton(el("btn-backup-keyfile"), async () => {
+    const keyfilePassphrase = el("keyfile-passphrase").value;
+    if (!keyfilePassphrase) {
+      setProfileStatus("вкажіть passphrase для keyfile");
+      return;
+    }
+    const rawPrivateKey = await exportPrivateKeyRaw(state.identityKeyPair.privateKey);
+    const keyfile = await createKeyfile(rawPrivateKey, keyfilePassphrase);
+    el("keyfile-passphrase").value = "";
+    el("keyfile-display").textContent = JSON.stringify(keyfile);
+  });
+
+  el("btn-backup-skip").addEventListener("click", () => {
+    el("backup-step").hidden = true;
+    el("backup-reminder").hidden = false;
   });
 
   withBusyButton(el("btn-google-verify"), async () => {

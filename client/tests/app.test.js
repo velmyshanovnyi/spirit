@@ -6,7 +6,18 @@ vi.mock("../js/identity.js", () => ({
   generateEcdhKeyPair: vi.fn(),
   fingerprint: vi.fn(),
   exportEcdhPublicKeyForWire: vi.fn().mockResolvedValue("ECDH_PUB_WIRE"),
-  importEcdhPublicKeyFromWire: vi.fn().mockResolvedValue({ __tag: "restored-peer-ecdh-pub" })
+  importEcdhPublicKeyFromWire: vi.fn().mockResolvedValue({ __tag: "restored-peer-ecdh-pub" }),
+  exportPrivateKeyScalar: vi.fn(),
+  exportPrivateKeyRaw: vi.fn()
+}));
+vi.mock("../js/profile.js", () => ({
+  createPermanentProfile: vi.fn()
+}));
+vi.mock("../js/mnemonic.js", () => ({
+  bytesToMnemonic: vi.fn()
+}));
+vi.mock("../js/keyfile.js", () => ({
+  createKeyfile: vi.fn()
 }));
 vi.mock("../js/webrtc.js", () => ({
   startAsInitiator: vi.fn(),
@@ -30,7 +41,16 @@ vi.mock("../js/googleOAuth.js", () => ({
   verifyGoogleIdToken: vi.fn()
 }));
 
-import { generateIdentityKeyPair, generateEcdhKeyPair, fingerprint } from "../js/identity.js";
+import {
+  generateIdentityKeyPair,
+  generateEcdhKeyPair,
+  fingerprint,
+  exportPrivateKeyScalar,
+  exportPrivateKeyRaw
+} from "../js/identity.js";
+import { createPermanentProfile } from "../js/profile.js";
+import { bytesToMnemonic } from "../js/mnemonic.js";
+import { createKeyfile } from "../js/keyfile.js";
 import { startAsInitiator, startAsJoiner, applyRemoteAnswer } from "../js/webrtc.js";
 import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer } from "../js/signalingClient.js";
 import { encryptMessage, deriveSessionKey } from "../js/e2ee.js";
@@ -38,8 +58,23 @@ import { promptGoogleSignIn, verifyGoogleIdToken } from "../js/googleOAuth.js";
 import { initApp } from "../js/app.js";
 
 const HTML = `
-  <button id="btn-generate" type="button">Створити акаунт</button>
+  <button id="btn-generate" type="button">Швидкий чат</button>
+  <button id="btn-create-profile" type="button">Створити профіль</button>
   <div>Ваш ID: <span id="pub-key-display">не згенеровано</span></div>
+  <div id="profile-setup" hidden>
+    <input id="profile-passphrase" type="password">
+    <button id="btn-profile-confirm" type="button">Створити</button>
+    <div id="profile-status"></div>
+  </div>
+  <div id="backup-step" hidden>
+    <button id="btn-backup-mnemonic" type="button">Показати мнемоніку</button>
+    <input id="keyfile-passphrase" type="password">
+    <button id="btn-backup-keyfile" type="button">Створити keyfile</button>
+    <button id="btn-backup-skip" type="button">Пропустити</button>
+    <div id="mnemonic-display"></div>
+    <div id="keyfile-display"></div>
+  </div>
+  <div id="backup-reminder" hidden>Ви не зробили резервну копію ключа</div>
   <input id="google-client-id" type="text" value="test-client-id">
   <button id="btn-google-verify" type="button">Підтвердити через Google</button>
   <div id="google-verify-status"></div>
@@ -82,6 +117,119 @@ describe("btn-generate", () => {
 
     expect(generateIdentityKeyPair).toHaveBeenCalled();
     expect(fingerprint).toHaveBeenCalledWith(keyPair.publicKey);
+  });
+});
+
+describe("permanent profile creation UI", () => {
+  function setupCreatedProfile() {
+    const keyPair = { privateKey: { __tag: "profile-priv" }, publicKey: fakePublicKey("profile-pub") };
+    createPermanentProfile.mockResolvedValue(keyPair);
+    fingerprint.mockResolvedValue("profile-fp");
+    return keyPair;
+  }
+
+  async function createProfileThroughUi() {
+    const keyPair = setupCreatedProfile();
+    initApp(document);
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "my local passphrase";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("profile-fp"));
+    return keyPair;
+  }
+
+  it("reveals the passphrase step on 'Створити профіль' without creating anything yet", () => {
+    initApp(document);
+    expect(document.getElementById("profile-setup").hidden).toBe(true);
+
+    document.getElementById("btn-create-profile").click();
+
+    expect(document.getElementById("profile-setup").hidden).toBe(false);
+    expect(createPermanentProfile).not.toHaveBeenCalled();
+  });
+
+  it("refuses to create a profile with an empty passphrase", async () => {
+    initApp(document);
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("btn-profile-confirm").click();
+
+    await vi.waitFor(() =>
+      expect(document.getElementById("profile-status").textContent).toMatch(/passphrase/i)
+    );
+    expect(createPermanentProfile).not.toHaveBeenCalled();
+  });
+
+  it("creates the profile with the entered passphrase, shows the fingerprint, and reveals the backup step", async () => {
+    await createProfileThroughUi();
+
+    expect(createPermanentProfile).toHaveBeenCalledWith("my local passphrase");
+    expect(document.getElementById("backup-step").hidden).toBe(false);
+    // The passphrase field must not keep the secret around after use.
+    expect(document.getElementById("profile-passphrase").value).toBe("");
+  });
+
+  it("shows a mnemonic that encodes the actually-created key's scalar", async () => {
+    const keyPair = await createProfileThroughUi();
+    const scalar = new Uint8Array([1, 2, 3]);
+    exportPrivateKeyScalar.mockResolvedValue(scalar);
+    bytesToMnemonic.mockResolvedValue(["alpha", "bravo", "charlie"]);
+
+    document.getElementById("btn-backup-mnemonic").click();
+    await vi.waitFor(() =>
+      expect(document.getElementById("mnemonic-display").textContent).toBe("alpha bravo charlie")
+    );
+
+    expect(exportPrivateKeyScalar).toHaveBeenCalledWith(keyPair.privateKey);
+    expect(bytesToMnemonic).toHaveBeenCalledWith(scalar);
+  });
+
+  it("creates a keyfile from the actually-created key with the keyfile passphrase and displays it", async () => {
+    const keyPair = await createProfileThroughUi();
+    const rawKey = new Uint8Array([9, 9, 9]).buffer;
+    exportPrivateKeyRaw.mockResolvedValue(rawKey);
+    createKeyfile.mockResolvedValue({ version: 1, salt: "S", ciphertext: "C" });
+
+    document.getElementById("keyfile-passphrase").value = "keyfile secret";
+    document.getElementById("btn-backup-keyfile").click();
+    await vi.waitFor(() =>
+      expect(document.getElementById("keyfile-display").textContent).toContain('"ciphertext"')
+    );
+
+    expect(exportPrivateKeyRaw).toHaveBeenCalledWith(keyPair.privateKey);
+    expect(createKeyfile).toHaveBeenCalledWith(rawKey, "keyfile secret");
+  });
+
+  it("refuses to create a keyfile with an empty keyfile passphrase", async () => {
+    await createProfileThroughUi();
+
+    document.getElementById("btn-backup-keyfile").click();
+    await vi.waitFor(() =>
+      expect(document.getElementById("profile-status").textContent).toMatch(/passphrase/i)
+    );
+    expect(createKeyfile).not.toHaveBeenCalled();
+  });
+
+  it("skipping backup hides the backup step and shows the persistent reminder banner", async () => {
+    await createProfileThroughUi();
+
+    document.getElementById("btn-backup-skip").click();
+
+    expect(document.getElementById("backup-step").hidden).toBe(true);
+    expect(document.getElementById("backup-reminder").hidden).toBe(false);
+  });
+
+  it("ephemeral quick chat (btn-generate) still works and never shows profile/backup UI", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("deadbeef");
+
+    initApp(document);
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("deadbeef"));
+
+    expect(createPermanentProfile).not.toHaveBeenCalled();
+    expect(document.getElementById("profile-setup").hidden).toBe(true);
+    expect(document.getElementById("backup-step").hidden).toBe(true);
+    expect(document.getElementById("backup-reminder").hidden).toBe(true);
   });
 });
 
