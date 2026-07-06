@@ -58,9 +58,9 @@
 
 ## Секція 8: Мультипристрій — device keypair та сертифікат
 
-- [ ] **Tests**: `client/tests/deviceLinking.test.js` — `generateDeviceKeyPair()` — окремий від identity ECDSA keypair; `signDeviceCertificate(identityPrivateKey, devicePublicKey)` створює перевірюваний підпис over `devicePublicKey + timestamp`; `verifyDeviceCertificate` приймає валідний сертифікат і відхиляє підроблений/протермінований.
-- [ ] **Impl**: `client/js/deviceLinking.js` — `generateDeviceKeyPair`, `signDeviceCertificate`, `verifyDeviceCertificate`.
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/deviceLinking.test.js`, 9 тестів — `generateDeviceKeyPair()` — окремий від identity ECDSA P-256 keypair (два виклики → різні ключі); `signDeviceCertificate(identityPrivateKey, devicePublicKey, {validityMs, now})` — перевірюваний сертифікат `{devicePubkey, issuedAt, expiresAt, signature}`, переживає JSON round-trip; `verifyDeviceCertificate` відхиляє: підмінений devicePubkey, підроблені timestamps, протермінований (і приймає той самий за мить до expiry — доводить, що причина саме expiry), issuedAt у майбутньому за межами skew, підпис чужої identity, malformed-структури (повертає `false`, ніколи не кидає).
+- [x] **Impl**: `client/js/deviceLinking.js` — `generateDeviceKeyPair`, `signDeviceCertificate`, `verifyDeviceCertificate`. Канонічний payload підпису `spirit-device-cert-v1|<devicePubkeyB64>|<issuedAt>|<expiresAt>` — доменний префікс проти крос-контекстного replay, `|`-розділювач ін'єктивний (не зустрічається ні в base64, ні в рядковій формі жодного JS-числа); verify — чистий предикат (peer-контрольований вхід не може викликати виняток); clock-skew 60с лише вперед для issuedAt (як у googleOAuth.js), без допуску на expiry.
+- [x] **Exec review**: 1 ітерація, конвергенція без правок — [iter1](../reviews/phase2-section-8-device-cert-iter1.md). Перевірено: числові краї JS для ін'єктивності payload, прив'язку алгоритму, межі expiry/skew, never-throws, свідоме непарсення SPKI (відповідальність Секції 9), невакуумність forgery-тестів.
 
 ## Секція 9: Мультипристрій — flow приєднання пристрою (перевикористання P2P-інфраструктури)
 
