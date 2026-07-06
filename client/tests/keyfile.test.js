@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createKeyfile, restoreFromKeyfile, IncorrectKeyfilePassphraseError } from "../js/keyfile.js";
+import { createKeyfile, restoreFromKeyfile, IncorrectPassphraseError } from "../js/keyfile.js";
 
 describe("createKeyfile", () => {
   it("returns a JSON-serializable structure with a version, salt, and encrypted ciphertext", async () => {
@@ -54,7 +54,7 @@ describe("restoreFromKeyfile", () => {
     const rawKeyBytes = crypto.getRandomValues(new Uint8Array(32));
     const keyfile = await createKeyfile(rawKeyBytes, "the real passphrase");
 
-    await expect(restoreFromKeyfile(keyfile, "wrong passphrase")).rejects.toThrow(IncorrectKeyfilePassphraseError);
+    await expect(restoreFromKeyfile(keyfile, "wrong passphrase")).rejects.toThrow(IncorrectPassphraseError);
   });
 
   it("throws a clear error for an unsupported or malformed keyfile format", async () => {

@@ -1,14 +1,10 @@
 import { generateSalt, deriveVaultKey, encryptForVault, decryptForVault } from "./vault.js";
 import { bytesToBase64, base64ToBytes } from "./codec.js";
+import { IncorrectPassphraseError } from "./errors.js";
+
+export { IncorrectPassphraseError };
 
 const KEYFILE_FORMAT_VERSION = 1;
-
-export class IncorrectKeyfilePassphraseError extends Error {
-  constructor() {
-    super("Incorrect passphrase or corrupted keyfile");
-    this.name = "IncorrectKeyfilePassphraseError";
-  }
-}
 
 /**
  * Encrypts raw key bytes (e.g. a pkcs8 identity private key) with a
@@ -33,7 +29,7 @@ export async function createKeyfile(rawKeyBytes, passphrase) {
  * from JSON.parse(JSON.stringify(...)) (i.e. after a real save/load
  * round-trip through a file).
  *
- * @throws {IncorrectKeyfilePassphraseError} for a wrong passphrase or
+ * @throws {IncorrectPassphraseError} for a wrong passphrase or
  *         corrupted ciphertext (indistinguishable at the AES-GCM layer).
  */
 export async function restoreFromKeyfile(keyfile, passphrase) {
@@ -53,7 +49,7 @@ export async function restoreFromKeyfile(keyfile, passphrase) {
     // Malformed salt is a structural problem with the keyfile itself, not
     // a wrong-passphrase/corrupted-ciphertext situation -- surface it as
     // "malformed keyfile" instead of letting a raw InvalidCharacterError
-    // escape, or misreporting it as IncorrectKeyfilePassphraseError.
+    // escape, or misreporting it as IncorrectPassphraseError.
     throw new Error("Unsupported or malformed keyfile format");
   }
 
@@ -62,6 +58,6 @@ export async function restoreFromKeyfile(keyfile, passphrase) {
   try {
     return await decryptForVault(vaultKey, keyfile.ciphertext);
   } catch {
-    throw new IncorrectKeyfilePassphraseError();
+    throw new IncorrectPassphraseError();
   }
 }

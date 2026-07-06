@@ -7,7 +7,9 @@ import {
   fingerprint,
   exportEcdhPublicKeyForWire,
   importEcdhPublicKeyFromWire,
-  derivePublicKeyFromPrivate
+  derivePublicKeyFromPrivate,
+  exportPrivateKeyScalar,
+  importPrivateKeyFromScalar
 } from "../js/identity.js";
 
 describe("generateIdentityKeyPair", () => {
@@ -80,6 +82,48 @@ describe("exportPrivateKeyRaw / importPrivateKeyRaw", () => {
       256
     );
     expect(new Uint8Array(secretFromRestored)).toEqual(new Uint8Array(secretFromOriginal));
+  });
+});
+
+describe("exportPrivateKeyScalar / importPrivateKeyFromScalar", () => {
+  it("round-trips just the 32-byte raw P-256 scalar (no embedded public key) into a fully working key pair", async () => {
+    const original = await generateIdentityKeyPair();
+    const extractableOriginal = await importPrivateKeyRaw(await exportPrivateKeyRaw(original.privateKey), {
+      name: "ECDSA",
+      namedCurve: "P-256"
+    }, true);
+    const scalar = await exportPrivateKeyScalar(extractableOriginal);
+    expect(scalar).toBeInstanceOf(Uint8Array);
+    expect(scalar.length).toBe(32);
+
+    const restoredExtractable = await importPrivateKeyFromScalar(scalar, { name: "ECDSA", namedCurve: "P-256" }, true);
+
+    // The reconstructed key must expose a working public key (x/y derived
+    // internally from the scalar), not just an opaque private handle --
+    // this is the whole point: mnemonic backups only carry the 32-byte
+    // scalar, so restoring an identity depends on this derivation working.
+    const restoredPublicKey = await derivePublicKeyFromPrivate(restoredExtractable, { name: "ECDSA", namedCurve: "P-256" });
+
+    const message = new TextEncoder().encode("scalar-round-trip-check");
+    const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, restoredExtractable, message);
+    const isValid = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, restoredPublicKey, signature, message);
+    expect(isValid).toBe(true);
+
+    // And it must be the SAME key as the original, not just "a" working key.
+    const originalSignature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, original.privateKey, message);
+    const crossValid = await crypto.subtle.verify(
+      { name: "ECDSA", hash: "SHA-256" },
+      restoredPublicKey,
+      originalSignature,
+      message
+    );
+    expect(crossValid).toBe(true);
+  });
+
+  it("throws a clear error for a scalar that isn't exactly 32 bytes", async () => {
+    await expect(
+      importPrivateKeyFromScalar(new Uint8Array(16), { name: "ECDSA", namedCurve: "P-256" })
+    ).rejects.toThrow(/32 bytes/i);
   });
 });
 

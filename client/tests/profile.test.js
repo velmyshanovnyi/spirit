@@ -4,12 +4,16 @@ import {
   createPermanentProfile,
   loadPermanentProfile,
   hasStoredProfile,
+  restoreProfileFromMnemonic,
+  restoreProfileFromKeyfile,
   IncorrectPassphraseError,
   NoStoredProfileError
 } from "../js/profile.js";
 import { get } from "../js/db.js";
-import { exportPrivateKeyRaw } from "../js/identity.js";
+import { exportPrivateKeyRaw, exportPrivateKeyScalar } from "../js/identity.js";
 import { bytesToBase64 } from "../js/codec.js";
+import { bytesToMnemonic } from "../js/mnemonic.js";
+import { createKeyfile } from "../js/keyfile.js";
 
 beforeEach(() => {
   global.indexedDB = new IDBFactory();
@@ -78,5 +82,76 @@ describe("loadPermanentProfile", () => {
 
   it("throws a clear error when no profile has been stored yet", async () => {
     await expect(loadPermanentProfile("anything")).rejects.toThrow(NoStoredProfileError);
+  });
+});
+
+describe("restoreProfileFromMnemonic", () => {
+  it("restores a key pair that can sign/verify against the originally created key pair, and persists it", async () => {
+    const created = await createPermanentProfile("original passphrase");
+    const scalarBytes = await exportPrivateKeyScalar(created.privateKey);
+    const words = await bytesToMnemonic(scalarBytes);
+
+    const restored = await restoreProfileFromMnemonic(words, "new local passphrase");
+
+    const message = new TextEncoder().encode("mnemonic-restore-check");
+    const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, restored.privateKey, message);
+    const isValid = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, created.publicKey, signature, message);
+    expect(isValid).toBe(true);
+
+    // Persisted under the new local passphrase -- a subsequent independent
+    // load must succeed (proves it was actually saved, not just returned).
+    const reloaded = await loadPermanentProfile("new local passphrase");
+    const reloadedSignature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, reloaded.privateKey, message);
+    const reloadedValid = await crypto.subtle.verify(
+      { name: "ECDSA", hash: "SHA-256" },
+      created.publicKey,
+      reloadedSignature,
+      message
+    );
+    expect(reloadedValid).toBe(true);
+  });
+
+  it("propagates mnemonic.js's own error for an invalid mnemonic, not a passphrase error", async () => {
+    const tooFewWords = Array(24).fill("abandon");
+    tooFewWords[0] = "not-a-real-bip39-word";
+
+    await expect(restoreProfileFromMnemonic(tooFewWords, "local passphrase")).rejects.toThrow(
+      /not in the BIP39 English wordlist/
+    );
+  });
+});
+
+describe("restoreProfileFromKeyfile", () => {
+  it("restores a key pair that can sign/verify against the originally created key pair, and persists it", async () => {
+    const created = await createPermanentProfile("original passphrase");
+    const rawPrivateKey = await exportPrivateKeyRaw(created.privateKey);
+    const keyfile = await createKeyfile(rawPrivateKey, "keyfile passphrase");
+
+    const restored = await restoreProfileFromKeyfile(keyfile, "keyfile passphrase", "new local passphrase");
+
+    const message = new TextEncoder().encode("keyfile-restore-check");
+    const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, restored.privateKey, message);
+    const isValid = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, created.publicKey, signature, message);
+    expect(isValid).toBe(true);
+
+    const reloaded = await loadPermanentProfile("new local passphrase");
+    const reloadedSignature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, reloaded.privateKey, message);
+    const reloadedValid = await crypto.subtle.verify(
+      { name: "ECDSA", hash: "SHA-256" },
+      created.publicKey,
+      reloadedSignature,
+      message
+    );
+    expect(reloadedValid).toBe(true);
+  });
+
+  it("throws IncorrectPassphraseError for a wrong keyfile passphrase", async () => {
+    const created = await createPermanentProfile("original passphrase");
+    const rawPrivateKey = await exportPrivateKeyRaw(created.privateKey);
+    const keyfile = await createKeyfile(rawPrivateKey, "the real keyfile passphrase");
+
+    await expect(restoreProfileFromKeyfile(keyfile, "wrong keyfile passphrase", "local passphrase")).rejects.toThrow(
+      IncorrectPassphraseError
+    );
   });
 });
