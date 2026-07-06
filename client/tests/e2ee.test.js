@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { generateEcdhKeyPair } from "../js/identity.js";
-import { deriveSessionKey, encryptMessage, decryptMessage, bytesToBase64, base64ToBytes } from "../js/e2ee.js";
+import { deriveSessionKey, encryptMessage, decryptMessage } from "../js/e2ee.js";
+import { bytesToBase64, base64ToBytes } from "../js/codec.js";
 
 describe("deriveSessionKey", () => {
   it("is symmetric: both parties derive the same AES-GCM key from ECDH", async () => {

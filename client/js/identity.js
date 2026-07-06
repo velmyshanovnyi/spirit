@@ -1,4 +1,4 @@
-import { bytesToBase64, base64ToBytes } from "./e2ee.js";
+import { bytesToBase64, base64ToBytes } from "./codec.js";
 
 export async function generateIdentityKeyPair() {
   return crypto.subtle.generateKey(

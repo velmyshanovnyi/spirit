@@ -24,9 +24,11 @@
 
 ## Секція 3: Модель профілю (створення/завантаження перманентного профілю)
 
-- [ ] **Tests**: `client/tests/profile.test.js` — `createPermanentProfile(passphrase)` генерує identity-keypair (`extractable: true`, на відміну від ефемерного режиму), зберігає зашифрований приватний ключ **і сіль** у `db` (сіль генерується рівно один раз, при створенні); `loadPermanentProfile(passphrase)` відновлює той самий keypair (перевірка через sign/verify), **перевикористовуючи збережену сіль** (окремий тест: два послідовні `loadPermanentProfile` з тим самим passphrase успішні — захист від "нова сіль на кожне розблокування"); невірний passphrase при завантаженні — чітка, доменна помилка (не сира `DOMException` від `decryptForVault`).
-- [ ] **Impl**: `client/js/profile.js` — `createPermanentProfile`, `loadPermanentProfile`, `hasStoredProfile()`.
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/profile.test.js`, 7 тестів — `createPermanentProfile(passphrase)` генерує identity-keypair (`extractable: true`), зберігає зашифрований приватний ключ **і сіль** у `db`; `loadPermanentProfile(passphrase)` відновлює той самий keypair (sign/verify крос-перевірка з оригінальним), **перевикористовуючи збережену сіль** (два послідовні `loadPermanentProfile` успішні); невірний passphrase → `IncorrectPassphraseError`; відсутній профіль → `NoStoredProfileError`.
+- [x] **Impl**: `client/js/profile.js` — `createPermanentProfile`, `loadPermanentProfile`, `hasStoredProfile()`, `IncorrectPassphraseError`, `NoStoredProfileError`. Публічний ключ при відновленні реконструюється через `derivePublicKeyFromPrivate` (нова функція в `identity.js` — сирі байти зберігають лише приватний ключ, за D8).
+  - **Побічно**: виявлено й закрито архітектурну прогалину — відновлення identity лише з сирих приватних байт не мало способу відтворити публічний ключ (Web Crypto не має "derive public from private"); вирішено через гарантію JWK-експорту (RFC 7518 §6.2.2 зобов'язує включати x/y поряд із `d`).
+  - **Достроково закрито пункт із Секції 5**: поріг "третій споживач codec" вже досягнутий — `bytesToBase64`/`base64ToBytes` винесено в `client/js/codec.js`, усі споживачі (`e2ee.js`, `identity.js`, `googleOAuth.js`, `vault.js`, `profile.js`) оновлені.
+- [x] **Exec review**: 2 ітерації, конвергенція — [iter1](../reviews/phase2-section-3-profile-iter1.md), [iter2](../reviews/phase2-section-3-profile-iter2.md). Окремо: `derivePublicKeyFromPrivate` review — [iter1](../reviews/identity-derive-public-key-iter1.md).
 
 ## Секція 4: Backup — мнемоніка (BIP39-подібне кодування)
 
@@ -37,8 +39,7 @@
 ## Секція 5: Backup — keyfile
 
 - [ ] **Tests**: `client/tests/keyfile.test.js` — `createKeyfile(rawKeyBytes, passphrase)` повертає JSON-структуру з сіллю/iv/ciphertext; `restoreFromKeyfile(keyfileJson, passphrase)` — точний round-trip сирих байтів; невірний passphrase — чітка помилка.
-- [ ] **Impl**: `client/js/keyfile.js` — перевикористовує `vault.js` для шифрування, серіалізує у стабільний JSON-формат для завантаження/збереження файлу.
-  - **Перенесено з Секції 2 review**: якщо ця секція стане третім споживачем `bytesToBase64`/`base64ToBytes` (після `e2ee.js` і `vault.js`), варто винести їх у нейтральний `client/js/codec.js`, щоб ні message-crypto, ні storage-crypto не "володіли" спільним кодеком.
+- [ ] **Impl**: `client/js/keyfile.js` — перевикористовує `vault.js` для шифрування, серіалізує у стабільний JSON-формат для завантаження/збереження файлу. Base64-кодек уже винесено в `client/js/codec.js` (закрито достроково в Секції 3) — імпортувати звідти.
 - [ ] **Exec review**: —
 
 ## Секція 6: Відновлення профілю з backup

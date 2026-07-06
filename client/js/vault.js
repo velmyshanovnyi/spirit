@@ -1,4 +1,4 @@
-import { bytesToBase64, base64ToBytes } from "./e2ee.js";
+import { bytesToBase64, base64ToBytes } from "./codec.js";
 
 const PBKDF2_ITERATIONS = 600_000; // OWASP-recommended floor for PBKDF2-HMAC-SHA256 (2023+)
 const SALT_LENGTH_BYTES = 16;

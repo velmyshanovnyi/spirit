@@ -1,4 +1,4 @@
-import { base64ToBytes } from "./e2ee.js";
+import { base64ToBytes } from "./codec.js";
 
 const GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
 const GOOGLE_ISSUERS = ["https://accounts.google.com", "accounts.google.com"];
