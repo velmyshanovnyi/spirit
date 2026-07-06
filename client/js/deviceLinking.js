@@ -1,4 +1,9 @@
 import { bytesToBase64, base64ToBytes } from "./codec.js";
+import { importPrivateKeyRaw, derivePublicKeyFromPrivate } from "./identity.js";
+import { adoptIdentity } from "./profile.js";
+import { put } from "./db.js";
+
+const IDENTITY_ALGORITHM = { name: "ECDSA", namedCurve: "P-256" };
 
 const SIGNING_ALGORITHM = { name: "ECDSA", hash: "SHA-256" };
 const DEFAULT_VALIDITY_MS = 365 * 24 * 60 * 60 * 1000;
@@ -89,4 +94,93 @@ export async function verifyDeviceCertificate(identityPublicKey, certificate, { 
   } catch {
     return false; // malformed base64 or a key/format error -- invalid, not fatal
   }
+}
+
+/**
+ * First message of the linking handshake, sent by the NEW device over the
+ * already-established E2EE channel: announces the device public key the
+ * primary should certify. Possession of the invite token (shared
+ * out-of-band, docs/accounts.md) is what authorizes this request -- the
+ * channel itself carries no other authentication of the new device.
+ */
+export async function createLinkRequest(devicePublicKey) {
+  const spki = await crypto.subtle.exportKey("spki", devicePublicKey);
+  return { type: "device-link-request", devicePubkey: bytesToBase64(new Uint8Array(spki)) };
+}
+
+/**
+ * Primary device's reply: certifies the requested device key and hands over
+ * the identity. Takes RAW identity bytes (not a CryptoKey) because a loaded
+ * profile's private key is deliberately non-extractable -- the caller
+ * re-derives the raw bytes via profile.js's exportRawIdentity(passphrase),
+ * making linking require a passphrase confirmation.
+ *
+ * @throws for a malformed request, or a devicePubkey that isn't a parseable
+ *         P-256 SPKI key (crypto.subtle.importKey rejects garbage here --
+ *         the validation deliberately deferred from Section 8's verify).
+ */
+export async function createLinkGrant(identityRawPrivateKey, request, { contacts = [], validityMs, now } = {}) {
+  if (!request || request.type !== "device-link-request" || typeof request.devicePubkey !== "string") {
+    throw new Error("Malformed device link request");
+  }
+
+  const devicePublicKey = await crypto.subtle.importKey(
+    "spki",
+    base64ToBytes(request.devicePubkey),
+    IDENTITY_ALGORITHM,
+    true,
+    ["verify"]
+  );
+
+  const identityPrivateKey = await importPrivateKeyRaw(identityRawPrivateKey, IDENTITY_ALGORITHM, false);
+  const certOptions = {};
+  if (validityMs !== undefined) certOptions.validityMs = validityMs;
+  if (now !== undefined) certOptions.now = now;
+  const certificate = await signDeviceCertificate(identityPrivateKey, devicePublicKey, certOptions);
+
+  return {
+    type: "device-link-grant",
+    certificate,
+    identityPrivateKey: bytesToBase64(new Uint8Array(identityRawPrivateKey)),
+    contacts
+  };
+}
+
+/**
+ * New device's final step: validates the grant and only then persists.
+ * Order matters -- nothing is written until (1) the certificate is bound to
+ * THIS device's own key (a grant certifying some other key must not be
+ * accepted, even from the legitimate identity) and (2) the certificate
+ * verifies against the identity delivered in the grant itself (a tampered
+ * or mismatched grant persists nothing).
+ */
+export async function applyLinkGrant(grant, localPassphrase, { devicePublicKey }) {
+  if (
+    !grant ||
+    grant.type !== "device-link-grant" ||
+    typeof grant.identityPrivateKey !== "string" ||
+    !grant.certificate ||
+    !Array.isArray(grant.contacts)
+  ) {
+    throw new Error("Malformed device link grant");
+  }
+
+  const ownSpki = await crypto.subtle.exportKey("spki", devicePublicKey);
+  if (grant.certificate.devicePubkey !== bytesToBase64(new Uint8Array(ownSpki))) {
+    throw new Error("Link grant certificate is bound to a different device key");
+  }
+
+  const rawIdentity = base64ToBytes(grant.identityPrivateKey);
+  const extractableIdentity = await importPrivateKeyRaw(rawIdentity, IDENTITY_ALGORITHM, true);
+  const identityPublicKey = await derivePublicKeyFromPrivate(extractableIdentity, IDENTITY_ALGORITHM);
+  if (!(await verifyDeviceCertificate(identityPublicKey, grant.certificate))) {
+    throw new Error("Invalid device certificate in link grant");
+  }
+
+  const identityKeyPair = await adoptIdentity(rawIdentity, localPassphrase);
+  for (const { key, value } of grant.contacts) {
+    await put("contacts", key, value);
+  }
+
+  return { identityKeyPair, certificate: grant.certificate, contacts: grant.contacts };
 }

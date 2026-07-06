@@ -1,10 +1,20 @@
-import { describe, it, expect } from "vitest";
-import { generateIdentityKeyPair } from "../js/identity.js";
+import { describe, it, expect, beforeEach } from "vitest";
+import { IDBFactory } from "fake-indexeddb";
+import { generateIdentityKeyPair, exportPrivateKeyRaw } from "../js/identity.js";
 import {
   generateDeviceKeyPair,
   signDeviceCertificate,
-  verifyDeviceCertificate
+  verifyDeviceCertificate,
+  createLinkRequest,
+  createLinkGrant,
+  applyLinkGrant
 } from "../js/deviceLinking.js";
+import { hasStoredProfile, loadPermanentProfile } from "../js/profile.js";
+import { get } from "../js/db.js";
+
+beforeEach(() => {
+  global.indexedDB = new IDBFactory();
+});
 
 describe("generateDeviceKeyPair", () => {
   it("generates a separate ECDSA P-256 sign/verify key pair, independent of the identity key", async () => {
@@ -101,6 +111,109 @@ describe("signDeviceCertificate / verifyDeviceCertificate", () => {
     expect(await verifyDeviceCertificate(identityB.publicKey, cert)).toBe(false);
   });
 
+});
+
+describe("device linking protocol (link request / grant / apply)", () => {
+  async function linkedSetup() {
+    const identity = await generateIdentityKeyPair();
+    // createLinkGrant takes RAW identity bytes, not a CryptoKey: a loaded
+    // profile's private key is deliberately non-extractable (Section 3), so
+    // the linking flow re-derives the raw key from the vault via passphrase.
+    const identityRaw = new Uint8Array(await exportPrivateKeyRaw(identity.privateKey));
+    const device = await generateDeviceKeyPair();
+    const request = await createLinkRequest(device.publicKey);
+    return { identity, identityRaw, device, request };
+  }
+
+  it("createLinkRequest produces a JSON-serializable request carrying the device public key", async () => {
+    const { device, request } = await linkedSetup();
+
+    expect(request.type).toBe("device-link-request");
+    expect(typeof request.devicePubkey).toBe("string");
+    expect(JSON.parse(JSON.stringify(request))).toEqual(request);
+
+    // The wire form must be the device's actual SPKI.
+    const spki = new Uint8Array(await crypto.subtle.exportKey("spki", device.publicKey));
+    expect(request.devicePubkey).toBe(btoa(String.fromCharCode(...spki)));
+  });
+
+  it("createLinkGrant signs a certificate binding the requested device key and carries identity + contacts", async () => {
+    const { identity, identityRaw, request } = await linkedSetup();
+    const contacts = [{ key: "peer1", value: { name: "Alice" } }];
+
+    const grant = await createLinkGrant(identityRaw, request, { contacts });
+
+    expect(grant.type).toBe("device-link-grant");
+    expect(typeof grant.identityPrivateKey).toBe("string");
+    expect(grant.contacts).toEqual(contacts);
+    expect(await verifyDeviceCertificate(identity.publicKey, grant.certificate)).toBe(true);
+    expect(grant.certificate.devicePubkey).toBe(request.devicePubkey);
+    expect(JSON.parse(JSON.stringify(grant))).toEqual(grant);
+  });
+
+  it("createLinkGrant rejects a malformed request or an unparseable device public key", async () => {
+    const { identityRaw } = await linkedSetup();
+
+    await expect(createLinkGrant(identityRaw, null, {})).rejects.toThrow(/link request/i);
+    await expect(createLinkGrant(identityRaw, { type: "device-link-request" }, {})).rejects.toThrow(/link request/i);
+    // Valid base64 but not a parseable SPKI key -- the Section 8 review deferred
+    // rejecting garbage device keys to this consumer; prove it actually rejects.
+    await expect(
+      createLinkGrant(identityRaw, { type: "device-link-request", devicePubkey: "AAAA" }, {})
+    ).rejects.toThrow();
+  });
+
+  it("applyLinkGrant persists the identity so the new device can load it, and restores contacts", async () => {
+    const { identity, identityRaw, device, request } = await linkedSetup();
+    const contacts = [{ key: "peer1", value: { name: "Alice" } }];
+    const grant = await createLinkGrant(identityRaw, request, { contacts });
+    const overTheWire = JSON.parse(JSON.stringify(grant));
+
+    const result = await applyLinkGrant(overTheWire, "new device passphrase", { devicePublicKey: device.publicKey });
+
+    // Same identity as the primary device: cross sign/verify.
+    const message = new TextEncoder().encode("link-grant-check");
+    const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, result.identityKeyPair.privateKey, message);
+    expect(await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, identity.publicKey, signature, message)).toBe(true);
+
+    // Actually persisted: an independent load with the local passphrase works.
+    const reloaded = await loadPermanentProfile("new device passphrase");
+    const reloadedSig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, reloaded.privateKey, message);
+    expect(await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, identity.publicKey, reloadedSig, message)).toBe(true);
+
+    // Contacts snapshot restored into the local db.
+    expect(await get("contacts", "peer1")).toEqual({ name: "Alice" });
+    expect(result.certificate).toEqual(grant.certificate);
+  });
+
+  it("applyLinkGrant rejects a grant whose certificate is bound to a DIFFERENT device key, without persisting", async () => {
+    const { identityRaw, request } = await linkedSetup();
+    const otherDevice = await generateDeviceKeyPair();
+    const grant = await createLinkGrant(identityRaw, request, { contacts: [] });
+
+    await expect(
+      applyLinkGrant(grant, "pass", { devicePublicKey: otherDevice.publicKey })
+    ).rejects.toThrow(/device/i);
+    expect(await hasStoredProfile()).toBe(false);
+  });
+
+  it("applyLinkGrant rejects a tampered certificate, without persisting anything", async () => {
+    const { identityRaw, device, request } = await linkedSetup();
+    const grant = await createLinkGrant(identityRaw, request, { contacts: [] });
+    const tampered = { ...grant, certificate: { ...grant.certificate, expiresAt: grant.certificate.expiresAt + 1 } };
+
+    await expect(applyLinkGrant(tampered, "pass", { devicePublicKey: device.publicKey })).rejects.toThrow(/certificate/i);
+    expect(await hasStoredProfile()).toBe(false);
+  });
+
+  it("applyLinkGrant rejects malformed grants", async () => {
+    const device = await generateDeviceKeyPair();
+    await expect(applyLinkGrant(null, "pass", { devicePublicKey: device.publicKey })).rejects.toThrow(/link grant/i);
+    await expect(applyLinkGrant({ type: "device-link-grant" }, "pass", { devicePublicKey: device.publicKey })).rejects.toThrow(/link grant/i);
+  });
+});
+
+describe("verifyDeviceCertificate (malformed input)", () => {
   it("rejects malformed certificates (missing fields, wrong types) as invalid, never throws", async () => {
     const identity = await generateIdentityKeyPair();
 

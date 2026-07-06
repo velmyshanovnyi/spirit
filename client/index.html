@@ -36,6 +36,22 @@
     </section>
 
     <section>
+      <h2>Пристрої</h2>
+      <div>
+        <h3>На основному пристрої</h3>
+        <label>Passphrase профілю: <input id="link-passphrase" type="password" autocomplete="current-password"></label>
+        <button id="btn-link-device" type="button">Прив'язати новий пристрій</button>
+      </div>
+      <div>
+        <h3>На новому пристрої</h3>
+        <p>Заповніть Room ID та invite token з основного пристрою (розділ «Інфраструктура»).</p>
+        <label>Passphrase для цього пристрою: <input id="device-local-passphrase" type="password" autocomplete="new-password"></label>
+        <button id="btn-join-as-device" type="button">Приєднати цей пристрій</button>
+      </div>
+      <div id="device-link-status"></div>
+    </section>
+
+    <section>
       <h2>Верифікація</h2>
       <label>Google Client ID: <input id="google-client-id" type="text"></label>
       <button id="btn-google-verify" type="button">Підтвердити через Google</button>

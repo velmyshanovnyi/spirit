@@ -68,6 +68,10 @@ export async function createPermanentProfile(passphrase) {
  *         AES-GCM layer by design (distinguishing them would be an oracle).
  */
 export async function loadPermanentProfile(passphrase) {
+  return reconstructKeyPairFromRaw(await decryptStoredRawIdentity(passphrase));
+}
+
+async function decryptStoredRawIdentity(passphrase) {
   const record = await get("profile", PROFILE_RECORD_KEY);
   if (!record) {
     throw new NoStoredProfileError();
@@ -76,14 +80,36 @@ export async function loadPermanentProfile(passphrase) {
   const salt = base64ToBytes(record.salt);
   const vaultKey = await deriveVaultKey(passphrase, salt);
 
-  let rawPrivateKey;
   try {
-    rawPrivateKey = await decryptForVault(vaultKey, record.encryptedPrivateKey);
+    return await decryptForVault(vaultKey, record.encryptedPrivateKey);
   } catch {
     throw new IncorrectPassphraseError();
   }
+}
 
-  return reconstructKeyPairFromRaw(rawPrivateKey);
+/**
+ * Returns the stored raw (pkcs8) identity private key bytes after
+ * passphrase verification. Needed by device linking (deviceLinking.js):
+ * loadPermanentProfile deliberately returns a non-extractable key, so the
+ * only way to hand the identity to a new device is to re-derive the raw
+ * bytes from the vault -- which also makes linking require the passphrase,
+ * a deliberate confirmation step for this high-impact action.
+ *
+ * @throws {NoStoredProfileError} / {IncorrectPassphraseError} as loadPermanentProfile.
+ */
+export async function exportRawIdentity(passphrase) {
+  return decryptStoredRawIdentity(passphrase);
+}
+
+/**
+ * Persists an externally-obtained raw identity (device linking: the grant
+ * from the primary device) as this device's permanent profile, encrypted
+ * under `localPassphrase`. Same overwrite semantics as the restore functions.
+ */
+export async function adoptIdentity(rawPrivateKey, localPassphrase) {
+  const keyPair = await reconstructKeyPairFromRaw(rawPrivateKey);
+  await persistRawIdentity(rawPrivateKey, localPassphrase);
+  return keyPair;
 }
 
 /**

@@ -6,6 +6,7 @@ import {
   hasStoredProfile,
   restoreProfileFromMnemonic,
   restoreProfileFromKeyfile,
+  exportRawIdentity,
   IncorrectPassphraseError,
   NoStoredProfileError
 } from "../js/profile.js";
@@ -82,6 +83,26 @@ describe("loadPermanentProfile", () => {
 
   it("throws a clear error when no profile has been stored yet", async () => {
     await expect(loadPermanentProfile("anything")).rejects.toThrow(NoStoredProfileError);
+  });
+});
+
+describe("exportRawIdentity", () => {
+  it("returns the stored raw private key bytes for the correct passphrase (device-linking needs them)", async () => {
+    const created = await createPermanentProfile("my passphrase");
+    const expectedRaw = new Uint8Array(await exportPrivateKeyRaw(created.privateKey));
+
+    const raw = await exportRawIdentity("my passphrase");
+
+    expect(new Uint8Array(raw)).toEqual(expectedRaw);
+  });
+
+  it("throws IncorrectPassphraseError for a wrong passphrase", async () => {
+    await createPermanentProfile("the real passphrase");
+    await expect(exportRawIdentity("wrong")).rejects.toThrow(IncorrectPassphraseError);
+  });
+
+  it("throws NoStoredProfileError when no profile exists", async () => {
+    await expect(exportRawIdentity("anything")).rejects.toThrow(NoStoredProfileError);
   });
 });
 

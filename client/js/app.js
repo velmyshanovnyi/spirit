@@ -7,9 +7,11 @@ import {
   exportPrivateKeyScalar,
   exportPrivateKeyRaw
 } from "./identity.js";
-import { createPermanentProfile } from "./profile.js";
+import { createPermanentProfile, exportRawIdentity } from "./profile.js";
 import { bytesToMnemonic } from "./mnemonic.js";
 import { createKeyfile } from "./keyfile.js";
+import { generateDeviceKeyPair, createLinkRequest, createLinkGrant, applyLinkGrant } from "./deviceLinking.js";
+import { listKeys, get } from "./db.js";
 import { startAsInitiator, startAsJoiner, applyRemoteAnswer } from "./webrtc.js";
 import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer } from "./signalingClient.js";
 import { deriveSessionKey, encryptMessage, decryptMessage } from "./e2ee.js";
@@ -49,16 +51,23 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
     };
   }
 
-  function wireChannelCallbacks(disarmIceTimeout) {
+  function wireChannelCallbacks(disarmIceTimeout, { onDecryptedMessage = appendChat, afterChannelOpen } = {}) {
     return {
       onChannelOpen: (channel) => {
         state.channel = channel;
         setStatus("з'єднано");
+        if (afterChannelOpen) afterChannelOpen();
       },
       onMessage: async (payload) => {
         if (!state.sessionKey) return; // message arrived before session key derived; drop rather than throw
-        const text = await decryptMessage(state.sessionKey, payload);
-        appendChat(text);
+        try {
+          const text = await decryptMessage(state.sessionKey, payload);
+          await onDecryptedMessage(text);
+        } catch (err) {
+          // This callback runs detached from any button handler, so nothing
+          // upstream can catch a rejection here.
+          setStatus(`помилка: ${err.message}`);
+        }
       },
       onChannelClose: () => setStatus("з'єднання закрито"),
       onError: (err) => {
@@ -68,6 +77,103 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
         setStatus(`помилка: ${err.message}`);
       }
     };
+  }
+
+  // Signaling sender_key for the device-linking flows: an opaque one-off
+  // identifier, NOT the identity fingerprint -- the new device has no
+  // identity yet, and the primary has no reason to announce its identity to
+  // the signaling node just to hand it over inside the E2EE channel.
+  function randomSenderKey() {
+    return [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  async function snapshotContacts() {
+    const keys = await listKeys("contacts");
+    return Promise.all(keys.map(async (key) => ({ key, value: await get("contacts", key) })));
+  }
+
+  /**
+   * The initiator handshake shared by "Ініціювати чат" and "Прив'язати
+   * пристрій": ICE gathering -> publish offer -> wait for answer -> derive
+   * the E2EE session key. Behavior for the chat path is byte-for-byte what
+   * it was before this was extracted.
+   */
+  function startInitiatorSession({ senderKey, ecdhKeyPair, roomId, inviteToken, serverUrl, rtcConfig, channelOptions, onSessionReady }) {
+    const disarmIceTimeout = armIceTimeout();
+
+    state.pc = startAsInitiator({
+      rtcConfig,
+      ...wireChannelCallbacks(disarmIceTimeout, channelOptions),
+      onLocalOfferReady: async (offerSdp) => {
+        disarmIceTimeout();
+        try {
+          const ecdhPubkey = await exportEcdhPublicKeyForWire(ecdhKeyPair.publicKey);
+          await createOffer(serverUrl, {
+            senderKey,
+            roomId,
+            inviteToken,
+            sdpData: JSON.stringify(offerSdp),
+            ecdhPubkey
+          });
+
+          setStatus("очікування відповіді співрозмовника...");
+          const answerWaitController = new AbortController();
+          const answerWaitTimeoutId = setTimeout(() => answerWaitController.abort(), answerWaitTimeoutMs);
+          let answer, peerEcdhPubkeyWire;
+          try {
+            ({ answer, ecdhPubkey: peerEcdhPubkeyWire } = await pollForAnswer(
+              serverUrl,
+              { senderKey, roomId },
+              { signal: answerWaitController.signal }
+            ));
+          } finally {
+            clearTimeout(answerWaitTimeoutId);
+          }
+
+          await applyRemoteAnswer(state.pc, JSON.parse(answer));
+          const peerEcdhPubkey = await importEcdhPublicKeyFromWire(peerEcdhPubkeyWire);
+          state.sessionKey = await deriveSessionKey(ecdhKeyPair.privateKey, peerEcdhPubkey);
+          if (onSessionReady) await onSessionReady();
+        } catch (err) {
+          setStatus(`помилка: ${err.message}`);
+        }
+      }
+    });
+  }
+
+  /**
+   * The joiner handshake shared by "Приєднатися до чату" and "Приєднати цей
+   * пристрій": fetch offer -> answer -> derive the E2EE session key.
+   */
+  async function startJoinerSession({ senderKey, roomId, inviteToken, serverUrl, rtcConfig, channelOptions, onSessionReady }) {
+    const ecdhKeyPair = await generateEcdhKeyPair();
+    const { offer, ecdhPubkey: peerEcdhPubkeyWire } = await getOffer(serverUrl, { senderKey, roomId, inviteToken });
+
+    const disarmIceTimeout = armIceTimeout();
+
+    state.pc = startAsJoiner({
+      rtcConfig,
+      offerSdp: JSON.parse(offer),
+      ...wireChannelCallbacks(disarmIceTimeout, channelOptions),
+      onLocalAnswerReady: async (answerSdp) => {
+        disarmIceTimeout();
+        try {
+          const ecdhPubkey = await exportEcdhPublicKeyForWire(ecdhKeyPair.publicKey);
+          await submitAnswer(serverUrl, {
+            senderKey,
+            roomId,
+            inviteToken,
+            sdpData: JSON.stringify(answerSdp),
+            ecdhPubkey
+          });
+          const peerEcdhPubkey = await importEcdhPublicKeyFromWire(peerEcdhPubkeyWire);
+          state.sessionKey = await deriveSessionKey(ecdhKeyPair.privateKey, peerEcdhPubkey);
+          if (onSessionReady) await onSessionReady();
+        } catch (err) {
+          setStatus(`помилка: ${err.message}`);
+        }
+      }
+    });
   }
 
   function withBusyButton(button, handler) {
@@ -169,8 +275,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
       return;
     }
     const serverUrl = el("server-url").value;
-    const stunUrl = el("stun-url").value;
-    const rtcConfig = { iceServers: [{ urls: stunUrl }] };
+    const rtcConfig = { iceServers: [{ urls: el("stun-url").value }] };
     const senderKey = state.senderKey;
 
     const ecdhKeyPair = await generateEcdhKeyPair();
@@ -178,45 +283,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
     el("room-id").value = roomId;
     el("invite-token").value = inviteToken;
 
-    const disarmIceTimeout = armIceTimeout();
-
-    state.pc = startAsInitiator({
-      rtcConfig,
-      ...wireChannelCallbacks(disarmIceTimeout),
-      onLocalOfferReady: async (offerSdp) => {
-        disarmIceTimeout();
-        try {
-          const ecdhPubkey = await exportEcdhPublicKeyForWire(ecdhKeyPair.publicKey);
-          await createOffer(serverUrl, {
-            senderKey,
-            roomId,
-            inviteToken,
-            sdpData: JSON.stringify(offerSdp),
-            ecdhPubkey
-          });
-
-          setStatus("очікування відповіді співрозмовника...");
-          const answerWaitController = new AbortController();
-          const answerWaitTimeoutId = setTimeout(() => answerWaitController.abort(), answerWaitTimeoutMs);
-          let answer, peerEcdhPubkeyWire;
-          try {
-            ({ answer, ecdhPubkey: peerEcdhPubkeyWire } = await pollForAnswer(
-              serverUrl,
-              { senderKey, roomId },
-              { signal: answerWaitController.signal }
-            ));
-          } finally {
-            clearTimeout(answerWaitTimeoutId);
-          }
-
-          await applyRemoteAnswer(state.pc, JSON.parse(answer));
-          const peerEcdhPubkey = await importEcdhPublicKeyFromWire(peerEcdhPubkeyWire);
-          state.sessionKey = await deriveSessionKey(ecdhKeyPair.privateKey, peerEcdhPubkey);
-        } catch (err) {
-          setStatus(`помилка: ${err.message}`);
-        }
-      }
-    });
+    startInitiatorSession({ senderKey, ecdhKeyPair, roomId, inviteToken, serverUrl, rtcConfig });
   });
 
   withBusyButton(el("btn-join"), async () => {
@@ -224,37 +291,112 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
       setStatus("спочатку створіть акаунт");
       return;
     }
+    await startJoinerSession({
+      senderKey: state.senderKey,
+      roomId: el("room-id").value,
+      inviteToken: el("invite-token").value,
+      serverUrl: el("server-url").value,
+      rtcConfig: { iceServers: [{ urls: el("stun-url").value }] }
+    });
+  });
+
+  const setDeviceLinkStatus = (text) => {
+    el("device-link-status").textContent = text;
+  };
+
+  withBusyButton(el("btn-link-device"), async () => {
+    const passphrase = el("link-passphrase").value;
+    if (!passphrase) {
+      setDeviceLinkStatus("вкажіть passphrase профілю");
+      return;
+    }
+    // Re-deriving the raw identity from the vault both unlocks the bytes to
+    // hand over AND makes linking require passphrase confirmation.
+    const identityRaw = await exportRawIdentity(passphrase);
+    el("link-passphrase").value = "";
+
     const serverUrl = el("server-url").value;
-    const stunUrl = el("stun-url").value;
-    const roomId = el("room-id").value;
-    const inviteToken = el("invite-token").value;
-    const rtcConfig = { iceServers: [{ urls: stunUrl }] };
-    const senderKey = state.senderKey;
+    const rtcConfig = { iceServers: [{ urls: el("stun-url").value }] };
+    const senderKey = randomSenderKey();
 
     const ecdhKeyPair = await generateEcdhKeyPair();
-    const { offer, ecdhPubkey: peerEcdhPubkeyWire } = await getOffer(serverUrl, { senderKey, roomId, inviteToken });
+    const { roomId, inviteToken } = await createInvite(serverUrl, senderKey);
+    el("room-id").value = roomId;
+    el("invite-token").value = inviteToken;
+    setDeviceLinkStatus("передайте Room ID та invite token на новий пристрій...");
 
-    const disarmIceTimeout = armIceTimeout();
-
-    state.pc = startAsJoiner({
+    startInitiatorSession({
+      senderKey,
+      ecdhKeyPair,
+      roomId,
+      inviteToken,
+      serverUrl,
       rtcConfig,
-      offerSdp: JSON.parse(offer),
-      ...wireChannelCallbacks(disarmIceTimeout),
-      onLocalAnswerReady: async (answerSdp) => {
-        disarmIceTimeout();
-        try {
-          const ecdhPubkey = await exportEcdhPublicKeyForWire(ecdhKeyPair.publicKey);
-          await submitAnswer(serverUrl, {
-            senderKey,
-            roomId,
-            inviteToken,
-            sdpData: JSON.stringify(answerSdp),
-            ecdhPubkey
+      channelOptions: {
+        onDecryptedMessage: async (text) => {
+          let message;
+          try {
+            message = JSON.parse(text);
+          } catch {
+            return; // not a linking message; nothing else is expected on this channel
+          }
+          if (!message || message.type !== "device-link-request") return;
+
+          const contacts = await snapshotContacts();
+          const grant = await createLinkGrant(identityRaw, message, { contacts });
+          state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify(grant)));
+          setDeviceLinkStatus("пристрій прив'язано");
+        }
+      }
+    });
+  });
+
+  withBusyButton(el("btn-join-as-device"), async () => {
+    const localPassphrase = el("device-local-passphrase").value;
+    if (!localPassphrase) {
+      setDeviceLinkStatus("вкажіть passphrase для цього пристрою");
+      return;
+    }
+
+    const devicePair = await generateDeviceKeyPair();
+
+    // The request can only go out once BOTH the channel is open and the
+    // session key is derived; those two complete in either order.
+    let linkRequestSent = false;
+    const maybeSendLinkRequest = async () => {
+      if (linkRequestSent || !state.channel || !state.sessionKey) return;
+      linkRequestSent = true;
+      const request = await createLinkRequest(devicePair.publicKey);
+      state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify(request)));
+      setDeviceLinkStatus("очікування підтвердження від основного пристрою...");
+    };
+
+    await startJoinerSession({
+      senderKey: randomSenderKey(),
+      roomId: el("room-id").value,
+      inviteToken: el("invite-token").value,
+      serverUrl: el("server-url").value,
+      rtcConfig: { iceServers: [{ urls: el("stun-url").value }] },
+      onSessionReady: maybeSendLinkRequest,
+      channelOptions: {
+        afterChannelOpen: maybeSendLinkRequest,
+        onDecryptedMessage: async (text) => {
+          let message;
+          try {
+            message = JSON.parse(text);
+          } catch {
+            return;
+          }
+          if (!message || message.type !== "device-link-grant") return;
+
+          const { identityKeyPair } = await applyLinkGrant(message, localPassphrase, {
+            devicePublicKey: devicePair.publicKey
           });
-          const peerEcdhPubkey = await importEcdhPublicKeyFromWire(peerEcdhPubkeyWire);
-          state.sessionKey = await deriveSessionKey(ecdhKeyPair.privateKey, peerEcdhPubkey);
-        } catch (err) {
-          setStatus(`помилка: ${err.message}`);
+          el("device-local-passphrase").value = "";
+          state.identityKeyPair = identityKeyPair;
+          state.senderKey = await fingerprint(identityKeyPair.publicKey);
+          el("pub-key-display").textContent = state.senderKey;
+          setDeviceLinkStatus("пристрій приєднано");
         }
       }
     });

@@ -64,9 +64,9 @@
 
 ## Секція 9: Мультипристрій — flow приєднання пристрою (перевикористання P2P-інфраструктури)
 
-- [ ] **Tests**: `client/tests/app.test.js`/`deviceLinking.test.js` (моки `webrtc.js`/`signalingClient.js`/`e2ee.js`) — "Приєднати цей пристрій" генерує device keypair, запускає invite-based P2P хендшейк (той самий шлях, що й звичайний чат), новий пристрій отримує device certificate + identity private key + знімок контактів через E2EE-канал.
-- [ ] **Impl**: `client/js/deviceLinking.js` (доповнення), `client/js/app.js`/`client/index.html` (UI).
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/deviceLinking.test.js` (доповнення, 7 тестів, реальна крипто + fake-indexeddb) — протокол request/grant/apply: JSON round-trip, прив'язка сертифіката до запитаного ключа, відхилення malformed request і непарсибельного SPKI (перевірка, свідомо відкладена з Секції 8), повний happy-path з незалежним `loadPermanentProfile` після adoption і відновленням контактів, відмова без персистенції для сертифіката чужого пристрою/підробленого/malformed grant. `client/tests/profile.test.js` (доповнення, 3 тести) — `exportRawIdentity(passphrase)`. `client/tests/app.test.js` (доповнення, 4 тести, моки) — обидва UI-флоу з перевіркою повного ланцюжка викликів і очищення passphrase-полів.
+- [x] **Impl**: `client/js/deviceLinking.js` (доповнення) — `createLinkRequest`/`createLinkGrant`/`applyLinkGrant`; grant бере СИРІ байти identity (не CryptoKey — завантажений профіль non-extractable за дизайном Секції 3), тож прив'язка пристрою вимагає повторного введення passphrase; `applyLinkGrant` валідує все до першого запису (прив'язка до власного ключа + верифікація сертифіката). `client/js/profile.js` — нові `exportRawIdentity`/`adoptIdentity` (спільний приватний `decryptStoredRawIdentity`). `client/js/app.js` — витягнуто спільні `startInitiatorSession`/`startJoinerSession` (чат-поведінка незмінна), нові обробники `btn-link-device`/`btn-join-as-device` з опаковим випадковим senderKey для сигналінгу (не identity fingerprint). `client/index.html` — секція "Пристрої".
+- [x] **Exec review**: 1 ітерація, конвергенція без правок — [iter1](../reviews/phase2-section-9-device-join-iter1.md).
 
 ## Секція 10: Мультипристрій — відкликання та синхронізація
 

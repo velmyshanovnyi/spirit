@@ -11,7 +11,18 @@ vi.mock("../js/identity.js", () => ({
   exportPrivateKeyRaw: vi.fn()
 }));
 vi.mock("../js/profile.js", () => ({
-  createPermanentProfile: vi.fn()
+  createPermanentProfile: vi.fn(),
+  exportRawIdentity: vi.fn()
+}));
+vi.mock("../js/deviceLinking.js", () => ({
+  generateDeviceKeyPair: vi.fn(),
+  createLinkRequest: vi.fn(),
+  createLinkGrant: vi.fn(),
+  applyLinkGrant: vi.fn()
+}));
+vi.mock("../js/db.js", () => ({
+  listKeys: vi.fn().mockResolvedValue([]),
+  get: vi.fn()
 }));
 vi.mock("../js/mnemonic.js", () => ({
   bytesToMnemonic: vi.fn()
@@ -48,12 +59,13 @@ import {
   exportPrivateKeyScalar,
   exportPrivateKeyRaw
 } from "../js/identity.js";
-import { createPermanentProfile } from "../js/profile.js";
+import { createPermanentProfile, exportRawIdentity } from "../js/profile.js";
+import { generateDeviceKeyPair, createLinkRequest, createLinkGrant, applyLinkGrant } from "../js/deviceLinking.js";
 import { bytesToMnemonic } from "../js/mnemonic.js";
 import { createKeyfile } from "../js/keyfile.js";
 import { startAsInitiator, startAsJoiner, applyRemoteAnswer } from "../js/webrtc.js";
 import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer } from "../js/signalingClient.js";
-import { encryptMessage, deriveSessionKey } from "../js/e2ee.js";
+import { encryptMessage, decryptMessage, deriveSessionKey } from "../js/e2ee.js";
 import { promptGoogleSignIn, verifyGoogleIdToken } from "../js/googleOAuth.js";
 import { initApp } from "../js/app.js";
 
@@ -75,6 +87,11 @@ const HTML = `
     <div id="keyfile-display"></div>
   </div>
   <div id="backup-reminder" hidden>Ви не зробили резервну копію ключа</div>
+  <input id="link-passphrase" type="password">
+  <button id="btn-link-device" type="button">Прив'язати новий пристрій</button>
+  <input id="device-local-passphrase" type="password">
+  <button id="btn-join-as-device" type="button">Приєднати цей пристрій</button>
+  <div id="device-link-status"></div>
   <input id="google-client-id" type="text" value="test-client-id">
   <button id="btn-google-verify" type="button">Підтвердити через Google</button>
   <div id="google-verify-status"></div>
@@ -582,6 +599,134 @@ describe("btn-send", () => {
     expect(encryptMessage).toHaveBeenCalledWith({ __tag: "session-key" }, "привіт");
     expect(channel.send).toHaveBeenCalledWith("ENCRYPTED_PAYLOAD");
     expect(channel.send).not.toHaveBeenCalledWith("привіт");
+  });
+});
+
+describe("device linking UI", () => {
+  describe("btn-link-device (primary device)", () => {
+    it("requires the profile passphrase before starting", async () => {
+      initApp(document);
+      document.getElementById("btn-link-device").click();
+      await vi.waitFor(() =>
+        expect(document.getElementById("device-link-status").textContent).toMatch(/passphrase/i)
+      );
+      expect(exportRawIdentity).not.toHaveBeenCalled();
+      expect(createInvite).not.toHaveBeenCalled();
+    });
+
+    it("unlocks the raw identity, creates an invite, and answers a link request with an encrypted grant", async () => {
+      const identityRaw = new Uint8Array([7, 7, 7]);
+      exportRawIdentity.mockResolvedValue(identityRaw);
+      fingerprint.mockResolvedValue("sender-fp");
+      generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+      createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+      createOffer.mockResolvedValue(undefined);
+      pollForAnswer.mockResolvedValue({
+        answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+        ecdhPubkey: "peer-ecdh-b64"
+      });
+      deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+      const linkRequest = { type: "device-link-request", devicePubkey: "DEV_PUB" };
+      decryptMessage.mockResolvedValue(JSON.stringify(linkRequest));
+      const grant = { type: "device-link-grant", certificate: {}, identityPrivateKey: "RAW_B64", contacts: [] };
+      createLinkGrant.mockResolvedValue(grant);
+      encryptMessage.mockResolvedValue("ENCRYPTED_GRANT");
+
+      const channel = fakeChannel();
+      let captured;
+      startAsInitiator.mockImplementation((opts) => {
+        captured = opts;
+        return { __fakePc: true };
+      });
+
+      initApp(document);
+      document.getElementById("link-passphrase").value = "my passphrase";
+      document.getElementById("btn-link-device").click();
+      await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+
+      expect(exportRawIdentity).toHaveBeenCalledWith("my passphrase");
+      // The secret must not linger in the DOM afterwards.
+      expect(document.getElementById("link-passphrase").value).toBe("");
+      expect(createInvite).toHaveBeenCalled();
+      expect(document.getElementById("room-id").value).toBe("room1");
+
+      captured.onChannelOpen(channel);
+      await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+      // Simulate the new device's encrypted link request arriving.
+      await captured.onMessage("ENCRYPTED_REQUEST_PAYLOAD");
+      await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith("ENCRYPTED_GRANT"));
+
+      expect(createLinkGrant).toHaveBeenCalledWith(identityRaw, linkRequest, { contacts: [] });
+      expect(encryptMessage).toHaveBeenCalledWith({ __tag: "session-key" }, JSON.stringify(grant));
+      expect(document.getElementById("device-link-status").textContent).toMatch(/прив'язано/);
+    });
+  });
+
+  describe("btn-join-as-device (new device)", () => {
+    it("requires a local passphrase for the adopted profile", async () => {
+      initApp(document);
+      document.getElementById("btn-join-as-device").click();
+      await vi.waitFor(() =>
+        expect(document.getElementById("device-link-status").textContent).toMatch(/passphrase/i)
+      );
+      expect(generateDeviceKeyPair).not.toHaveBeenCalled();
+    });
+
+    it("joins the room, sends an encrypted link request, and applies the received grant", async () => {
+      const devicePair = { privateKey: {}, publicKey: fakePublicKey("device-pub") };
+      generateDeviceKeyPair.mockResolvedValue(devicePair);
+      generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+      getOffer.mockResolvedValue({ offer: JSON.stringify({ type: "offer", sdp: "OFFER_SDP" }), ecdhPubkey: "peer-ecdh-b64" });
+      submitAnswer.mockResolvedValue(undefined);
+      deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+      const linkRequest = { type: "device-link-request", devicePubkey: "DEV_PUB" };
+      createLinkRequest.mockResolvedValue(linkRequest);
+      encryptMessage.mockResolvedValue("ENCRYPTED_REQUEST");
+      const grant = { type: "device-link-grant", certificate: {}, identityPrivateKey: "RAW_B64", contacts: [] };
+      decryptMessage.mockResolvedValue(JSON.stringify(grant));
+      const adoptedPair = { privateKey: {}, publicKey: fakePublicKey("identity-pub") };
+      applyLinkGrant.mockResolvedValue({ identityKeyPair: adoptedPair, certificate: {}, contacts: [] });
+      fingerprint.mockResolvedValue("adopted-fp");
+
+      const channel = fakeChannel();
+      let captured;
+      startAsJoiner.mockImplementation((opts) => {
+        captured = opts;
+        return { __fakePc: true };
+      });
+
+      initApp(document);
+      document.getElementById("room-id").value = "room1";
+      document.getElementById("invite-token").value = "tok1";
+      document.getElementById("device-local-passphrase").value = "new device pass";
+      document.getElementById("btn-join-as-device").click();
+      await vi.waitFor(() => expect(startAsJoiner).toHaveBeenCalled());
+
+      expect(getOffer).toHaveBeenCalledWith("http://node.example/index.php", {
+        senderKey: expect.any(String),
+        roomId: "room1",
+        inviteToken: "tok1"
+      });
+
+      captured.onChannelOpen(channel);
+      await captured.onLocalAnswerReady({ type: "answer", sdp: "ANSWER_SDP" });
+
+      // Once both the channel and session key exist, the link request goes out encrypted.
+      await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith("ENCRYPTED_REQUEST"));
+      expect(createLinkRequest).toHaveBeenCalledWith(devicePair.publicKey);
+
+      // The primary's grant arrives; it must be applied with the local passphrase and OUR device key.
+      await captured.onMessage("ENCRYPTED_GRANT_PAYLOAD");
+      await vi.waitFor(() =>
+        expect(document.getElementById("device-link-status").textContent).toMatch(/приєднано/)
+      );
+      expect(applyLinkGrant).toHaveBeenCalledWith(grant, "new device pass", { devicePublicKey: devicePair.publicKey });
+      // The adopted identity becomes this device's active account.
+      expect(document.getElementById("pub-key-display").textContent).toBe("adopted-fp");
+      // The secret must not linger in the DOM afterwards.
+      expect(document.getElementById("device-local-passphrase").value).toBe("");
+    });
   });
 });
 
