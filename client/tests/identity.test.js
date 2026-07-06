@@ -6,7 +6,8 @@ import {
   importPrivateKeyRaw,
   fingerprint,
   exportEcdhPublicKeyForWire,
-  importEcdhPublicKeyFromWire
+  importEcdhPublicKeyFromWire,
+  derivePublicKeyFromPrivate
 } from "../js/identity.js";
 
 describe("generateIdentityKeyPair", () => {
@@ -79,6 +80,72 @@ describe("exportPrivateKeyRaw / importPrivateKeyRaw", () => {
       256
     );
     expect(new Uint8Array(secretFromRestored)).toEqual(new Uint8Array(secretFromOriginal));
+  });
+});
+
+describe("derivePublicKeyFromPrivate", () => {
+  it("recovers a usable ECDSA public key from only the private key (e.g. after restoring from a mnemonic/keyfile backup that stores just the private scalar)", async () => {
+    const original = await generateIdentityKeyPair();
+    const raw = await exportPrivateKeyRaw(original.privateKey);
+
+    // Simulate a real restore-from-backup: only raw private key bytes are
+    // available, no reference to the original keyPair/publicKey survives.
+    const restoredPrivateKey = await importPrivateKeyRaw(
+      raw,
+      { name: "ECDSA", namedCurve: "P-256" },
+      true // must be extractable to derive the public key via JWK export
+    );
+    const derivedPublicKey = await derivePublicKeyFromPrivate(restoredPrivateKey, {
+      name: "ECDSA",
+      namedCurve: "P-256"
+    });
+
+    const message = new TextEncoder().encode("derived-public-key-check");
+    const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, restoredPrivateKey, message);
+    const isValid = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, derivedPublicKey, signature, message);
+
+    expect(isValid).toBe(true);
+  });
+
+  it("produces a public key with the same fingerprint as the original", async () => {
+    const original = await generateIdentityKeyPair();
+    const raw = await exportPrivateKeyRaw(original.privateKey);
+    const restoredPrivateKey = await importPrivateKeyRaw(raw, { name: "ECDSA", namedCurve: "P-256" }, true);
+
+    const derivedPublicKey = await derivePublicKeyFromPrivate(restoredPrivateKey, {
+      name: "ECDSA",
+      namedCurve: "P-256"
+    });
+
+    expect(await fingerprint(derivedPublicKey)).toBe(await fingerprint(original.publicKey));
+  });
+
+  it("works for ECDH keys too, deriving a public key usable for shared-secret derivation", async () => {
+    const alice = await generateEcdhKeyPair();
+    const bob = await generateEcdhKeyPair();
+
+    const raw = await exportPrivateKeyRaw(alice.privateKey);
+    const restoredAlicePrivate = await importPrivateKeyRaw(raw, { name: "ECDH", namedCurve: "P-256" }, true);
+    const derivedAlicePublic = await derivePublicKeyFromPrivate(
+      restoredAlicePrivate,
+      { name: "ECDH", namedCurve: "P-256" },
+      []
+    );
+
+    const secretViaOriginal = await crypto.subtle.deriveBits({ name: "ECDH", public: alice.publicKey }, bob.privateKey, 256);
+    const secretViaDerived = await crypto.subtle.deriveBits({ name: "ECDH", public: derivedAlicePublic }, bob.privateKey, 256);
+
+    expect(new Uint8Array(secretViaDerived)).toEqual(new Uint8Array(secretViaOriginal));
+  });
+
+  it("throws a clear error if the private key isn't extractable", async () => {
+    const original = await generateIdentityKeyPair();
+    const raw = await exportPrivateKeyRaw(original.privateKey);
+    const nonExtractable = await importPrivateKeyRaw(raw, { name: "ECDSA", namedCurve: "P-256" }); // extractable defaults to false
+
+    await expect(
+      derivePublicKeyFromPrivate(nonExtractable, { name: "ECDSA", namedCurve: "P-256" })
+    ).rejects.toThrow(/extractable/i);
   });
 });
 
