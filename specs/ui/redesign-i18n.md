@@ -18,6 +18,6 @@
 
 ## Секція U3: Деплой і жива верифікація
 
-- [ ] **Tests**: —(деплой)
-- [ ] **Impl**: викладання на spirit.kibr.com.ua та spirit.kolo.media.
-- [ ] **Exec review**: жива перевірка (скриншоти light/dark/mobile у preview, HTTPS-контроль обох хостів).
+- [x] **Tests**: —(деплой)
+- [x] **Impl**: викладено на spirit.kibr.com.ua та spirit.kolo.media (index.html, css/style.css, усі js-модулі включно з новими i18n.js/theme.js).
+- [x] **Exec review**: жива перевірка — preview: light/dark, mobile 375px, DE/FR-локалізація, fingerprint виживає зміну мови; HTTPS-контроль обох хостів: css/i18n.js/theme.js — 200, нова розмітка (40 маркерів data-i18n/перемикачів), сигналінг живий (create_invite success).
