@@ -27,6 +27,8 @@ import { startAsInitiator, startAsJoiner, applyRemoteAnswer } from "./webrtc.js"
 import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer } from "./signalingClient.js";
 import { deriveSessionKey, encryptMessage, decryptMessage } from "./e2ee.js";
 import { promptGoogleSignIn, verifyGoogleIdToken } from "./googleOAuth.js";
+import { t, setLocale, detectLocale, applyTranslations, getLocale, SUPPORTED_LOCALES } from "./i18n.js";
+import { initTheme, toggleTheme } from "./theme.js";
 
 // Per-profile own device list record key in the "profile" store (Section 15:
 // multiple accounts each maintain their own list).
@@ -35,7 +37,32 @@ const ownDeviceListKey = (profileId) => `deviceList:${profileId}`;
 const DEFAULT_ICE_TIMEOUT_MS = 15000;
 const DEFAULT_ANSWER_WAIT_TIMEOUT_MS = 5 * 60 * 1000; // matches the signaling node's default session TTL
 
-export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWaitTimeoutMs = DEFAULT_ANSWER_WAIT_TIMEOUT_MS } = {}) {
+export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWaitTimeoutMs = DEFAULT_ANSWER_WAIT_TIMEOUT_MS, locale } = {}) {
+  // Locale: explicit option (tests) -> stored choice -> browser language.
+  setLocale(locale ?? detectLocale(typeof navigator !== "undefined" ? navigator.language : undefined));
+  initTheme(doc);
+  applyTranslations(doc);
+
+  const themeToggle = doc.getElementById("theme-toggle");
+  if (themeToggle) {
+    themeToggle.addEventListener("click", () => toggleTheme(doc));
+  }
+  const langSelect = doc.getElementById("lang-select");
+  if (langSelect) {
+    langSelect.innerHTML = "";
+    for (const code of SUPPORTED_LOCALES) {
+      const option = doc.createElement("option");
+      option.value = code;
+      option.textContent = code.toUpperCase();
+      langSelect.appendChild(option);
+    }
+    langSelect.value = getLocale();
+    langSelect.addEventListener("change", () => {
+      setLocale(langSelect.value);
+      applyTranslations(doc);
+    });
+  }
+
   const state = {
     identityKeyPair: null,
     senderKey: null,
@@ -54,8 +81,14 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
   };
 
   const el = (id) => doc.getElementById(id);
+  // Runtime values must survive language switches: the first dynamic write
+  // strips the element's data-i18n so applyTranslations stops touching it.
+  const setDynamicText = (element, text) => {
+    element.removeAttribute("data-i18n");
+    element.textContent = text;
+  };
   const setStatus = (text) => {
-    el("connection-status").textContent = text;
+    setDynamicText(el("connection-status"), text);
   };
   const setGoogleStatus = (text) => {
     el("google-verify-status").textContent = text;
@@ -67,7 +100,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
   function armIceTimeout() {
     let settled = false;
     const timeoutId = setTimeout(() => {
-      if (!settled) setStatus("не вдалося зібрати ICE-кандидати (тайм-аут)");
+      if (!settled) setStatus(t("status.iceTimeout"));
     }, iceTimeoutMs);
     return () => {
       settled = true;
@@ -96,7 +129,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
 
     if (!control) {
       if (!state.peerFingerprint) {
-        setStatus("вхідне повідомлення відхилено: identity співрозмовника не підтверджена");
+        setStatus(t("status.incomingRejected"));
         return;
       }
       appendChat(text);
@@ -117,7 +150,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
         state.sessionEcdhWires.peerEcdhWire
       );
       if (!verified) {
-        setStatus("⚠ не вдалося підтвердити identity співрозмовника");
+        setStatus(t("status.announceFailed"));
         return;
       }
       state.peerFingerprint = verified.fingerprint;
@@ -130,9 +163,9 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
           fingerprint: verified.fingerprint,
           identityPubkeyWire: verified.identityPubkeyWire
         });
-        continuity = status === "known" ? " (відомий контакт)" : " (новий контакт)";
+        continuity = status === "known" ? t("status.knownContact") : t("status.newContact");
       }
-      setStatus(`співрозмовник підтверджений: ${verified.fingerprint}${continuity}`);
+      setStatus(t("status.peerVerified", { fp: verified.fingerprint }) + continuity);
       // Known contact in profile mode: bring the prior conversation back
       // into the chat log before any new messages arrive.
       if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
@@ -183,7 +216,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
           );
         }
       } catch (err) {
-        setStatus(`помилка: ${err.message}`); // afterChannelOpen path is detached; nothing upstream catches
+        setStatus(t("status.error", { msg: err.message })); // afterChannelOpen path is detached; nothing upstream catches
       }
     };
   }
@@ -192,7 +225,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
     return {
       onChannelOpen: (channel) => {
         state.channel = channel;
-        setStatus("з'єднано");
+        setStatus(t("status.connected"));
         if (afterChannelOpen) afterChannelOpen();
       },
       onMessage: async (payload) => {
@@ -203,15 +236,15 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
         } catch (err) {
           // This callback runs detached from any button handler, so nothing
           // upstream can catch a rejection here.
-          setStatus(`помилка: ${err.message}`);
+          setStatus(t("status.error", { msg: err.message }));
         }
       },
-      onChannelClose: () => setStatus("з'єднання закрито"),
+      onChannelClose: () => setStatus(t("status.closed")),
       onError: (err) => {
         disarmIceTimeout(); // the local-description IIFE failed before onLocalOfferReady/onLocalAnswerReady
         // could ever fire to disarm it itself -- without this the stale ICE timeout
         // would later overwrite this real error with a misleading timeout message.
-        setStatus(`помилка: ${err.message}`);
+        setStatus(t("status.error", { msg: err.message }));
       }
     };
   }
@@ -253,7 +286,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
             ecdhPubkey
           });
 
-          setStatus("очікування відповіді співрозмовника...");
+          setStatus(t("status.waitingAnswer"));
           const answerWaitController = new AbortController();
           const answerWaitTimeoutId = setTimeout(() => answerWaitController.abort(), answerWaitTimeoutMs);
           let answer, peerEcdhPubkeyWire;
@@ -273,7 +306,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
           state.sessionKey = await deriveSessionKey(ecdhKeyPair.privateKey, peerEcdhPubkey);
           if (onSessionReady) await onSessionReady();
         } catch (err) {
-          setStatus(`помилка: ${err.message}`);
+          setStatus(t("status.error", { msg: err.message }));
         }
       }
     });
@@ -309,7 +342,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
           state.sessionKey = await deriveSessionKey(ecdhKeyPair.privateKey, peerEcdhPubkey);
           if (onSessionReady) await onSessionReady();
         } catch (err) {
-          setStatus(`помилка: ${err.message}`);
+          setStatus(t("status.error", { msg: err.message }));
         }
       }
     });
@@ -322,7 +355,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
       try {
         await handler();
       } catch (err) {
-        setStatus(`помилка: ${err.message}`);
+        setStatus(t("status.error", { msg: err.message }));
       } finally {
         button.disabled = false;
       }
@@ -332,7 +365,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
   el("btn-generate").addEventListener("click", async () => {
     state.identityKeyPair = await generateIdentityKeyPair();
     state.senderKey = await fingerprint(state.identityKeyPair.publicKey);
-    el("pub-key-display").textContent = state.senderKey;
+    setDynamicText(el("pub-key-display"), state.senderKey);
   });
 
   const setProfileStatus = (text) => {
@@ -349,7 +382,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
     for (const { id } of await listProfiles()) {
       const option = doc.createElement("option");
       option.value = id;
-      option.textContent = id === "identity" ? "профіль (стара версія)" : id.slice(0, 16) + "…";
+      option.textContent = id === "identity" ? t("profile.legacyOption") : id.slice(0, 16) + "…";
       select.appendChild(option);
     }
   }
@@ -359,12 +392,12 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
   withBusyButton(el("btn-profile-unlock"), async () => {
     const passphrase = el("unlock-passphrase").value;
     if (!passphrase) {
-      setProfileStatus("вкажіть passphrase профілю");
+      setProfileStatus(t("unlock.needPassphrase"));
       return;
     }
     const selectedId = el("profile-select").value;
     if (!selectedId) {
-      setProfileStatus("немає збереженого профілю");
+      setProfileStatus(t("unlock.noProfiles"));
       return;
     }
     try {
@@ -372,7 +405,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
       el("unlock-passphrase").value = "";
       state.identityKeyPair = profile;
       state.senderKey = profile.profileId;
-      el("pub-key-display").textContent = state.senderKey;
+      setDynamicText(el("pub-key-display"), state.senderKey);
       setProfileStatus("");
       // A legacy record migrates on unlock -- its id changes to the fingerprint.
       await refreshProfileSelector();
@@ -384,14 +417,14 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
   withBusyButton(el("btn-profile-confirm"), async () => {
     const passphrase = el("profile-passphrase").value;
     if (!passphrase) {
-      setProfileStatus("вкажіть passphrase для профілю");
+      setProfileStatus(t("profile.needPassphrase"));
       return;
     }
     state.identityKeyPair = await createPermanentProfile(passphrase);
     // Don't keep the secret sitting in a DOM input after it's been used.
     el("profile-passphrase").value = "";
     state.senderKey = await fingerprint(state.identityKeyPair.publicKey);
-    el("pub-key-display").textContent = state.senderKey;
+    setDynamicText(el("pub-key-display"), state.senderKey);
     setProfileStatus("");
     el("backup-step").hidden = false;
     await refreshProfileSelector();
@@ -406,7 +439,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
   withBusyButton(el("btn-backup-keyfile"), async () => {
     const keyfilePassphrase = el("keyfile-passphrase").value;
     if (!keyfilePassphrase) {
-      setProfileStatus("вкажіть passphrase для keyfile");
+      setProfileStatus(t("profile.needKeyfilePassphrase"));
       return;
     }
     const rawPrivateKey = await exportPrivateKeyRaw(state.identityKeyPair.privateKey);
@@ -422,12 +455,12 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
 
   withBusyButton(el("btn-google-verify"), async () => {
     if (!state.senderKey) {
-      setGoogleStatus("спочатку створіть акаунт");
+      setGoogleStatus(t("status.createAccountFirst"));
       return;
     }
     const clientId = el("google-client-id").value;
     if (!clientId) {
-      setGoogleStatus("вкажіть Google Client ID");
+      setGoogleStatus(t("google.needClientId"));
       return;
     }
     // Snapshotted once so the nonce used to start the Google prompt and the
@@ -441,15 +474,15 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
       // (docs/oauth-verification.md).
       const idToken = await promptGoogleSignIn({ clientId, nonce: senderKey });
       const claims = await verifyGoogleIdToken(idToken, { expectedNonce: senderKey, expectedAudience: clientId });
-      setGoogleStatus(`Підтверджено через Google: ${claims.email}`);
+      setGoogleStatus(t("google.verified", { email: claims.email }));
     } catch (err) {
-      setGoogleStatus(`помилка: ${err.message}`);
+      setGoogleStatus(t("status.error", { msg: err.message }));
     }
   });
 
   withBusyButton(el("btn-initiate"), async () => {
     if (!state.senderKey) {
-      setStatus("спочатку створіть акаунт");
+      setStatus(t("status.createAccountFirst"));
       return;
     }
     const serverUrl = el("server-url").value;
@@ -478,7 +511,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
 
   withBusyButton(el("btn-join"), async () => {
     if (!state.senderKey) {
-      setStatus("спочатку створіть акаунт");
+      setStatus(t("status.createAccountFirst"));
       return;
     }
     state.peerFingerprint = null;
@@ -502,11 +535,11 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
   withBusyButton(el("btn-link-device"), async () => {
     const passphrase = el("link-passphrase").value;
     if (!passphrase) {
-      setDeviceLinkStatus("вкажіть passphrase профілю");
+      setDeviceLinkStatus(t("unlock.needPassphrase"));
       return;
     }
     if (!state.senderKey) {
-      setDeviceLinkStatus("спочатку створіть або розблокуйте профіль");
+      setDeviceLinkStatus(t("link.needProfile"));
       return;
     }
     // The active profile id is the identity fingerprint (= senderKey).
@@ -524,7 +557,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
     const { roomId, inviteToken } = await createInvite(serverUrl, senderKey);
     el("room-id").value = roomId;
     el("invite-token").value = inviteToken;
-    setDeviceLinkStatus("передайте Room ID та invite token на новий пристрій...");
+    setDeviceLinkStatus(t("link.shareRoom"));
 
     startInitiatorSession({
       senderKey,
@@ -551,7 +584,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
           const currentOwnList = (await get("profile", ownDeviceListKey(activeProfileId))) ?? null;
           const updatedOwnList = await appendDeviceToList(identityRaw, currentOwnList, grant.certificate);
           await put("profile", ownDeviceListKey(activeProfileId), updatedOwnList);
-          setDeviceLinkStatus("пристрій прив'язано");
+          setDeviceLinkStatus(t("link.done"));
         }
       }
     });
@@ -560,7 +593,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
   withBusyButton(el("btn-join-as-device"), async () => {
     const localPassphrase = el("device-local-passphrase").value;
     if (!localPassphrase) {
-      setDeviceLinkStatus("вкажіть passphrase для цього пристрою");
+      setDeviceLinkStatus(t("device.needPassphrase"));
       return;
     }
 
@@ -574,7 +607,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
       linkRequestSent = true;
       const request = await createLinkRequest(devicePair.publicKey);
       state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify(request)));
-      setDeviceLinkStatus("очікування підтвердження від основного пристрою...");
+      setDeviceLinkStatus(t("device.waitingGrant"));
     };
 
     await startJoinerSession({
@@ -601,8 +634,8 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
           el("device-local-passphrase").value = "";
           state.identityKeyPair = identityKeyPair;
           state.senderKey = await fingerprint(identityKeyPair.publicKey);
-          el("pub-key-display").textContent = state.senderKey;
-          setDeviceLinkStatus("пристрій приєднано");
+          setDynamicText(el("pub-key-display"), state.senderKey);
+          setDeviceLinkStatus(t("device.done"));
         }
       }
     });
@@ -610,7 +643,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
 
   el("btn-send").addEventListener("click", async () => {
     if (!state.channel || !state.sessionKey) {
-      setStatus("немає активного з'єднання");
+      setStatus(t("status.noActiveConnection"));
       return;
     }
     const text = el("message-input").value;

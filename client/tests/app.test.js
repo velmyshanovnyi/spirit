@@ -101,7 +101,7 @@ import { initApp } from "../js/app.js";
 const HTML = `
   <button id="btn-generate" type="button">Швидкий чат</button>
   <button id="btn-create-profile" type="button">Створити профіль</button>
-  <div>Ваш ID: <span id="pub-key-display">не згенеровано</span></div>
+  <div>Ваш ID: <span id="pub-key-display" data-i18n="id.none">не згенеровано</span></div>
   <div id="profile-setup" hidden>
     <input id="profile-passphrase" type="password">
     <button id="btn-profile-confirm" type="button">Створити</button>
@@ -116,6 +116,9 @@ const HTML = `
     <div id="keyfile-display"></div>
   </div>
   <div id="backup-reminder" hidden>Ви не зробили резервну копію ключа</div>
+  <button id="theme-toggle" type="button"></button>
+  <select id="lang-select"></select>
+  <h2 id="account-heading" data-i18n="section.account"></h2>
   <select id="profile-select"></select>
   <input id="unlock-passphrase" type="password">
   <button id="btn-profile-unlock" type="button">Розблокувати</button>
@@ -133,7 +136,7 @@ const HTML = `
   <input id="invite-token" type="text">
   <button id="btn-initiate" type="button">Ініціювати чат</button>
   <button id="btn-join" type="button">Приєднатися до чату</button>
-  <div id="connection-status">не з'єднано</div>
+  <div id="connection-status" data-i18n="conn.none">не з'єднано</div>
   <div id="chat-log"></div>
   <input id="message-input" type="text">
   <button id="btn-send" type="button">Надіслати</button>
@@ -158,7 +161,7 @@ describe("btn-generate", () => {
     generateIdentityKeyPair.mockResolvedValue(keyPair);
     fingerprint.mockResolvedValue("deadbeef");
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => {
       expect(document.getElementById("pub-key-display").textContent).toBe("deadbeef");
@@ -169,11 +172,57 @@ describe("btn-generate", () => {
   });
 });
 
+describe("theme and language switchers (Section U2)", () => {
+  it("initializes a theme on the document and the toggle flips it", async () => {
+    initApp(document, { locale: "uk" });
+
+    const initial = document.documentElement.dataset.theme;
+    expect(["light", "dark"]).toContain(initial);
+
+    document.getElementById("theme-toggle").click();
+    expect(document.documentElement.dataset.theme).toBe(initial === "dark" ? "light" : "dark");
+  });
+
+  it("populates the language selector and switching re-translates static texts", async () => {
+    initApp(document, { locale: "uk" });
+
+    expect(document.getElementById("account-heading").textContent).toBe("Акаунт");
+    const langSelect = document.getElementById("lang-select");
+    expect(langSelect.options.length).toBe(11);
+    expect(langSelect.value).toBe("uk");
+
+    langSelect.value = "en";
+    langSelect.dispatchEvent(new Event("change"));
+    expect(document.getElementById("account-heading").textContent).toBe("Account");
+
+    langSelect.value = "de";
+    langSelect.dispatchEvent(new Event("change"));
+    expect(document.getElementById("account-heading").textContent).toBe("Konto");
+  });
+
+  it("a language switch must NOT clobber runtime content (fingerprint, live status)", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("live-fingerprint");
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("live-fingerprint"));
+
+    const langSelect = document.getElementById("lang-select");
+    langSelect.value = "en";
+    langSelect.dispatchEvent(new Event("change"));
+
+    // Static text re-translated, runtime values untouched.
+    expect(document.getElementById("account-heading").textContent).toBe("Account");
+    expect(document.getElementById("pub-key-display").textContent).toBe("live-fingerprint");
+  });
+});
+
 describe("profile selector and unlock (Section 15)", () => {
   it("populates the selector with stored profiles on init", async () => {
     listProfiles.mockResolvedValue([{ id: "a".repeat(64) }, { id: "identity" }]);
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
 
     await vi.waitFor(() => {
       const options = [...document.getElementById("profile-select").options].map((o) => o.value);
@@ -191,7 +240,7 @@ describe("profile selector and unlock (Section 15)", () => {
     });
     fingerprint.mockResolvedValue("f".repeat(64));
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     await vi.waitFor(() => expect(document.getElementById("profile-select").options.length).toBe(1));
     document.getElementById("unlock-passphrase").value = "my pass";
     document.getElementById("btn-profile-unlock").click();
@@ -207,7 +256,7 @@ describe("profile selector and unlock (Section 15)", () => {
   it("refuses to unlock with an empty passphrase", async () => {
     listProfiles.mockResolvedValue([{ id: "identity" }]);
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     await vi.waitFor(() => expect(document.getElementById("profile-select").options.length).toBe(1));
     document.getElementById("btn-profile-unlock").click();
 
@@ -221,7 +270,7 @@ describe("profile selector and unlock (Section 15)", () => {
     listProfiles.mockResolvedValue([{ id: "identity" }]);
     loadPermanentProfile.mockRejectedValue(new Error("Incorrect passphrase or corrupted data"));
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     await vi.waitFor(() => expect(document.getElementById("profile-select").options.length).toBe(1));
     document.getElementById("unlock-passphrase").value = "wrong";
     document.getElementById("btn-profile-unlock").click();
@@ -242,7 +291,7 @@ describe("permanent profile creation UI", () => {
 
   async function createProfileThroughUi() {
     const keyPair = setupCreatedProfile();
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-create-profile").click();
     document.getElementById("profile-passphrase").value = "my local passphrase";
     document.getElementById("btn-profile-confirm").click();
@@ -251,7 +300,7 @@ describe("permanent profile creation UI", () => {
   }
 
   it("reveals the passphrase step on 'Створити профіль' without creating anything yet", () => {
-    initApp(document);
+    initApp(document, { locale: "uk" });
     expect(document.getElementById("profile-setup").hidden).toBe(true);
 
     document.getElementById("btn-create-profile").click();
@@ -261,7 +310,7 @@ describe("permanent profile creation UI", () => {
   });
 
   it("refuses to create a profile with an empty passphrase", async () => {
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-create-profile").click();
     document.getElementById("btn-profile-confirm").click();
 
@@ -334,7 +383,7 @@ describe("permanent profile creation UI", () => {
     generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
     fingerprint.mockResolvedValue("deadbeef");
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("deadbeef"));
 
@@ -347,7 +396,7 @@ describe("permanent profile creation UI", () => {
 
 describe("btn-google-verify", () => {
   it("refuses to start Google verification before an account exists", async () => {
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-google-verify").click();
     await vi.waitFor(() =>
       expect(document.getElementById("google-verify-status").textContent).toMatch(/спочатку створіть акаунт/)
@@ -361,7 +410,7 @@ describe("btn-google-verify", () => {
     promptGoogleSignIn.mockResolvedValue("FAKE_ID_TOKEN");
     verifyGoogleIdToken.mockResolvedValue({ sub: "123", email: "user@gmail.com", emailVerified: true });
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
 
@@ -383,7 +432,7 @@ describe("btn-google-verify", () => {
     promptGoogleSignIn.mockResolvedValue("FAKE_ID_TOKEN");
     verifyGoogleIdToken.mockRejectedValue(new Error("Nonce mismatch: token was not issued for this identity key"));
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
 
@@ -397,7 +446,7 @@ describe("btn-google-verify", () => {
     generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
     fingerprint.mockResolvedValue("sender-fp");
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
     document.getElementById("google-client-id").value = "";
@@ -412,7 +461,7 @@ describe("btn-google-verify", () => {
 
 describe("btn-initiate", () => {
   it("refuses to start a handshake before an account exists, instead of sending sender_key=null", async () => {
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-initiate").click();
     await vi.waitFor(() =>
       expect(document.getElementById("connection-status").textContent).toMatch(/спочатку створіть акаунт/)
@@ -426,7 +475,7 @@ describe("btn-initiate", () => {
     generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
     createInvite.mockRejectedValue(new Error("Access Denied: Public key not in white-list"));
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
 
@@ -448,7 +497,7 @@ describe("btn-initiate", () => {
       })
     );
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
 
@@ -478,7 +527,7 @@ describe("btn-initiate", () => {
       return { __fakePc: true };
     });
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
 
@@ -516,7 +565,7 @@ describe("btn-initiate", () => {
       return fakePc;
     });
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
     document.getElementById("btn-initiate").click();
@@ -541,7 +590,7 @@ describe("btn-initiate", () => {
       return { __fakePc: true };
     });
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
     document.getElementById("btn-initiate").click();
@@ -571,7 +620,7 @@ describe("btn-initiate", () => {
         return { __fakePc: true }; // onLocalOfferReady deliberately never invoked in this test
       });
 
-      initApp(document, { iceTimeoutMs: 5000 });
+      initApp(document, { locale: "uk", iceTimeoutMs: 5000 });
       document.getElementById("btn-generate").click();
       await vi.advanceTimersByTimeAsync(0);
       document.getElementById("btn-initiate").click();
@@ -593,7 +642,7 @@ describe("btn-initiate", () => {
 
 describe("btn-join", () => {
   it("refuses to join before an account exists, instead of sending sender_key=null", async () => {
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-join").click();
     await vi.waitFor(() =>
       expect(document.getElementById("connection-status").textContent).toMatch(/спочатку створіть акаунт/)
@@ -614,7 +663,7 @@ describe("btn-join", () => {
       return { __fakePc: true };
     });
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
     document.getElementById("room-id").value = "room1";
@@ -646,7 +695,7 @@ describe("btn-join", () => {
 
 describe("btn-send", () => {
   it("refuses to send before a session key exists, instead of throwing", async () => {
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("message-input").value = "привіт";
     document.getElementById("btn-send").click();
     await vi.waitFor(() =>
@@ -675,7 +724,7 @@ describe("btn-send", () => {
       return { __fakePc: true };
     });
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
     document.getElementById("btn-initiate").click();
@@ -719,7 +768,7 @@ describe("identity announce in chat flows (Section 12)", () => {
       return { __fakePc: true };
     });
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
     document.getElementById("btn-initiate").click();
@@ -851,7 +900,7 @@ describe("identity announce in chat flows (Section 12)", () => {
       return { __fakePc: true };
     });
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-create-profile").click();
     document.getElementById("profile-passphrase").value = "pass";
     document.getElementById("btn-profile-confirm").click();
@@ -896,7 +945,7 @@ describe("device-list transport (Section 13)", () => {
       return { __fakePc: true };
     });
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
     document.getElementById("btn-initiate").click();
@@ -963,7 +1012,7 @@ describe("device-list transport (Section 13)", () => {
       return { __fakePc: true };
     });
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-create-profile").click();
     document.getElementById("profile-passphrase").value = "pass";
     document.getElementById("btn-profile-confirm").click();
@@ -1030,7 +1079,7 @@ describe("device-list transport (Section 13)", () => {
       return { __fakePc: true };
     });
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-create-profile").click();
     document.getElementById("profile-passphrase").value = "pass";
     document.getElementById("btn-profile-confirm").click();
@@ -1084,7 +1133,7 @@ describe("chat history wiring (Section 14)", () => {
       return { __fakePc: true };
     });
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-create-profile").click();
     document.getElementById("profile-passphrase").value = "pass";
     document.getElementById("btn-profile-confirm").click();
@@ -1173,7 +1222,7 @@ describe("chat history wiring (Section 14)", () => {
       return { __fakePc: true };
     });
 
-    initApp(document);
+    initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
     document.getElementById("btn-initiate").click();
@@ -1201,7 +1250,7 @@ describe("chat history wiring (Section 14)", () => {
 describe("device linking UI", () => {
   describe("btn-link-device (primary device)", () => {
     it("requires the profile passphrase before starting", async () => {
-      initApp(document);
+      initApp(document, { locale: "uk" });
       document.getElementById("btn-link-device").click();
       await vi.waitFor(() =>
         expect(document.getElementById("device-link-status").textContent).toMatch(/passphrase/i)
@@ -1211,7 +1260,7 @@ describe("device linking UI", () => {
     });
 
     it("refuses to link before an active profile exists", async () => {
-      initApp(document);
+      initApp(document, { locale: "uk" });
       document.getElementById("link-passphrase").value = "some passphrase";
       document.getElementById("btn-link-device").click();
       await vi.waitFor(() =>
@@ -1250,7 +1299,7 @@ describe("device linking UI", () => {
         return { __fakePc: true };
       });
 
-      initApp(document);
+      initApp(document, { locale: "uk" });
       document.getElementById("btn-create-profile").click();
       document.getElementById("profile-passphrase").value = "pass";
       document.getElementById("btn-profile-confirm").click();
@@ -1280,7 +1329,7 @@ describe("device linking UI", () => {
 
   describe("btn-join-as-device (new device)", () => {
     it("requires a local passphrase for the adopted profile", async () => {
-      initApp(document);
+      initApp(document, { locale: "uk" });
       document.getElementById("btn-join-as-device").click();
       await vi.waitFor(() =>
         expect(document.getElementById("device-link-status").textContent).toMatch(/passphrase/i)
@@ -1311,7 +1360,7 @@ describe("device linking UI", () => {
         return { __fakePc: true };
       });
 
-      initApp(document);
+      initApp(document, { locale: "uk" });
       document.getElementById("room-id").value = "room1";
       document.getElementById("invite-token").value = "tok1";
       document.getElementById("device-local-passphrase").value = "new device pass";
@@ -1360,7 +1409,7 @@ describe("ICE gathering timeout", () => {
     createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
     startAsInitiator.mockImplementation(() => ({ __fakePc: true })); // onLocalOfferReady never called
 
-    initApp(document, { iceTimeoutMs: 5000 });
+    initApp(document, { locale: "uk", iceTimeoutMs: 5000 });
     document.getElementById("btn-generate").click();
     await vi.advanceTimersByTimeAsync(0);
     document.getElementById("btn-initiate").click();
@@ -1387,7 +1436,7 @@ describe("ICE gathering timeout", () => {
       return { __fakePc: true };
     });
 
-    initApp(document, { iceTimeoutMs: 5000 });
+    initApp(document, { locale: "uk", iceTimeoutMs: 5000 });
     document.getElementById("btn-generate").click();
     await vi.advanceTimersByTimeAsync(0);
     document.getElementById("btn-initiate").click();
