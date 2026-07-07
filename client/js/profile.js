@@ -25,6 +25,7 @@ async function persistRawIdentity(rawPrivateKey, passphrase) {
     salt: bytesToBase64(salt),
     encryptedPrivateKey
   });
+  return vaultKey;
 }
 
 async function reconstructKeyPairFromRaw(rawPrivateKey) {
@@ -53,8 +54,10 @@ async function reconstructKeyPairFromRaw(rawPrivateKey) {
 export async function createPermanentProfile(passphrase) {
   const keyPair = await generateIdentityKeyPair();
   const rawPrivateKey = await exportPrivateKeyRaw(keyPair.privateKey);
-  await persistRawIdentity(rawPrivateKey, passphrase);
-  return keyPair;
+  const vaultKey = await persistRawIdentity(rawPrivateKey, passphrase);
+  // vaultKey stays available for the session: message history (historyStore.js)
+  // is encrypted with it. The CryptoKey itself is non-extractable.
+  return { ...keyPair, vaultKey };
 }
 
 /**
@@ -68,7 +71,9 @@ export async function createPermanentProfile(passphrase) {
  *         AES-GCM layer by design (distinguishing them would be an oracle).
  */
 export async function loadPermanentProfile(passphrase) {
-  return reconstructKeyPairFromRaw(await decryptStoredRawIdentity(passphrase));
+  const { rawPrivateKey, vaultKey } = await decryptStoredRawIdentity(passphrase);
+  const keyPair = await reconstructKeyPairFromRaw(rawPrivateKey);
+  return { ...keyPair, vaultKey };
 }
 
 async function decryptStoredRawIdentity(passphrase) {
@@ -81,7 +86,7 @@ async function decryptStoredRawIdentity(passphrase) {
   const vaultKey = await deriveVaultKey(passphrase, salt);
 
   try {
-    return await decryptForVault(vaultKey, record.encryptedPrivateKey);
+    return { rawPrivateKey: await decryptForVault(vaultKey, record.encryptedPrivateKey), vaultKey };
   } catch {
     throw new IncorrectPassphraseError();
   }
@@ -98,7 +103,8 @@ async function decryptStoredRawIdentity(passphrase) {
  * @throws {NoStoredProfileError} / {IncorrectPassphraseError} as loadPermanentProfile.
  */
 export async function exportRawIdentity(passphrase) {
-  return decryptStoredRawIdentity(passphrase);
+  const { rawPrivateKey } = await decryptStoredRawIdentity(passphrase);
+  return rawPrivateKey;
 }
 
 /**

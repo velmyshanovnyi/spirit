@@ -13,6 +13,7 @@ import {
 import { get } from "../js/db.js";
 import { exportPrivateKeyRaw, exportPrivateKeyScalar } from "../js/identity.js";
 import { bytesToBase64 } from "../js/codec.js";
+import { encryptForVault, decryptForVault } from "../js/vault.js";
 import { bytesToMnemonic } from "../js/mnemonic.js";
 import { createKeyfile } from "../js/keyfile.js";
 
@@ -83,6 +84,27 @@ describe("loadPermanentProfile", () => {
 
   it("throws a clear error when no profile has been stored yet", async () => {
     await expect(loadPermanentProfile("anything")).rejects.toThrow(NoStoredProfileError);
+  });
+});
+
+describe("session vault key (history encryption, Section 11)", () => {
+  it("createPermanentProfile returns a usable vaultKey alongside the key pair", async () => {
+    const profile = await createPermanentProfile("my passphrase");
+
+    expect(profile.vaultKey).toBeDefined();
+    const plaintext = new TextEncoder().encode("history record");
+    const ciphertext = await encryptForVault(profile.vaultKey, plaintext);
+    expect(new Uint8Array(await decryptForVault(profile.vaultKey, ciphertext))).toEqual(new Uint8Array(plaintext));
+  });
+
+  it("loadPermanentProfile returns the SAME vault key material (can decrypt what create's key encrypted)", async () => {
+    const created = await createPermanentProfile("my passphrase");
+    const plaintext = new TextEncoder().encode("written at create time");
+    const ciphertext = await encryptForVault(created.vaultKey, plaintext);
+
+    const loaded = await loadPermanentProfile("my passphrase");
+
+    expect(new Uint8Array(await decryptForVault(loaded.vaultKey, ciphertext))).toEqual(new Uint8Array(plaintext));
   });
 });
 

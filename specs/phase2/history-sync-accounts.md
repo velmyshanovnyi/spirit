@@ -12,9 +12,9 @@
 
 ## Секція 11: Vault-сесія та зашифроване сховище історії
 
-- [ ] **Tests**: `client/tests/historyStore.test.js` (fake-indexeddb, реальна крипто) — `appendMessage(vaultKey, contactId, {direction, text, timestamp})` пише запис, `text` у db відсутній у відкритому вигляді; `listMessages(vaultKey, contactId)` повертає повідомлення в хронологічному порядку, розшифровані; повідомлення різних контактів не змішуються; невірний vault-ключ → помилка розшифровки, не сміття. `client/tests/profile.test.js` (доповнення) — `createPermanentProfile`/`loadPermanentProfile` повертають також `vaultKey` (CryptoKey, non-extractable), придатний для `encryptForVault`/`decryptForVault`.
-- [ ] **Impl**: `client/js/historyStore.js` (новий) — ключ запису `<contactId>:<timestamp>:<seq>`, значення — AES-GCM ciphertext серіалізованого повідомлення; `client/js/profile.js` — повернення `vaultKey` поруч із keyPair (без зміни збереженого формату).
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/historyStore.test.js` (7 тестів, fake-indexeddb, реальна крипто) — `appendMessage` пише запис без plaintext у db (probe і по значенню, і по ключу); `listMessages` — хронологічний порядок навіть при записі не по порядку, включно з пасткою лексикографічного сортування "999 vs 1000"; ізоляція контактів; два повідомлення в одну мілісекунду не перезаписуються; невірний vault-ключ → throw, не сміття; порожня історія → `[]`. `client/tests/profile.test.js` (доповнення, 2 тести) — `createPermanentProfile`/`loadPermanentProfile` повертають `vaultKey`; ключ від load розшифровує зашифроване ключем від create (той самий матеріал).
+- [x] **Impl**: `client/js/historyStore.js` (новий) — ключ запису `<contactId>:<timestamp zero-pad 16>:<4 випадкові байти>`, значення — AES-GCM ciphertext серіалізованого повідомлення; `client/js/profile.js` — `persistRawIdentity` повертає vaultKey, `create`/`load` повертають `{...keyPair, vaultKey}` (spread зберігає сумісність з наявними споживачами), спільний `decryptStoredRawIdentity` повертає обидва.
+- [x] **Exec review**: 1 ітерація, конвергенція — [iter1](../reviews/phase2-section-11-history-iter1.md). **Перенесено до Секції 14 (обов'язково)**: `adoptIdentity`/`restoreProfileFrom*` відкидають vaultKey — після link/restore сесія лишається без нього, дротування історії мусить це закрити.
 
 ## Секція 12: Автентифікований identity-announce у хендшейку
 
