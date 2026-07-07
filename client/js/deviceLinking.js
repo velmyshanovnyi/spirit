@@ -202,6 +202,19 @@ export async function acceptNewerDeviceList(identityPublicKey, current, incoming
 }
 
 /**
+ * Adds a newly-certified device to the own signed device list (or starts a
+ * version-1 list if none exists yet). Takes RAW identity bytes for the same
+ * reason as createLinkGrant: the primary's linking flow already holds them,
+ * and a loaded profile's CryptoKey is non-extractable.
+ */
+export async function appendDeviceToList(identityRawPrivateKey, currentList, certificate) {
+  const identityPrivateKey = await importPrivateKeyRaw(identityRawPrivateKey, IDENTITY_ALGORITHM, false);
+  const certificates = [...(currentList ? currentList.certificates : []), certificate];
+  const version = (currentList ? currentList.version : 0) + 1;
+  return signDeviceList(identityPrivateKey, certificates, { version });
+}
+
+/**
  * First message of the linking handshake, sent by the NEW device over the
  * already-established E2EE channel: announces the device public key the
  * primary should certify. Possession of the invite token (shared

@@ -10,10 +10,19 @@ import {
 import { createPermanentProfile, exportRawIdentity } from "./profile.js";
 import { bytesToMnemonic } from "./mnemonic.js";
 import { createKeyfile } from "./keyfile.js";
-import { generateDeviceKeyPair, createLinkRequest, createLinkGrant, applyLinkGrant } from "./deviceLinking.js";
-import { listKeys, get } from "./db.js";
+import {
+  generateDeviceKeyPair,
+  createLinkRequest,
+  createLinkGrant,
+  applyLinkGrant,
+  appendDeviceToList,
+  acceptNewerDeviceList
+} from "./deviceLinking.js";
+import { listKeys, get, put } from "./db.js";
 import { createIdentityAnnounce, verifyIdentityAnnounce } from "./identityAnnounce.js";
-import { rememberContact } from "./contacts.js";
+import { rememberContact, getContact, updateContactDeviceList } from "./contacts.js";
+
+const OWN_DEVICE_LIST_KEY = "deviceList";
 import { startAsInitiator, startAsJoiner, applyRemoteAnswer } from "./webrtc.js";
 import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer } from "./signalingClient.js";
 import { deriveSessionKey, encryptMessage, decryptMessage } from "./e2ee.js";
@@ -34,7 +43,10 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
     sessionEcdhWires: null,
     // Fingerprint of the peer's VERIFIED identity (null until a valid
     // announce arrives; incoming chat text is refused while null).
-    peerFingerprint: null
+    peerFingerprint: null,
+    // The verified peer identity key -- device-list announces are checked
+    // against it (Section 13).
+    peerIdentityPublicKey: null
   };
 
   const el = (id) => doc.getElementById(id);
@@ -98,6 +110,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
         return;
       }
       state.peerFingerprint = verified.fingerprint;
+      state.peerIdentityPublicKey = verified.identityPublicKey;
       let continuity = "";
       // Persist the contact only in permanent-profile mode (the vault key's
       // presence is what distinguishes it) -- ephemeral sessions store nothing.
@@ -109,6 +122,19 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
         continuity = status === "known" ? " (відомий контакт)" : " (новий контакт)";
       }
       setStatus(`співрозмовник підтверджений: ${verified.fingerprint}${continuity}`);
+      return;
+    }
+
+    if (control.type === "device-list-announce") {
+      // Meaningless before the peer proved its identity (nothing to verify
+      // the list against), and pointless in ephemeral mode (nothing persists).
+      if (!state.peerFingerprint || !state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
+      const contact = await getContact(state.peerFingerprint);
+      const heldList = contact ? contact.deviceList : null;
+      const accepted = await acceptNewerDeviceList(state.peerIdentityPublicKey, heldList, control.list);
+      if (accepted !== heldList) {
+        await updateContactDeviceList(state.peerFingerprint, accepted);
+      }
     }
   }
 
@@ -129,6 +155,14 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
           state.sessionEcdhWires.peerEcdhWire
         );
         state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify(announce)));
+        // Follow up with the own device list, if this profile maintains one --
+        // the peer verifies it against the identity just announced.
+        const ownDeviceList = await get("profile", OWN_DEVICE_LIST_KEY);
+        if (ownDeviceList) {
+          state.channel.send(
+            await encryptMessage(state.sessionKey, JSON.stringify({ type: "device-list-announce", list: ownDeviceList }))
+          );
+        }
       } catch (err) {
         setStatus(`помилка: ${err.message}`); // afterChannelOpen path is detached; nothing upstream catches
       }
@@ -448,6 +482,11 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
           const contacts = await snapshotContacts();
           const grant = await createLinkGrant(identityRaw, message, { contacts });
           state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify(grant)));
+          // Record the new device in the own signed device list (Section 13):
+          // contacts receiving the updated list will accept the new device.
+          const currentOwnList = (await get("profile", OWN_DEVICE_LIST_KEY)) ?? null;
+          const updatedOwnList = await appendDeviceToList(identityRaw, currentOwnList, grant.certificate);
+          await put("profile", OWN_DEVICE_LIST_KEY, updatedOwnList);
           setDeviceLinkStatus("пристрій прив'язано");
         }
       }

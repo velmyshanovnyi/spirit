@@ -24,9 +24,9 @@
 
 ## Секція 13: Транспорт device-списку контактам
 
-- [ ] **Tests**: `client/tests/app.test.js`/`contacts.test.js` (доповнення) — після identity-announce сторона з наявним device-списком надсилає `device-list-announce`; отримувач застосовує `acceptNewerDeviceList` проти identity-ключа контакта і зберігає результат у записі контакта; replay старішого списку не понижує збережений.
-- [ ] **Impl**: `client/js/app.js` (доповнення), `client/js/contacts.js` (доповнення) — зберігання/оновлення `deviceList` контакта.
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/app.test.js` (доповнення, 5 тестів) — device-list-announce надсилається одразу після identity-announce лише коли власний список існує; вхідний список застосовується через `acceptNewerDeviceList` проти identity-ключа контакта з seed зі збереженого списку і персиститься; список до identity-announce ігнорується; primary link-флоу додає новий сертифікат до власного збереженого списку. `client/tests/contacts.test.js` (доповнення, 2) — `updateContactDeviceList` зберігає, кидає для невідомого контакта. `client/tests/deviceLinking.test.js` (доповнення, 1) — `appendDeviceToList` v1 з нуля та v+1 з наявного, обидва верифікуються.
+- [x] **Impl**: `client/js/deviceLinking.js` — `appendDeviceToList` (сирі identity-байти, як createLinkGrant); `client/js/contacts.js` — `updateContactDeviceList` (чисте сховище, без orphan-записів); `client/js/app.js` — надсилання власного списку в announcer-і, обробка вхідного в `handleChatMessage` (гейт на верифіковану identity + профільний режим; reference-equality як сигнал "без змін"), оновлення власного списку в btn-link-device.
+- [x] **Exec review**: 1 ітерація, конвергенція без правок — [iter1](../reviews/phase2-section-13-devicelist-transport-iter1.md).
 
 ## Секція 14: Дротування історії в чат-UI
 

@@ -12,7 +12,8 @@ import {
   verifyDeviceList,
   revokeDevice,
   isDeviceCertificateAllowed,
-  acceptNewerDeviceList
+  acceptNewerDeviceList,
+  appendDeviceToList
 } from "../js/deviceLinking.js";
 import { hasStoredProfile, loadPermanentProfile } from "../js/profile.js";
 import { get } from "../js/db.js";
@@ -313,6 +314,25 @@ describe("versioned device list: sign / verify / revoke / membership / monotonic
   it("acceptNewerDeviceList accepts a first verified list when none is held yet", async () => {
     const { identity, list } = await listSetup();
     expect(await acceptNewerDeviceList(identity.publicKey, null, list)).toEqual(list);
+  });
+
+  it("appendDeviceToList starts a version-1 list from nothing and appends with version+1 (raw identity bytes)", async () => {
+    const identity = await generateIdentityKeyPair();
+    const identityRaw = new Uint8Array(await exportPrivateKeyRaw(identity.privateKey));
+    const deviceA = await generateDeviceKeyPair();
+    const deviceB = await generateDeviceKeyPair();
+    const certA = await signDeviceCertificate(identity.privateKey, deviceA.publicKey);
+    const certB = await signDeviceCertificate(identity.privateKey, deviceB.publicKey);
+
+    const first = await appendDeviceToList(identityRaw, null, certA);
+    expect(first.version).toBe(1);
+    expect(first.certificates).toEqual([certA]);
+    expect(await verifyDeviceList(identity.publicKey, first)).toBe(true);
+
+    const second = await appendDeviceToList(identityRaw, first, certB);
+    expect(second.version).toBe(2);
+    expect(second.certificates).toEqual([certA, certB]);
+    expect(await verifyDeviceList(identity.publicKey, second)).toBe(true);
   });
 });
 

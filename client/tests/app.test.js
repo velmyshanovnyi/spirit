@@ -18,11 +18,14 @@ vi.mock("../js/deviceLinking.js", () => ({
   generateDeviceKeyPair: vi.fn(),
   createLinkRequest: vi.fn(),
   createLinkGrant: vi.fn(),
-  applyLinkGrant: vi.fn()
+  applyLinkGrant: vi.fn(),
+  appendDeviceToList: vi.fn(),
+  acceptNewerDeviceList: vi.fn()
 }));
 vi.mock("../js/db.js", () => ({
   listKeys: vi.fn().mockResolvedValue([]),
-  get: vi.fn()
+  get: vi.fn(),
+  put: vi.fn()
 }));
 vi.mock("../js/identityAnnounce.js", () => ({
   createIdentityAnnounce: vi.fn(),
@@ -30,7 +33,8 @@ vi.mock("../js/identityAnnounce.js", () => ({
 }));
 vi.mock("../js/contacts.js", () => ({
   rememberContact: vi.fn(),
-  getContact: vi.fn()
+  getContact: vi.fn(),
+  updateContactDeviceList: vi.fn()
 }));
 vi.mock("../js/mnemonic.js", () => ({
   bytesToMnemonic: vi.fn()
@@ -68,9 +72,17 @@ import {
   exportPrivateKeyRaw
 } from "../js/identity.js";
 import { createPermanentProfile, exportRawIdentity } from "../js/profile.js";
-import { generateDeviceKeyPair, createLinkRequest, createLinkGrant, applyLinkGrant } from "../js/deviceLinking.js";
+import {
+  generateDeviceKeyPair,
+  createLinkRequest,
+  createLinkGrant,
+  applyLinkGrant,
+  appendDeviceToList,
+  acceptNewerDeviceList
+} from "../js/deviceLinking.js";
 import { createIdentityAnnounce, verifyIdentityAnnounce } from "../js/identityAnnounce.js";
-import { rememberContact } from "../js/contacts.js";
+import { rememberContact, getContact, updateContactDeviceList } from "../js/contacts.js";
+import { get as dbGet, put as dbPut } from "../js/db.js";
 import { bytesToMnemonic } from "../js/mnemonic.js";
 import { createKeyfile } from "../js/keyfile.js";
 import { startAsInitiator, startAsJoiner, applyRemoteAnswer } from "../js/webrtc.js";
@@ -783,6 +795,172 @@ describe("identity announce in chat flows (Section 12)", () => {
     expect(rememberContact).toHaveBeenCalledWith(
       expect.objectContaining({ fingerprint: "peer-fp", identityPubkeyWire: "PEER" })
     );
+  });
+});
+
+describe("device-list transport (Section 13)", () => {
+  async function establishedChat({ ownDeviceList = null } = {}) {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: { __tag: "id-priv" }, publicKey: fakePublicKey("id-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockImplementation(async (_key, text) => `ENC(${text})`);
+    dbGet.mockImplementation(async (store, key) =>
+      store === "profile" && key === "deviceList" ? ownDeviceList ?? undefined : undefined
+    );
+
+    const channel = fakeChannel();
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document);
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(channel);
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+    return { captured, channel };
+  }
+
+  it("announces the own device list right after the identity announce, when one exists", async () => {
+    const ownList = { version: 2, certificates: [], signature: "SIG" };
+    const { channel } = await establishedChat({ ownDeviceList: ownList });
+
+    await vi.waitFor(() =>
+      expect(channel.send).toHaveBeenCalledWith(`ENC(${JSON.stringify({ type: "device-list-announce", list: ownList })})`)
+    );
+  });
+
+  it("sends no device-list announce when this profile has none", async () => {
+    const { channel } = await establishedChat({ ownDeviceList: null });
+
+    await vi.waitFor(() =>
+      expect(channel.send).toHaveBeenCalledWith(`ENC(${JSON.stringify({ type: "identity-announce" })})`)
+    );
+    const sent = channel.send.mock.calls.map(([payload]) => payload);
+    expect(sent.some((p) => p.includes("device-list-announce"))).toBe(false);
+  });
+
+  it("applies an incoming device-list announce via acceptNewerDeviceList and persists it on the contact (profile mode)", async () => {
+    createPermanentProfile.mockResolvedValue({
+      privateKey: { __tag: "profile-priv" },
+      publicKey: fakePublicKey("profile-pub"),
+      vaultKey: { __tag: "vault-key" }
+    });
+    fingerprint.mockResolvedValue("profile-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+    dbGet.mockResolvedValue(undefined);
+
+    const peerIdentityKey = fakePublicKey("peer-identity");
+    verifyIdentityAnnounce.mockResolvedValue({
+      identityPublicKey: peerIdentityKey,
+      identityPubkeyWire: "PEER",
+      fingerprint: "peer-fp"
+    });
+    rememberContact.mockResolvedValue({ status: "new", contact: { deviceList: null } });
+    const heldList = { version: 1, certificates: [], signature: "OLD" };
+    getContact.mockResolvedValue({ fingerprint: "peer-fp", deviceList: heldList });
+    const incomingList = { version: 2, certificates: [], signature: "NEW" };
+    acceptNewerDeviceList.mockResolvedValue(incomingList);
+
+    const channel = fakeChannel();
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document);
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "pass";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("profile-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(channel);
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    // Peer announces identity first, then its device list.
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "device-list-announce", list: incomingList }));
+    await captured.onMessage("ENCRYPTED_LIST");
+
+    await vi.waitFor(() => expect(updateContactDeviceList).toHaveBeenCalledWith("peer-fp", incomingList));
+    // Verified against the PEER's identity key, seeded with the held list.
+    expect(acceptNewerDeviceList).toHaveBeenCalledWith(peerIdentityKey, heldList, incomingList);
+  });
+
+  it("ignores a device-list announce arriving before the identity announce", async () => {
+    const { captured } = await establishedChat();
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "device-list-announce", list: { version: 9 } }));
+
+    await captured.onMessage("ENCRYPTED_LIST");
+
+    expect(acceptNewerDeviceList).not.toHaveBeenCalled();
+    expect(updateContactDeviceList).not.toHaveBeenCalled();
+  });
+
+  it("primary link flow appends the new device certificate to the own stored device list", async () => {
+    const identityRaw = new Uint8Array([7, 7, 7]);
+    exportRawIdentity.mockResolvedValue(identityRaw);
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    const linkRequest = { type: "device-link-request", devicePubkey: "DEV_PUB" };
+    decryptMessage.mockResolvedValue(JSON.stringify(linkRequest));
+    const certificate = { devicePubkey: "DEV_PUB", issuedAt: 1, expiresAt: 2, signature: "CERT_SIG" };
+    createLinkGrant.mockResolvedValue({ type: "device-link-grant", certificate, identityPrivateKey: "RAW", contacts: [] });
+    encryptMessage.mockResolvedValue("ENCRYPTED_GRANT");
+    const heldOwnList = { version: 1, certificates: [], signature: "OLD" };
+    dbGet.mockImplementation(async (store, key) =>
+      store === "profile" && key === "deviceList" ? heldOwnList : undefined
+    );
+    const updatedOwnList = { version: 2, certificates: [certificate], signature: "NEW" };
+    appendDeviceToList.mockResolvedValue(updatedOwnList);
+
+    const channel = fakeChannel();
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document);
+    document.getElementById("link-passphrase").value = "my passphrase";
+    document.getElementById("btn-link-device").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(channel);
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+    await captured.onMessage("ENCRYPTED_REQUEST");
+
+    await vi.waitFor(() => expect(appendDeviceToList).toHaveBeenCalledWith(identityRaw, heldOwnList, certificate));
+    expect(dbPut).toHaveBeenCalledWith("profile", "deviceList", updatedOwnList);
   });
 });
 
