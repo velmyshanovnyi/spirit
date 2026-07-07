@@ -12,6 +12,8 @@ import { bytesToMnemonic } from "./mnemonic.js";
 import { createKeyfile } from "./keyfile.js";
 import { generateDeviceKeyPair, createLinkRequest, createLinkGrant, applyLinkGrant } from "./deviceLinking.js";
 import { listKeys, get } from "./db.js";
+import { createIdentityAnnounce, verifyIdentityAnnounce } from "./identityAnnounce.js";
+import { rememberContact } from "./contacts.js";
 import { startAsInitiator, startAsJoiner, applyRemoteAnswer } from "./webrtc.js";
 import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer } from "./signalingClient.js";
 import { deriveSessionKey, encryptMessage, decryptMessage } from "./e2ee.js";
@@ -26,7 +28,13 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
     senderKey: null,
     pc: null,
     channel: null,
-    sessionKey: null
+    sessionKey: null,
+    // Set by the session helpers just before the session key is derived;
+    // needed to bind/verify identity announces to THIS session's ECDH keys.
+    sessionEcdhWires: null,
+    // Fingerprint of the peer's VERIFIED identity (null until a valid
+    // announce arrives; incoming chat text is refused while null).
+    peerFingerprint: null
   };
 
   const el = (id) => doc.getElementById(id);
@@ -51,7 +59,83 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
     };
   }
 
-  function wireChannelCallbacks(disarmIceTimeout, { onDecryptedMessage = appendChat, afterChannelOpen } = {}) {
+  const CONTROL_MESSAGE_TYPES = new Set(["identity-announce", "device-list-announce"]);
+
+  /**
+   * Default handler for decrypted chat-channel messages. Control messages
+   * (JSON with a known type) are routed; everything else is chat text --
+   * refused until the peer has proven its identity via a valid announce
+   * (TOFU, Section 12).
+   */
+  async function handleChatMessage(text) {
+    let control = null;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && CONTROL_MESSAGE_TYPES.has(parsed.type)) {
+        control = parsed;
+      }
+    } catch {
+      // not JSON -- plain chat text
+    }
+
+    if (!control) {
+      if (!state.peerFingerprint) {
+        setStatus("вхідне повідомлення відхилено: identity співрозмовника не підтверджена");
+        return;
+      }
+      appendChat(text);
+      return;
+    }
+
+    if (control.type === "identity-announce") {
+      const verified = await verifyIdentityAnnounce(
+        control,
+        state.sessionEcdhWires.localEcdhWire,
+        state.sessionEcdhWires.peerEcdhWire
+      );
+      if (!verified) {
+        setStatus("⚠ не вдалося підтвердити identity співрозмовника");
+        return;
+      }
+      state.peerFingerprint = verified.fingerprint;
+      let continuity = "";
+      // Persist the contact only in permanent-profile mode (the vault key's
+      // presence is what distinguishes it) -- ephemeral sessions store nothing.
+      if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
+        const { status } = await rememberContact({
+          fingerprint: verified.fingerprint,
+          identityPubkeyWire: verified.identityPubkeyWire
+        });
+        continuity = status === "known" ? " (відомий контакт)" : " (новий контакт)";
+      }
+      setStatus(`співрозмовник підтверджений: ${verified.fingerprint}${continuity}`);
+    }
+  }
+
+  /**
+   * One-shot announce sender for chat flows: fires once the channel is open
+   * AND the session key + ECDH wires exist, whichever completes last.
+   */
+  function makeIdentityAnnouncer() {
+    let announced = false;
+    return async () => {
+      if (announced || !state.channel || !state.sessionKey || !state.sessionEcdhWires) return;
+      announced = true;
+      try {
+        const announce = await createIdentityAnnounce(
+          state.identityKeyPair.privateKey,
+          state.identityKeyPair.publicKey,
+          state.sessionEcdhWires.localEcdhWire,
+          state.sessionEcdhWires.peerEcdhWire
+        );
+        state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify(announce)));
+      } catch (err) {
+        setStatus(`помилка: ${err.message}`); // afterChannelOpen path is detached; nothing upstream catches
+      }
+    };
+  }
+
+  function wireChannelCallbacks(disarmIceTimeout, { onDecryptedMessage = handleChatMessage, afterChannelOpen } = {}) {
     return {
       onChannelOpen: (channel) => {
         state.channel = channel;
@@ -132,6 +216,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
 
           await applyRemoteAnswer(state.pc, JSON.parse(answer));
           const peerEcdhPubkey = await importEcdhPublicKeyFromWire(peerEcdhPubkeyWire);
+          state.sessionEcdhWires = { localEcdhWire: ecdhPubkey, peerEcdhWire: peerEcdhPubkeyWire };
           state.sessionKey = await deriveSessionKey(ecdhKeyPair.privateKey, peerEcdhPubkey);
           if (onSessionReady) await onSessionReady();
         } catch (err) {
@@ -167,6 +252,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
             ecdhPubkey
           });
           const peerEcdhPubkey = await importEcdhPublicKeyFromWire(peerEcdhPubkeyWire);
+          state.sessionEcdhWires = { localEcdhWire: ecdhPubkey, peerEcdhWire: peerEcdhPubkeyWire };
           state.sessionKey = await deriveSessionKey(ecdhKeyPair.privateKey, peerEcdhPubkey);
           if (onSessionReady) await onSessionReady();
         } catch (err) {
@@ -283,7 +369,19 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
     el("room-id").value = roomId;
     el("invite-token").value = inviteToken;
 
-    startInitiatorSession({ senderKey, ecdhKeyPair, roomId, inviteToken, serverUrl, rtcConfig });
+    state.peerFingerprint = null;
+    state.sessionEcdhWires = null;
+    const announce = makeIdentityAnnouncer();
+    startInitiatorSession({
+      senderKey,
+      ecdhKeyPair,
+      roomId,
+      inviteToken,
+      serverUrl,
+      rtcConfig,
+      channelOptions: { afterChannelOpen: announce },
+      onSessionReady: announce
+    });
   });
 
   withBusyButton(el("btn-join"), async () => {
@@ -291,12 +389,17 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
       setStatus("спочатку створіть акаунт");
       return;
     }
+    state.peerFingerprint = null;
+    state.sessionEcdhWires = null;
+    const announce = makeIdentityAnnouncer();
     await startJoinerSession({
       senderKey: state.senderKey,
       roomId: el("room-id").value,
       inviteToken: el("invite-token").value,
       serverUrl: el("server-url").value,
-      rtcConfig: { iceServers: [{ urls: el("stun-url").value }] }
+      rtcConfig: { iceServers: [{ urls: el("stun-url").value }] },
+      channelOptions: { afterChannelOpen: announce },
+      onSessionReady: announce
     });
   });
 

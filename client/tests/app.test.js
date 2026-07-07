@@ -24,6 +24,14 @@ vi.mock("../js/db.js", () => ({
   listKeys: vi.fn().mockResolvedValue([]),
   get: vi.fn()
 }));
+vi.mock("../js/identityAnnounce.js", () => ({
+  createIdentityAnnounce: vi.fn(),
+  verifyIdentityAnnounce: vi.fn()
+}));
+vi.mock("../js/contacts.js", () => ({
+  rememberContact: vi.fn(),
+  getContact: vi.fn()
+}));
 vi.mock("../js/mnemonic.js", () => ({
   bytesToMnemonic: vi.fn()
 }));
@@ -61,6 +69,8 @@ import {
 } from "../js/identity.js";
 import { createPermanentProfile, exportRawIdentity } from "../js/profile.js";
 import { generateDeviceKeyPair, createLinkRequest, createLinkGrant, applyLinkGrant } from "../js/deviceLinking.js";
+import { createIdentityAnnounce, verifyIdentityAnnounce } from "../js/identityAnnounce.js";
+import { rememberContact } from "../js/contacts.js";
 import { bytesToMnemonic } from "../js/mnemonic.js";
 import { createKeyfile } from "../js/keyfile.js";
 import { startAsInitiator, startAsJoiner, applyRemoteAnswer } from "../js/webrtc.js";
@@ -599,6 +609,180 @@ describe("btn-send", () => {
     expect(encryptMessage).toHaveBeenCalledWith({ __tag: "session-key" }, "привіт");
     expect(channel.send).toHaveBeenCalledWith("ENCRYPTED_PAYLOAD");
     expect(channel.send).not.toHaveBeenCalledWith("привіт");
+  });
+});
+
+describe("identity announce in chat flows (Section 12)", () => {
+  // Drives the initiator chat flow up to an open channel + derived session key,
+  // returning the captured webrtc callbacks and the fake channel.
+  async function establishedInitiatorChat() {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: { __tag: "id-priv" }, publicKey: fakePublicKey("id-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+
+    const channel = fakeChannel();
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document);
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+
+    captured.onChannelOpen(channel);
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+    return { captured, channel };
+  }
+
+  it("sends an encrypted identity announce once the channel and session key are both ready", async () => {
+    const announce = { type: "identity-announce", identityPubkey: "ME", signature: "SIG" };
+    createIdentityAnnounce.mockResolvedValue(announce);
+    encryptMessage.mockResolvedValue("ENCRYPTED_ANNOUNCE");
+
+    const { channel } = await establishedInitiatorChat();
+
+    await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith("ENCRYPTED_ANNOUNCE"));
+    // Signed over this session's ECDH wire keys: own first, peer's second.
+    expect(createIdentityAnnounce).toHaveBeenCalledWith(
+      { __tag: "id-priv" },
+      fakePublicKey("id-pub"),
+      "ECDH_PUB_WIRE",
+      "peer-ecdh-b64"
+    );
+    expect(encryptMessage).toHaveBeenCalledWith({ __tag: "session-key" }, JSON.stringify(announce));
+  });
+
+  it("verifies an incoming announce against the session's ECDH keys and shows the peer fingerprint", async () => {
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+    const incoming = { type: "identity-announce", identityPubkey: "PEER", signature: "SIG" };
+    decryptMessage.mockResolvedValue(JSON.stringify(incoming));
+    verifyIdentityAnnounce.mockResolvedValue({
+      identityPublicKey: {},
+      identityPubkeyWire: "PEER",
+      fingerprint: "peer-fp-123"
+    });
+
+    const { captured } = await establishedInitiatorChat();
+    await captured.onMessage("ENCRYPTED_INCOMING_ANNOUNCE");
+
+    await vi.waitFor(() =>
+      expect(document.getElementById("connection-status").textContent).toContain("peer-fp-123")
+    );
+    // Verifier's view: own wire first, peer's second (mirroring is verify's job).
+    expect(verifyIdentityAnnounce).toHaveBeenCalledWith(incoming, "ECDH_PUB_WIRE", "peer-ecdh-b64");
+    // Ephemeral mode must NOT persist the contact.
+    expect(rememberContact).not.toHaveBeenCalled();
+  });
+
+  it("drops incoming chat text and warns while the peer identity is not verified", async () => {
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+    decryptMessage.mockResolvedValue("привіт до підтвердження");
+
+    const { captured } = await establishedInitiatorChat();
+    await captured.onMessage("ENCRYPTED_TEXT");
+
+    await vi.waitFor(() =>
+      expect(document.getElementById("connection-status").textContent).toMatch(/не підтверджен/)
+    );
+    expect(document.getElementById("chat-log").textContent).not.toContain("привіт до підтвердження");
+  });
+
+  it("shows a clear warning for an announce that fails verification, and still refuses chat text after it", async () => {
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+    verifyIdentityAnnounce.mockResolvedValue(null);
+
+    const { captured } = await establishedInitiatorChat();
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "EVIL", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_BAD_ANNOUNCE");
+
+    await vi.waitFor(() =>
+      expect(document.getElementById("connection-status").textContent).toMatch(/не вдалося підтвердити/)
+    );
+
+    decryptMessage.mockResolvedValueOnce("текст після фейкового announce");
+    await captured.onMessage("ENCRYPTED_TEXT");
+    expect(document.getElementById("chat-log").textContent).not.toContain("текст після фейкового announce");
+  });
+
+  it("appends incoming chat text normally once the peer identity is verified", async () => {
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+    verifyIdentityAnnounce.mockResolvedValue({ identityPublicKey: {}, identityPubkeyWire: "PEER", fingerprint: "peer-fp" });
+
+    const { captured } = await establishedInitiatorChat();
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+    await vi.waitFor(() =>
+      expect(document.getElementById("connection-status").textContent).toContain("peer-fp")
+    );
+
+    decryptMessage.mockResolvedValueOnce("привіт після підтвердження");
+    await captured.onMessage("ENCRYPTED_TEXT");
+
+    await vi.waitFor(() =>
+      expect(document.getElementById("chat-log").textContent).toContain("привіт після підтвердження")
+    );
+  });
+
+  it("persists the verified contact when a permanent profile is active", async () => {
+    // Profile mode: createPermanentProfile returns a keyPair WITH vaultKey.
+    createPermanentProfile.mockResolvedValue({
+      privateKey: { __tag: "profile-priv" },
+      publicKey: fakePublicKey("profile-pub"),
+      vaultKey: { __tag: "vault-key" }
+    });
+    fingerprint.mockResolvedValue("profile-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+    verifyIdentityAnnounce.mockResolvedValue({ identityPublicKey: {}, identityPubkeyWire: "PEER", fingerprint: "peer-fp" });
+    rememberContact.mockResolvedValue({ status: "new", contact: {} });
+
+    const channel = fakeChannel();
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document);
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "pass";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("profile-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(channel);
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+
+    await vi.waitFor(() => expect(rememberContact).toHaveBeenCalled());
+    expect(rememberContact).toHaveBeenCalledWith(
+      expect.objectContaining({ fingerprint: "peer-fp", identityPubkeyWire: "PEER" })
+    );
   });
 });
 
