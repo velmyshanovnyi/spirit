@@ -21,6 +21,7 @@ import {
 import { listKeys, get, put } from "./db.js";
 import { createIdentityAnnounce, verifyIdentityAnnounce } from "./identityAnnounce.js";
 import { rememberContact, getContact, updateContactDeviceList } from "./contacts.js";
+import { appendMessage, listMessages } from "./historyStore.js";
 
 const OWN_DEVICE_LIST_KEY = "deviceList";
 import { startAsInitiator, startAsJoiner, applyRemoteAnswer } from "./webrtc.js";
@@ -96,6 +97,13 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
         return;
       }
       appendChat(text);
+      if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
+        await appendMessage(state.identityKeyPair.vaultKey, state.peerFingerprint, {
+          direction: "in",
+          text,
+          timestamp: Date.now()
+        });
+      }
       return;
     }
 
@@ -122,6 +130,14 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
         continuity = status === "known" ? " (відомий контакт)" : " (новий контакт)";
       }
       setStatus(`співрозмовник підтверджений: ${verified.fingerprint}${continuity}`);
+      // Known contact in profile mode: bring the prior conversation back
+      // into the chat log before any new messages arrive.
+      if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
+        const history = await listMessages(state.identityKeyPair.vaultKey, verified.fingerprint);
+        for (const entry of history) {
+          appendChat(`${entry.direction === "out" ? "→" : "←"} ${entry.text}`);
+        }
+      }
       return;
     }
 
@@ -553,5 +569,15 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
     const payload = await encryptMessage(state.sessionKey, text);
     state.channel.send(payload);
     el("message-input").value = "";
+    // Profile mode + verified peer: keep the encrypted history (Section 14).
+    // Ephemeral mode has no vaultKey; an unverified peer has no fingerprint
+    // to file the message under -- both skip silently.
+    if (state.identityKeyPair && state.identityKeyPair.vaultKey && state.peerFingerprint) {
+      await appendMessage(state.identityKeyPair.vaultKey, state.peerFingerprint, {
+        direction: "out",
+        text,
+        timestamp: Date.now()
+      });
+    }
   });
 }

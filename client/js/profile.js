@@ -1,6 +1,6 @@
 import { generateIdentityKeyPair, exportPrivateKeyRaw, importPrivateKeyRaw, derivePublicKeyFromPrivate, importPrivateKeyFromScalar } from "./identity.js";
 import { generateSalt, deriveVaultKey, encryptForVault, decryptForVault } from "./vault.js";
-import { get, put } from "./db.js";
+import { get, put, listKeys, remove } from "./db.js";
 import { bytesToBase64, base64ToBytes } from "./codec.js";
 import { mnemonicToBytes } from "./mnemonic.js";
 import { restoreFromKeyfile } from "./keyfile.js";
@@ -25,6 +25,17 @@ async function persistRawIdentity(rawPrivateKey, passphrase) {
     salt: bytesToBase64(salt),
     encryptedPrivateKey
   });
+
+  // The salt above is FRESH, so this vaultKey can never decrypt message rows
+  // written by any previous profile on this device -- they aren't corrupt,
+  // just permanently sealed under a superseded key. Leaving them behind
+  // would make every later listMessages call throw, so they go with the
+  // profile they belonged to (applies to create, restore, and adopt alike).
+  // Contacts stay: they aren't encrypted and remain valid.
+  for (const key of await listKeys("messages")) {
+    await remove("messages", key);
+  }
+
   return vaultKey;
 }
 
@@ -114,8 +125,10 @@ export async function exportRawIdentity(passphrase) {
  */
 export async function adoptIdentity(rawPrivateKey, localPassphrase) {
   const keyPair = await reconstructKeyPairFromRaw(rawPrivateKey);
-  await persistRawIdentity(rawPrivateKey, localPassphrase);
-  return keyPair;
+  const vaultKey = await persistRawIdentity(rawPrivateKey, localPassphrase);
+  // Same contract as create/load: the session vault key comes along, so a
+  // just-linked or just-restored device can write history immediately.
+  return { ...keyPair, vaultKey };
 }
 
 /**
@@ -141,9 +154,7 @@ export async function restoreProfileFromMnemonic(words, localPassphrase) {
   const scalarBytes = await mnemonicToBytes(words);
   const extractablePrivateKey = await importPrivateKeyFromScalar(scalarBytes, IDENTITY_ALGORITHM, true);
   const rawPrivateKey = await exportPrivateKeyRaw(extractablePrivateKey);
-  const keyPair = await reconstructKeyPairFromRaw(rawPrivateKey);
-  await persistRawIdentity(rawPrivateKey, localPassphrase);
-  return keyPair;
+  return adoptIdentity(rawPrivateKey, localPassphrase);
 }
 
 /**
@@ -159,7 +170,5 @@ export async function restoreProfileFromMnemonic(words, localPassphrase) {
  */
 export async function restoreProfileFromKeyfile(keyfileJson, keyfilePassphrase, localPassphrase) {
   const rawPrivateKey = await restoreFromKeyfile(keyfileJson, keyfilePassphrase);
-  const keyPair = await reconstructKeyPairFromRaw(rawPrivateKey);
-  await persistRawIdentity(rawPrivateKey, localPassphrase);
-  return keyPair;
+  return adoptIdentity(rawPrivateKey, localPassphrase);
 }

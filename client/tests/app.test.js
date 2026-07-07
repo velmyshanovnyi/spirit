@@ -36,6 +36,10 @@ vi.mock("../js/contacts.js", () => ({
   getContact: vi.fn(),
   updateContactDeviceList: vi.fn()
 }));
+vi.mock("../js/historyStore.js", () => ({
+  appendMessage: vi.fn(),
+  listMessages: vi.fn().mockResolvedValue([])
+}));
 vi.mock("../js/mnemonic.js", () => ({
   bytesToMnemonic: vi.fn()
 }));
@@ -83,6 +87,7 @@ import {
 import { createIdentityAnnounce, verifyIdentityAnnounce } from "../js/identityAnnounce.js";
 import { rememberContact, getContact, updateContactDeviceList } from "../js/contacts.js";
 import { get as dbGet, put as dbPut } from "../js/db.js";
+import { appendMessage, listMessages } from "../js/historyStore.js";
 import { bytesToMnemonic } from "../js/mnemonic.js";
 import { createKeyfile } from "../js/keyfile.js";
 import { startAsInitiator, startAsJoiner, applyRemoteAnswer } from "../js/webrtc.js";
@@ -961,6 +966,156 @@ describe("device-list transport (Section 13)", () => {
 
     await vi.waitFor(() => expect(appendDeviceToList).toHaveBeenCalledWith(identityRaw, heldOwnList, certificate));
     expect(dbPut).toHaveBeenCalledWith("profile", "deviceList", updatedOwnList);
+  });
+});
+
+describe("chat history wiring (Section 14)", () => {
+  const VAULT_KEY = { __tag: "vault-key" };
+
+  // Drives a PROFILE-MODE chat to the point where the peer is verified.
+  async function verifiedProfileChat() {
+    createPermanentProfile.mockResolvedValue({
+      privateKey: { __tag: "profile-priv" },
+      publicKey: fakePublicKey("profile-pub"),
+      vaultKey: VAULT_KEY
+    });
+    fingerprint.mockResolvedValue("profile-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("ENC");
+    dbGet.mockResolvedValue(undefined);
+    verifyIdentityAnnounce.mockResolvedValue({
+      identityPublicKey: fakePublicKey("peer-identity"),
+      identityPubkeyWire: "PEER",
+      fingerprint: "peer-fp"
+    });
+    rememberContact.mockResolvedValue({ status: "new", contact: {} });
+
+    const channel = fakeChannel();
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document);
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "pass";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("profile-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(channel);
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+    await vi.waitFor(() =>
+      expect(document.getElementById("connection-status").textContent).toContain("peer-fp")
+    );
+    return { captured, channel };
+  }
+
+  it("persists an outgoing message under the verified peer fingerprint in profile mode", async () => {
+    await verifiedProfileChat();
+
+    document.getElementById("message-input").value = "збережи мене";
+    document.getElementById("btn-send").click();
+
+    await vi.waitFor(() => expect(appendMessage).toHaveBeenCalled());
+    expect(appendMessage).toHaveBeenCalledWith(VAULT_KEY, "peer-fp", {
+      direction: "out",
+      text: "збережи мене",
+      timestamp: expect.any(Number)
+    });
+  });
+
+  it("persists an incoming message under the verified peer fingerprint in profile mode", async () => {
+    const { captured } = await verifiedProfileChat();
+
+    decryptMessage.mockResolvedValueOnce("вхідне для історії");
+    await captured.onMessage("ENCRYPTED_TEXT");
+
+    await vi.waitFor(() => expect(appendMessage).toHaveBeenCalled());
+    expect(appendMessage).toHaveBeenCalledWith(VAULT_KEY, "peer-fp", {
+      direction: "in",
+      text: "вхідне для історії",
+      timestamp: expect.any(Number)
+    });
+  });
+
+  it("renders the prior history into the chat log when a known contact's identity is verified", async () => {
+    listMessages.mockResolvedValue([
+      { direction: "out", text: "давнє вихідне", timestamp: 1 },
+      { direction: "in", text: "давнє вхідне", timestamp: 2 }
+    ]);
+
+    await verifiedProfileChat();
+
+    await vi.waitFor(() => {
+      const log = document.getElementById("chat-log").textContent;
+      expect(log).toContain("давнє вихідне");
+      expect(log).toContain("давнє вхідне");
+    });
+    expect(listMessages).toHaveBeenCalledWith(VAULT_KEY, "peer-fp");
+  });
+
+  it("writes nothing to history in ephemeral mode (send and receive)", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("id-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("ENC");
+    dbGet.mockResolvedValue(undefined);
+    verifyIdentityAnnounce.mockResolvedValue({
+      identityPublicKey: fakePublicKey("peer-identity"),
+      identityPubkeyWire: "PEER",
+      fingerprint: "peer-fp"
+    });
+
+    const channel = fakeChannel();
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document);
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(channel);
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+    await vi.waitFor(() =>
+      expect(document.getElementById("connection-status").textContent).toContain("peer-fp")
+    );
+
+    document.getElementById("message-input").value = "ефемерне";
+    document.getElementById("btn-send").click();
+    await vi.waitFor(() => expect(channel.send).toHaveBeenCalled());
+    decryptMessage.mockResolvedValueOnce("вхідне ефемерне");
+    await captured.onMessage("ENCRYPTED_TEXT");
+    await vi.waitFor(() => expect(document.getElementById("chat-log").textContent).toContain("вхідне ефемерне"));
+
+    expect(appendMessage).not.toHaveBeenCalled();
+    expect(listMessages).not.toHaveBeenCalled();
   });
 });
 

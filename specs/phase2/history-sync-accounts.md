@@ -30,9 +30,9 @@
 
 ## Секція 14: Дротування історії в чат-UI
 
-- [ ] **Tests**: `client/tests/app.test.js` (доповнення) — у профільному режимі надіслані й отримані повідомлення пишуться через `historyStore` під fingerprint контакта (відомим з announce); в ефемерному режимі — не пишуться; при встановленні сесії з відомим контактом попередня історія рендериться в чат-лог.
-- [ ] **Impl**: `client/js/app.js` (доповнення).
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/app.test.js` (доповнення, 4 тести) — у профільному режимі надіслані й отримані повідомлення пишуться через `historyStore` під fingerprint верифікованого контакта; в ефемерному — не пишуться і не читаються; при верифікації відомого контакта попередня історія рендериться в чат-лог з маркерами напряму. `client/tests/profile.test.js` (доповнення, 5 тестів) — `adoptIdentity`/`restoreProfileFromMnemonic`/`restoreProfileFromKeyfile` повертають робочий vaultKey (закриття обов'язкової прогалини з ревʼю Секції 11); `createPermanentProfile` і `adoptIdentity` очищують застарілу історію (RED→GREEN проти реального AES-GCM збою).
+- [x] **Impl**: `client/js/app.js` — persist out/in + рендер історії на announce (гейти: vaultKey = профільний режим, peerFingerprint = верифікований контакт); `client/js/profile.js` — restore-функції маршрутизовані через `adoptIdentity` (той самий контракт `{...keyPair, vaultKey}`); очищення стора `messages` у `persistRawIdentity` — кожен fresh-salt persist робить старі рядки назавжди нерозшифровними, тож вони йдуть разом із профілем, якому належали (контакти лишаються — вони не шифровані).
+- [x] **Exec review**: 2 ітерації, конвергенція — [iter1](../reviews/phase2-section-14-history-wiring-iter1.md), [iter2](../reviews/phase2-section-14-history-wiring-iter2.md). Ітерація 1 знайшла Medium: stale-рядки історії під заміненим vault-ключем валили announce-обробник відновленого профілю; фікс поширено й на `createPermanentProfile` (той самий баг), підтверджено ітерацією 2.
 
 ## Секція 15: Мультиакаунти в UI
 

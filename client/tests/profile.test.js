@@ -7,6 +7,7 @@ import {
   restoreProfileFromMnemonic,
   restoreProfileFromKeyfile,
   exportRawIdentity,
+  adoptIdentity,
   IncorrectPassphraseError,
   NoStoredProfileError
 } from "../js/profile.js";
@@ -14,6 +15,7 @@ import { get } from "../js/db.js";
 import { exportPrivateKeyRaw, exportPrivateKeyScalar } from "../js/identity.js";
 import { bytesToBase64 } from "../js/codec.js";
 import { encryptForVault, decryptForVault } from "../js/vault.js";
+import { appendMessage, listMessages } from "../js/historyStore.js";
 import { bytesToMnemonic } from "../js/mnemonic.js";
 import { createKeyfile } from "../js/keyfile.js";
 
@@ -105,6 +107,62 @@ describe("session vault key (history encryption, Section 11)", () => {
     const loaded = await loadPermanentProfile("my passphrase");
 
     expect(new Uint8Array(await decryptForVault(loaded.vaultKey, ciphertext))).toEqual(new Uint8Array(plaintext));
+  });
+});
+
+describe("vault key after restore/adopt (Section 14 gap from Section 11 review)", () => {
+  async function assertVaultKeyWorks(profile) {
+    expect(profile.vaultKey).toBeDefined();
+    const plaintext = new TextEncoder().encode("post-restore history");
+    const ciphertext = await encryptForVault(profile.vaultKey, plaintext);
+    expect(new Uint8Array(await decryptForVault(profile.vaultKey, ciphertext))).toEqual(new Uint8Array(plaintext));
+  }
+
+  it("adoptIdentity returns a usable vaultKey (a linked device must be able to write history)", async () => {
+    const created = await createPermanentProfile("origin pass");
+    const raw = await exportPrivateKeyRaw(created.privateKey);
+
+    await assertVaultKeyWorks(await adoptIdentity(raw, "device pass"));
+  });
+
+  it("restoreProfileFromMnemonic returns a usable vaultKey", async () => {
+    const created = await createPermanentProfile("origin pass");
+    const scalar = await exportPrivateKeyScalar(created.privateKey);
+    const words = await bytesToMnemonic(scalar);
+
+    await assertVaultKeyWorks(await restoreProfileFromMnemonic(words, "local pass"));
+  });
+
+  it("restoreProfileFromKeyfile returns a usable vaultKey", async () => {
+    const created = await createPermanentProfile("origin pass");
+    const raw = await exportPrivateKeyRaw(created.privateKey);
+    const keyfile = await createKeyfile(raw, "kf pass");
+
+    await assertVaultKeyWorks(await restoreProfileFromKeyfile(keyfile, "kf pass", "local pass"));
+  });
+
+  it("createPermanentProfile over an old profile also clears its stale history", async () => {
+    const contactId = "e".repeat(64);
+    const first = await createPermanentProfile("first pass");
+    await appendMessage(first.vaultKey, contactId, { direction: "out", text: "first world", timestamp: 1000 });
+
+    const second = await createPermanentProfile("second pass");
+
+    await expect(listMessages(second.vaultKey, contactId)).resolves.toEqual([]);
+  });
+
+  it("adoptIdentity clears stale message history (undecryptable under the fresh vault key)", async () => {
+    const contactId = "d".repeat(64);
+    const created = await createPermanentProfile("origin pass");
+    await appendMessage(created.vaultKey, contactId, { direction: "out", text: "old world", timestamp: 1000 });
+    const raw = await exportPrivateKeyRaw(created.privateKey);
+
+    // Re-adopting the SAME identity generates a fresh salt -> different vault
+    // key; the old rows can never be decrypted again. Keeping them would make
+    // every later listMessages call throw on a benign stale-row condition.
+    const adopted = await adoptIdentity(raw, "new device pass");
+
+    await expect(listMessages(adopted.vaultKey, contactId)).resolves.toEqual([]);
   });
 });
 
