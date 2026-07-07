@@ -164,7 +164,7 @@ describe("btn-generate", () => {
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => {
-      expect(document.getElementById("pub-key-display").textContent).toBe("deadbeef");
+      expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001deadbeef");
     });
 
     expect(generateIdentityKeyPair).toHaveBeenCalled();
@@ -206,7 +206,7 @@ describe("theme and language switchers (Section U2)", () => {
 
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
-    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("live-fingerprint"));
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001live-fingerprint"));
 
     const langSelect = document.getElementById("lang-select");
     langSelect.value = "en";
@@ -214,7 +214,7 @@ describe("theme and language switchers (Section U2)", () => {
 
     // Static text re-translated, runtime values untouched.
     expect(document.getElementById("account-heading").textContent).toBe("Account");
-    expect(document.getElementById("pub-key-display").textContent).toBe("live-fingerprint");
+    expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001live-fingerprint");
   });
 });
 
@@ -246,7 +246,7 @@ describe("profile selector and unlock (Section 15)", () => {
     document.getElementById("btn-profile-unlock").click();
 
     await vi.waitFor(() =>
-      expect(document.getElementById("pub-key-display").textContent).toBe("f".repeat(64))
+      expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001" + "f".repeat(64))
     );
     expect(loadPermanentProfile).toHaveBeenCalledWith("identity", "my pass");
     // The secret must not linger in the DOM.
@@ -295,7 +295,7 @@ describe("permanent profile creation UI", () => {
     document.getElementById("btn-create-profile").click();
     document.getElementById("profile-passphrase").value = "my local passphrase";
     document.getElementById("btn-profile-confirm").click();
-    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("profile-fp"));
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001profile-fp"));
     return keyPair;
   }
 
@@ -385,7 +385,7 @@ describe("permanent profile creation UI", () => {
 
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
-    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("deadbeef"));
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001deadbeef"));
 
     expect(createPermanentProfile).not.toHaveBeenCalled();
     expect(document.getElementById("profile-setup").hidden).toBe(true);
@@ -412,7 +412,7 @@ describe("btn-google-verify", () => {
 
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
-    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
 
     document.getElementById("btn-google-verify").click();
     await vi.waitFor(() =>
@@ -434,7 +434,7 @@ describe("btn-google-verify", () => {
 
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
-    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
 
     document.getElementById("btn-google-verify").click();
     await vi.waitFor(() =>
@@ -448,7 +448,7 @@ describe("btn-google-verify", () => {
 
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
-    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
     document.getElementById("google-client-id").value = "";
 
     document.getElementById("btn-google-verify").click();
@@ -477,7 +477,7 @@ describe("btn-initiate", () => {
 
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
-    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
 
     document.getElementById("btn-initiate").click();
     await vi.waitFor(() =>
@@ -499,7 +499,7 @@ describe("btn-initiate", () => {
 
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
-    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
 
     const initiateButton = document.getElementById("btn-initiate");
     initiateButton.click(); // first click: createInvite is now pending
@@ -529,7 +529,7 @@ describe("btn-initiate", () => {
 
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
-    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
 
     document.getElementById("btn-initiate").click();
     await vi.waitFor(() => expect(createInvite).toHaveBeenCalled());
@@ -567,7 +567,7 @@ describe("btn-initiate", () => {
 
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
-    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
     document.getElementById("btn-initiate").click();
     await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
 
@@ -592,7 +592,7 @@ describe("btn-initiate", () => {
 
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
-    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
     document.getElementById("btn-initiate").click();
     await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
 
@@ -665,7 +665,7 @@ describe("btn-join", () => {
 
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
-    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
     document.getElementById("room-id").value = "room1";
     document.getElementById("invite-token").value = "tok1";
 
@@ -726,7 +726,7 @@ describe("btn-send", () => {
 
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
-    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
     document.getElementById("btn-initiate").click();
     await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
 
@@ -770,7 +770,7 @@ describe("identity announce in chat flows (Section 12)", () => {
 
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
-    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
     document.getElementById("btn-initiate").click();
     await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
 
@@ -904,7 +904,7 @@ describe("identity announce in chat flows (Section 12)", () => {
     document.getElementById("btn-create-profile").click();
     document.getElementById("profile-passphrase").value = "pass";
     document.getElementById("btn-profile-confirm").click();
-    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("profile-fp"));
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001profile-fp"));
     document.getElementById("btn-initiate").click();
     await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
     captured.onChannelOpen(channel);
@@ -947,7 +947,7 @@ describe("device-list transport (Section 13)", () => {
 
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
-    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
     document.getElementById("btn-initiate").click();
     await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
     captured.onChannelOpen(channel);
@@ -1016,7 +1016,7 @@ describe("device-list transport (Section 13)", () => {
     document.getElementById("btn-create-profile").click();
     document.getElementById("profile-passphrase").value = "pass";
     document.getElementById("btn-profile-confirm").click();
-    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("profile-fp"));
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001profile-fp"));
     document.getElementById("btn-initiate").click();
     await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
     captured.onChannelOpen(channel);
@@ -1083,7 +1083,7 @@ describe("device-list transport (Section 13)", () => {
     document.getElementById("btn-create-profile").click();
     document.getElementById("profile-passphrase").value = "pass";
     document.getElementById("btn-profile-confirm").click();
-    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("profile-fp"));
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001profile-fp"));
     document.getElementById("link-passphrase").value = "my passphrase";
     document.getElementById("btn-link-device").click();
     await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
@@ -1137,7 +1137,7 @@ describe("chat history wiring (Section 14)", () => {
     document.getElementById("btn-create-profile").click();
     document.getElementById("profile-passphrase").value = "pass";
     document.getElementById("btn-profile-confirm").click();
-    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("profile-fp"));
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001profile-fp"));
     document.getElementById("btn-initiate").click();
     await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
     captured.onChannelOpen(channel);
@@ -1224,7 +1224,7 @@ describe("chat history wiring (Section 14)", () => {
 
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
-    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("sender-fp"));
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
     document.getElementById("btn-initiate").click();
     await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
     captured.onChannelOpen(channel);
@@ -1303,7 +1303,7 @@ describe("device linking UI", () => {
       document.getElementById("btn-create-profile").click();
       document.getElementById("profile-passphrase").value = "pass";
       document.getElementById("btn-profile-confirm").click();
-      await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("profile-fp"));
+      await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001profile-fp"));
       document.getElementById("link-passphrase").value = "my passphrase";
       document.getElementById("btn-link-device").click();
       await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
@@ -1387,7 +1387,7 @@ describe("device linking UI", () => {
       );
       expect(applyLinkGrant).toHaveBeenCalledWith(grant, "new device pass", { devicePublicKey: devicePair.publicKey });
       // The adopted identity becomes this device's active account.
-      expect(document.getElementById("pub-key-display").textContent).toBe("adopted-fp");
+      expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001adopted-fp");
       // The secret must not linger in the DOM afterwards.
       expect(document.getElementById("device-local-passphrase").value).toBe("");
     });

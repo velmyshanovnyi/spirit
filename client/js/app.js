@@ -29,6 +29,7 @@ import { deriveSessionKey, encryptMessage, decryptMessage } from "./e2ee.js";
 import { promptGoogleSignIn, verifyGoogleIdToken } from "./googleOAuth.js";
 import { t, setLocale, detectLocale, applyTranslations, getLocale, SUPPORTED_LOCALES } from "./i18n.js";
 import { initTheme, toggleTheme } from "./theme.js";
+import { formatSpiritId } from "./spiritId.js";
 
 // Per-profile own device list record key in the "profile" store (Section 15:
 // multiple accounts each maintain their own list).
@@ -165,7 +166,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
         });
         continuity = status === "known" ? t("status.knownContact") : t("status.newContact");
       }
-      setStatus(t("status.peerVerified", { fp: verified.fingerprint }) + continuity);
+      setStatus(t("status.peerVerified", { fp: formatSpiritId(verified.fingerprint) }) + continuity);
       // Known contact in profile mode: bring the prior conversation back
       // into the chat log before any new messages arrive.
       if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
@@ -365,7 +366,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
   el("btn-generate").addEventListener("click", async () => {
     state.identityKeyPair = await generateIdentityKeyPair();
     state.senderKey = await fingerprint(state.identityKeyPair.publicKey);
-    setDynamicText(el("pub-key-display"), state.senderKey);
+    setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
   });
 
   const setProfileStatus = (text) => {
@@ -382,7 +383,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
     for (const { id } of await listProfiles()) {
       const option = doc.createElement("option");
       option.value = id;
-      option.textContent = id === "identity" ? t("profile.legacyOption") : id.slice(0, 16) + "…";
+      option.textContent = id === "identity" ? t("profile.legacyOption") : formatSpiritId(id).slice(0, 26) + "…";
       select.appendChild(option);
     }
   }
@@ -405,7 +406,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
       el("unlock-passphrase").value = "";
       state.identityKeyPair = profile;
       state.senderKey = profile.profileId;
-      setDynamicText(el("pub-key-display"), state.senderKey);
+      setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
       setProfileStatus("");
       // A legacy record migrates on unlock -- its id changes to the fingerprint.
       await refreshProfileSelector();
@@ -424,7 +425,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
     // Don't keep the secret sitting in a DOM input after it's been used.
     el("profile-passphrase").value = "";
     state.senderKey = await fingerprint(state.identityKeyPair.publicKey);
-    setDynamicText(el("pub-key-display"), state.senderKey);
+    setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
     setProfileStatus("");
     el("backup-step").hidden = false;
     await refreshProfileSelector();
@@ -634,7 +635,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
           el("device-local-passphrase").value = "";
           state.identityKeyPair = identityKeyPair;
           state.senderKey = await fingerprint(identityKeyPair.publicKey);
-          setDynamicText(el("pub-key-display"), state.senderKey);
+          setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
           setDeviceLinkStatus(t("device.done"));
         }
       }

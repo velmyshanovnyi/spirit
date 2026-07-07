@@ -16,6 +16,12 @@
 - [x] **Impl**: `client/index.html` (хедер з перемикачами, картки, pre-paint theme проти FOUC, усі id збережені), `client/css/style.css` (токени на `[data-theme]`, `[hidden]`-guard проти display-перекриття, mobile-first grid, focus-visible), `client/js/app.js` (усі статуси через `t()`, `setDynamicText` знімає `data-i18n` при першому runtime-записі, ініціалізація locale/theme/перекладів у `initApp` з опцією `{ locale }`).
 - [x] **Exec review**: 2 ітерації, конвергенція — [iter1](../reviews/ui-redesign-i18n-iter1.md), [iter2](../reviews/ui-redesign-i18n-iter2.md). Iter1 знайшла реальний баг затирання runtime-контенту перемиканням мови + прогалину фікстури, що його маскувала. Живо перевірено в preview: light/dark, mobile 375px, DE/FR-локалізація, збереження fingerprint при зміні мови.
 
+## Секція U4: Формат відображуваного Spirit ID (префікс spirit0001)
+
+- [x] **Tests**: `client/tests/spiritId.test.js` (3) — `formatSpiritId(fp)` = `spirit0001` + fingerprint; `parseSpiritId` — точний round-trip, `null` для чужого префікса/не-hex/невірної довжини. `client/tests/app.test.js` — 25 оновлених перевірок показу ID (generate/create/unlock/adopt) з префіксом; перевірки внутрішніх значень (сигналінг, deviceList-ключі) лишилися сирими — регресійний захист від витоку формату в протокол.
+- [x] **Impl**: `client/js/spiritId.js` (новий — "0001" це версія формату), `client/js/app.js` — лише шар відображення (pub-key-display, peerVerified-статус, label селектора); storage/протокол недоторкані.
+- [x] **Exec review**: 1 ітерація, конвергенція без правок — [iter1](../reviews/ui-spiritid-format-iter1.md). Простежено всі використання senderKey — форматована форма не досягає жодного внутрішнього споживача.
+
 ## Секція U3: Деплой і жива верифікація
 
 - [x] **Tests**: —(деплой)
