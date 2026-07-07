@@ -16,6 +16,12 @@
       <button id="btn-create-profile" type="button">Створити профіль</button>
       <div>Ваш ID: <span id="pub-key-display">не згенеровано</span></div>
 
+      <div>
+        <label>Збережені профілі: <select id="profile-select"></select></label>
+        <label>Passphrase: <input id="unlock-passphrase" type="password" autocomplete="current-password"></label>
+        <button id="btn-profile-unlock" type="button">Розблокувати</button>
+      </div>
+
       <div id="profile-setup" hidden>
         <label>Passphrase профілю: <input id="profile-passphrase" type="password" autocomplete="new-password"></label>
         <button id="btn-profile-confirm" type="button">Створити</button>

@@ -183,7 +183,7 @@ describe("device linking protocol (link request / grant / apply)", () => {
     expect(await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, identity.publicKey, signature, message)).toBe(true);
 
     // Actually persisted: an independent load with the local passphrase works.
-    const reloaded = await loadPermanentProfile("new device passphrase");
+    const reloaded = await loadPermanentProfile(result.identityKeyPair.profileId, "new device passphrase");
     const reloadedSig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, reloaded.privateKey, message);
     expect(await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, identity.publicKey, reloadedSig, message)).toBe(true);
 

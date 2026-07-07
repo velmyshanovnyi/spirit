@@ -6,12 +6,16 @@ import { put, get, listKeys } from "./db.js";
 // milliseconds far beyond any realistic date.
 const TIMESTAMP_PAD = 16;
 
-function messageKey(contactId, timestamp) {
+function messageKey(profileId, contactId, timestamp) {
   const padded = String(timestamp).padStart(TIMESTAMP_PAD, "0");
   // Random suffix: two messages in the same millisecond must not overwrite
   // each other (put() upserts by key).
   const suffix = [...crypto.getRandomValues(new Uint8Array(4))].map((b) => b.toString(16).padStart(2, "0")).join("");
-  return `${contactId}:${padded}:${suffix}`;
+  // profileId namespaces histories of different OWN profiles (multi-account,
+  // Section 15): each profile's rows are encrypted with its own vault key,
+  // so without the namespace one profile's listMessages would throw on
+  // another profile's (legitimately undecryptable) rows.
+  return `${profileId}:${contactId}:${padded}:${suffix}`;
 }
 
 /**
@@ -21,10 +25,10 @@ function messageKey(contactId, timestamp) {
  * and coarse ordering, which the db's existence already implies.
  * Ephemeral mode simply never calls this.
  */
-export async function appendMessage(vaultKey, contactId, { direction, text, timestamp }) {
+export async function appendMessage(vaultKey, profileId, contactId, { direction, text, timestamp }) {
   const plaintext = new TextEncoder().encode(JSON.stringify({ direction, text, timestamp }));
   const ciphertext = await encryptForVault(vaultKey, plaintext);
-  await put("messages", messageKey(contactId, timestamp), ciphertext);
+  await put("messages", messageKey(profileId, contactId, timestamp), ciphertext);
 }
 
 /**
@@ -33,8 +37,8 @@ export async function appendMessage(vaultKey, contactId, { direction, text, time
  * @throws on a wrong vault key (AES-GCM auth failure) -- corrupted history
  *         must surface, not render as garbage.
  */
-export async function listMessages(vaultKey, contactId) {
-  const prefix = `${contactId}:`;
+export async function listMessages(vaultKey, profileId, contactId) {
+  const prefix = `${profileId}:${contactId}:`;
   const keys = (await listKeys("messages")).filter((key) => key.startsWith(prefix)).sort();
 
   const messages = [];

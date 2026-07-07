@@ -36,9 +36,9 @@
 
 ## Секція 15: Мультиакаунти в UI
 
-- [ ] **Tests**: `client/tests/profile.test.js` (доповнення) — `listProfiles()` повертає збережені профілі (id + мітка); `createPermanentProfile` додає, не перезаписуючи наявні; `loadPermanentProfile(profileId, passphrase)` розблоковує конкретний; legacy-запис `"identity"` читається і лінивo мігрується. `client/tests/app.test.js` (доповнення) — селектор профілю показує список, вибір + passphrase розблоковує обраний.
-- [ ] **Impl**: `client/js/profile.js` (розширення схеми ключів записів), `client/index.html`/`client/js/app.js` (селектор).
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/profile.test.js` (переписано під нові сигнатури) — `listProfiles()` за fingerprint-id, не плутає `deviceList:*`-записи з профілями; `createPermanentProfile` додає без перезапису; `loadPermanentProfile(profileId, passphrase)` розблоковує саме обраний (крос-passphrase між профілями відхиляється); legacy-запис `"identity"` лінивo мігрується на fingerprint-ключ при першому unlock (одноразово, та сама passphrase далі працює); ізоляція історій різних профілів (рядки профілю A невидимі і НЕ фатальні для B). `client/tests/historyStore.test.js` — неймспейс `<profileId>:<contactId>:...` + тест ізоляції. `client/tests/app.test.js` (4 нові + оновлені Секції 13/14/лінковки) — селектор заповнюється на init, unlock активує профіль і очищує поле, порожній passphrase/помилка розблокування → статус; лінковка вимагає активний профіль.
+- [x] **Impl**: `client/js/profile.js` — записи `account:<fingerprint>`, `listProfiles`/`loadPermanentProfile(profileId, ...)`/`exportRawIdentity(profileId, ...)`, `profileId` у поверненнях create/adopt, очищення stale-історії лише власного префікса; `client/js/historyStore.js` — profileId-неймспейс; `client/js/app.js` — селектор + unlock-обробник, per-profile ключ device-списку `deviceList:<profileId>`, guard активного профілю в лінковці; `client/index.html` — блок «Збережені профілі».
+- [x] **Exec review**: 1 ітерація, конвергенція без правок — [iter1](../reviews/phase2-section-15-multiaccounts-iter1.md). Живий браузерний smoke: create → reload → unlock → той самий fingerprint. Зафіксовано латентне cross-cutting питання на майбутнє: contacts-стор глобальний між профілями, і snapshot при лінковці надсилає його цілком — розглянути per-profile scoping разом із майбутнім contacts-UI.
 
 ## Верифікація
 

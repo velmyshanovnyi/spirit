@@ -12,6 +12,7 @@ async function freshVaultKey(passphrase = "history passphrase") {
   return deriveVaultKey(passphrase, generateSalt());
 }
 
+const PROFILE = "0".repeat(64); // own profile id (identity fingerprint)
 const CONTACT_A = "a".repeat(64); // identity fingerprints are 64-char hex
 const CONTACT_B = "b".repeat(64);
 
@@ -19,7 +20,7 @@ describe("appendMessage", () => {
   it("persists the message encrypted -- the plaintext never appears in the stored record or its key", async () => {
     const vaultKey = await freshVaultKey();
 
-    await appendMessage(vaultKey, CONTACT_A, { direction: "out", text: "цілком таємно", timestamp: 1000 });
+    await appendMessage(vaultKey, PROFILE, CONTACT_A, { direction: "out", text: "цілком таємно", timestamp: 1000 });
 
     const keys = await listKeys("messages");
     expect(keys.length).toBe(1);
@@ -34,11 +35,11 @@ describe("listMessages", () => {
   it("returns a contact's messages decrypted, in chronological order, even when appended out of order", async () => {
     const vaultKey = await freshVaultKey();
 
-    await appendMessage(vaultKey, CONTACT_A, { direction: "in", text: "third", timestamp: 3000 });
-    await appendMessage(vaultKey, CONTACT_A, { direction: "out", text: "first", timestamp: 1000 });
-    await appendMessage(vaultKey, CONTACT_A, { direction: "in", text: "second", timestamp: 2000 });
+    await appendMessage(vaultKey, PROFILE, CONTACT_A, { direction: "in", text: "third", timestamp: 3000 });
+    await appendMessage(vaultKey, PROFILE, CONTACT_A, { direction: "out", text: "first", timestamp: 1000 });
+    await appendMessage(vaultKey, PROFILE, CONTACT_A, { direction: "in", text: "second", timestamp: 2000 });
 
-    const messages = await listMessages(vaultKey, CONTACT_A);
+    const messages = await listMessages(vaultKey, PROFILE, CONTACT_A);
 
     expect(messages.map((m) => m.text)).toEqual(["first", "second", "third"]);
     expect(messages.map((m) => m.direction)).toEqual(["out", "in", "in"]);
@@ -49,30 +50,30 @@ describe("listMessages", () => {
     const vaultKey = await freshVaultKey();
 
     // "999" > "1000" lexicographically -- a naive string key would misorder these.
-    await appendMessage(vaultKey, CONTACT_A, { direction: "out", text: "later", timestamp: 1000 });
-    await appendMessage(vaultKey, CONTACT_A, { direction: "out", text: "earlier", timestamp: 999 });
+    await appendMessage(vaultKey, PROFILE, CONTACT_A, { direction: "out", text: "later", timestamp: 1000 });
+    await appendMessage(vaultKey, PROFILE, CONTACT_A, { direction: "out", text: "earlier", timestamp: 999 });
 
-    const messages = await listMessages(vaultKey, CONTACT_A);
+    const messages = await listMessages(vaultKey, PROFILE, CONTACT_A);
     expect(messages.map((m) => m.text)).toEqual(["earlier", "later"]);
   });
 
   it("does not mix messages between different contacts", async () => {
     const vaultKey = await freshVaultKey();
 
-    await appendMessage(vaultKey, CONTACT_A, { direction: "out", text: "for A", timestamp: 1000 });
-    await appendMessage(vaultKey, CONTACT_B, { direction: "out", text: "for B", timestamp: 1001 });
+    await appendMessage(vaultKey, PROFILE, CONTACT_A, { direction: "out", text: "for A", timestamp: 1000 });
+    await appendMessage(vaultKey, PROFILE, CONTACT_B, { direction: "out", text: "for B", timestamp: 1001 });
 
-    expect((await listMessages(vaultKey, CONTACT_A)).map((m) => m.text)).toEqual(["for A"]);
-    expect((await listMessages(vaultKey, CONTACT_B)).map((m) => m.text)).toEqual(["for B"]);
+    expect((await listMessages(vaultKey, PROFILE, CONTACT_A)).map((m) => m.text)).toEqual(["for A"]);
+    expect((await listMessages(vaultKey, PROFILE, CONTACT_B)).map((m) => m.text)).toEqual(["for B"]);
   });
 
   it("keeps two messages with the same timestamp for the same contact (no silent overwrite)", async () => {
     const vaultKey = await freshVaultKey();
 
-    await appendMessage(vaultKey, CONTACT_A, { direction: "out", text: "one", timestamp: 5000 });
-    await appendMessage(vaultKey, CONTACT_A, { direction: "out", text: "two", timestamp: 5000 });
+    await appendMessage(vaultKey, PROFILE, CONTACT_A, { direction: "out", text: "one", timestamp: 5000 });
+    await appendMessage(vaultKey, PROFILE, CONTACT_A, { direction: "out", text: "two", timestamp: 5000 });
 
-    const messages = await listMessages(vaultKey, CONTACT_A);
+    const messages = await listMessages(vaultKey, PROFILE, CONTACT_A);
     expect(messages.map((m) => m.text).sort()).toEqual(["one", "two"]);
   });
 
@@ -80,13 +81,25 @@ describe("listMessages", () => {
     const rightKey = await freshVaultKey("right");
     const wrongKey = await freshVaultKey("wrong");
 
-    await appendMessage(rightKey, CONTACT_A, { direction: "out", text: "secret", timestamp: 1000 });
+    await appendMessage(rightKey, PROFILE, CONTACT_A, { direction: "out", text: "secret", timestamp: 1000 });
 
-    await expect(listMessages(wrongKey, CONTACT_A)).rejects.toThrow();
+    await expect(listMessages(wrongKey, PROFILE, CONTACT_A)).rejects.toThrow();
   });
 
   it("returns an empty array for a contact with no history", async () => {
     const vaultKey = await freshVaultKey();
-    expect(await listMessages(vaultKey, CONTACT_A)).toEqual([]);
+    expect(await listMessages(vaultKey, PROFILE, CONTACT_A)).toEqual([]);
+  });
+
+  it("isolates histories of different OWN profiles for the same contact (multi-account)", async () => {
+    const keyA = await freshVaultKey("profile A");
+    const keyB = await freshVaultKey("profile B");
+    const otherProfile = "1".repeat(64);
+
+    await appendMessage(keyA, PROFILE, CONTACT_A, { direction: "out", text: "A's view", timestamp: 1000 });
+
+    // Profile B sees nothing for the same contact -- and does NOT throw on
+    // A's rows, which its vault key could never decrypt.
+    expect(await listMessages(keyB, otherProfile, CONTACT_A)).toEqual([]);
   });
 });

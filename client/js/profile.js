@@ -1,4 +1,4 @@
-import { generateIdentityKeyPair, exportPrivateKeyRaw, importPrivateKeyRaw, derivePublicKeyFromPrivate, importPrivateKeyFromScalar } from "./identity.js";
+import { generateIdentityKeyPair, exportPrivateKeyRaw, importPrivateKeyRaw, derivePublicKeyFromPrivate, importPrivateKeyFromScalar, fingerprint } from "./identity.js";
 import { generateSalt, deriveVaultKey, encryptForVault, decryptForVault } from "./vault.js";
 import { get, put, listKeys, remove } from "./db.js";
 import { bytesToBase64, base64ToBytes } from "./codec.js";
@@ -8,32 +8,61 @@ import { IncorrectPassphraseError, NoStoredProfileError } from "./errors.js";
 
 export { IncorrectPassphraseError, NoStoredProfileError };
 
-const PROFILE_RECORD_KEY = "identity";
+// Multi-account layout (Section 15): each profile lives under
+// "account:<identity fingerprint>". The pre-multi-account layout stored a
+// single record under the bare key "identity"; it is still listed and is
+// lazily migrated on first unlock (loadPermanentProfile).
+const ACCOUNT_KEY_PREFIX = "account:";
+const LEGACY_RECORD_KEY = "identity";
 const IDENTITY_ALGORITHM = { name: "ECDSA", namedCurve: "P-256" };
 
-export async function hasStoredProfile() {
-  const record = await get("profile", PROFILE_RECORD_KEY);
-  return record !== undefined;
+function accountRecordKey(profileId) {
+  return profileId === LEGACY_RECORD_KEY ? LEGACY_RECORD_KEY : ACCOUNT_KEY_PREFIX + profileId;
 }
 
-async function persistRawIdentity(rawPrivateKey, passphrase) {
+/**
+ * Lists stored profiles as { id } entries. The id is the identity
+ * fingerprint (or the literal "identity" for a not-yet-migrated legacy
+ * record). Non-account records sharing the "profile" store (e.g. the own
+ * device list, "deviceList:*") are excluded by the key prefix.
+ */
+export async function listProfiles() {
+  const keys = await listKeys("profile");
+  const profiles = keys
+    .filter((key) => key.startsWith(ACCOUNT_KEY_PREFIX))
+    .map((key) => ({ id: key.slice(ACCOUNT_KEY_PREFIX.length) }));
+  if (keys.includes(LEGACY_RECORD_KEY)) {
+    profiles.push({ id: LEGACY_RECORD_KEY });
+  }
+  return profiles;
+}
+
+export async function hasStoredProfile() {
+  return (await listProfiles()).length > 0;
+}
+
+async function persistRawIdentity(rawPrivateKey, passphrase, profileId) {
   const salt = generateSalt();
   const vaultKey = await deriveVaultKey(passphrase, salt);
   const encryptedPrivateKey = await encryptForVault(vaultKey, new Uint8Array(rawPrivateKey));
 
-  await put("profile", PROFILE_RECORD_KEY, {
+  await put("profile", accountRecordKey(profileId), {
     salt: bytesToBase64(salt),
     encryptedPrivateKey
   });
 
   // The salt above is FRESH, so this vaultKey can never decrypt message rows
-  // written by any previous profile on this device -- they aren't corrupt,
-  // just permanently sealed under a superseded key. Leaving them behind
-  // would make every later listMessages call throw, so they go with the
-  // profile they belonged to (applies to create, restore, and adopt alike).
-  // Contacts stay: they aren't encrypted and remain valid.
+  // THIS profile wrote before (re-create/re-adopt of the same identity) --
+  // they aren't corrupt, just permanently sealed under a superseded key.
+  // Leaving them behind would make every later listMessages call throw, so
+  // they go with the profile record they belonged to. Other profiles'
+  // histories live under their own id prefix and are untouched; contacts
+  // stay too (not encrypted, still valid).
+  const staleHistoryPrefix = `${profileId}:`;
   for (const key of await listKeys("messages")) {
-    await remove("messages", key);
+    if (key.startsWith(staleHistoryPrefix)) {
+      await remove("messages", key);
+    }
   }
 
   return vaultKey;
@@ -65,10 +94,11 @@ async function reconstructKeyPairFromRaw(rawPrivateKey) {
 export async function createPermanentProfile(passphrase) {
   const keyPair = await generateIdentityKeyPair();
   const rawPrivateKey = await exportPrivateKeyRaw(keyPair.privateKey);
-  const vaultKey = await persistRawIdentity(rawPrivateKey, passphrase);
+  const profileId = await fingerprint(keyPair.publicKey);
+  const vaultKey = await persistRawIdentity(rawPrivateKey, passphrase, profileId);
   // vaultKey stays available for the session: message history (historyStore.js)
   // is encrypted with it. The CryptoKey itself is non-extractable.
-  return { ...keyPair, vaultKey };
+  return { ...keyPair, vaultKey, profileId };
 }
 
 /**
@@ -81,14 +111,26 @@ export async function createPermanentProfile(passphrase) {
  *         stored data is corrupted -- these are indistinguishable at the
  *         AES-GCM layer by design (distinguishing them would be an oracle).
  */
-export async function loadPermanentProfile(passphrase) {
-  const { rawPrivateKey, vaultKey } = await decryptStoredRawIdentity(passphrase);
+export async function loadPermanentProfile(profileId, passphrase) {
+  const { rawPrivateKey, vaultKey } = await decryptStoredRawIdentity(profileId, passphrase);
   const keyPair = await reconstructKeyPairFromRaw(rawPrivateKey);
-  return { ...keyPair, vaultKey };
+  const realProfileId = await fingerprint(keyPair.publicKey);
+
+  if (profileId === LEGACY_RECORD_KEY) {
+    // Lazy migration: the legacy record's real id (the fingerprint) is only
+    // knowable after decryption. Move it under the account key -- same
+    // salt/ciphertext, so the same passphrase keeps working -- and drop the
+    // legacy key so this runs exactly once.
+    const record = await get("profile", LEGACY_RECORD_KEY);
+    await put("profile", ACCOUNT_KEY_PREFIX + realProfileId, record);
+    await remove("profile", LEGACY_RECORD_KEY);
+  }
+
+  return { ...keyPair, vaultKey, profileId: realProfileId };
 }
 
-async function decryptStoredRawIdentity(passphrase) {
-  const record = await get("profile", PROFILE_RECORD_KEY);
+async function decryptStoredRawIdentity(profileId, passphrase) {
+  const record = await get("profile", accountRecordKey(profileId));
   if (!record) {
     throw new NoStoredProfileError();
   }
@@ -113,8 +155,8 @@ async function decryptStoredRawIdentity(passphrase) {
  *
  * @throws {NoStoredProfileError} / {IncorrectPassphraseError} as loadPermanentProfile.
  */
-export async function exportRawIdentity(passphrase) {
-  const { rawPrivateKey } = await decryptStoredRawIdentity(passphrase);
+export async function exportRawIdentity(profileId, passphrase) {
+  const { rawPrivateKey } = await decryptStoredRawIdentity(profileId, passphrase);
   return rawPrivateKey;
 }
 
@@ -125,10 +167,11 @@ export async function exportRawIdentity(passphrase) {
  */
 export async function adoptIdentity(rawPrivateKey, localPassphrase) {
   const keyPair = await reconstructKeyPairFromRaw(rawPrivateKey);
-  const vaultKey = await persistRawIdentity(rawPrivateKey, localPassphrase);
+  const profileId = await fingerprint(keyPair.publicKey);
+  const vaultKey = await persistRawIdentity(rawPrivateKey, localPassphrase, profileId);
   // Same contract as create/load: the session vault key comes along, so a
   // just-linked or just-restored device can write history immediately.
-  return { ...keyPair, vaultKey };
+  return { ...keyPair, vaultKey, profileId };
 }
 
 /**

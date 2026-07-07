@@ -7,7 +7,7 @@ import {
   exportPrivateKeyScalar,
   exportPrivateKeyRaw
 } from "./identity.js";
-import { createPermanentProfile, exportRawIdentity } from "./profile.js";
+import { createPermanentProfile, exportRawIdentity, listProfiles, loadPermanentProfile } from "./profile.js";
 import { bytesToMnemonic } from "./mnemonic.js";
 import { createKeyfile } from "./keyfile.js";
 import {
@@ -23,11 +23,14 @@ import { createIdentityAnnounce, verifyIdentityAnnounce } from "./identityAnnoun
 import { rememberContact, getContact, updateContactDeviceList } from "./contacts.js";
 import { appendMessage, listMessages } from "./historyStore.js";
 
-const OWN_DEVICE_LIST_KEY = "deviceList";
 import { startAsInitiator, startAsJoiner, applyRemoteAnswer } from "./webrtc.js";
 import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer } from "./signalingClient.js";
 import { deriveSessionKey, encryptMessage, decryptMessage } from "./e2ee.js";
 import { promptGoogleSignIn, verifyGoogleIdToken } from "./googleOAuth.js";
+
+// Per-profile own device list record key in the "profile" store (Section 15:
+// multiple accounts each maintain their own list).
+const ownDeviceListKey = (profileId) => `deviceList:${profileId}`;
 
 const DEFAULT_ICE_TIMEOUT_MS = 15000;
 const DEFAULT_ANSWER_WAIT_TIMEOUT_MS = 5 * 60 * 1000; // matches the signaling node's default session TTL
@@ -98,7 +101,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
       }
       appendChat(text);
       if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
-        await appendMessage(state.identityKeyPair.vaultKey, state.peerFingerprint, {
+        await appendMessage(state.identityKeyPair.vaultKey, state.senderKey, state.peerFingerprint, {
           direction: "in",
           text,
           timestamp: Date.now()
@@ -133,7 +136,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
       // Known contact in profile mode: bring the prior conversation back
       // into the chat log before any new messages arrive.
       if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
-        const history = await listMessages(state.identityKeyPair.vaultKey, verified.fingerprint);
+        const history = await listMessages(state.identityKeyPair.vaultKey, state.senderKey, verified.fingerprint);
         for (const entry of history) {
           appendChat(`${entry.direction === "out" ? "→" : "←"} ${entry.text}`);
         }
@@ -173,7 +176,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
         state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify(announce)));
         // Follow up with the own device list, if this profile maintains one --
         // the peer verifies it against the identity just announced.
-        const ownDeviceList = await get("profile", OWN_DEVICE_LIST_KEY);
+        const ownDeviceList = await get("profile", ownDeviceListKey(state.senderKey));
         if (ownDeviceList) {
           state.channel.send(
             await encryptMessage(state.sessionKey, JSON.stringify({ type: "device-list-announce", list: ownDeviceList }))
@@ -340,6 +343,44 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
     el("profile-setup").hidden = false;
   });
 
+  async function refreshProfileSelector() {
+    const select = el("profile-select");
+    select.innerHTML = "";
+    for (const { id } of await listProfiles()) {
+      const option = doc.createElement("option");
+      option.value = id;
+      option.textContent = id === "identity" ? "профіль (стара версія)" : id.slice(0, 16) + "…";
+      select.appendChild(option);
+    }
+  }
+  // Fire-and-forget at startup; an empty selector is the correct state on error too.
+  refreshProfileSelector().catch(() => {});
+
+  withBusyButton(el("btn-profile-unlock"), async () => {
+    const passphrase = el("unlock-passphrase").value;
+    if (!passphrase) {
+      setProfileStatus("вкажіть passphrase профілю");
+      return;
+    }
+    const selectedId = el("profile-select").value;
+    if (!selectedId) {
+      setProfileStatus("немає збереженого профілю");
+      return;
+    }
+    try {
+      const profile = await loadPermanentProfile(selectedId, passphrase);
+      el("unlock-passphrase").value = "";
+      state.identityKeyPair = profile;
+      state.senderKey = profile.profileId;
+      el("pub-key-display").textContent = state.senderKey;
+      setProfileStatus("");
+      // A legacy record migrates on unlock -- its id changes to the fingerprint.
+      await refreshProfileSelector();
+    } catch (err) {
+      setProfileStatus(err.message);
+    }
+  });
+
   withBusyButton(el("btn-profile-confirm"), async () => {
     const passphrase = el("profile-passphrase").value;
     if (!passphrase) {
@@ -353,6 +394,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
     el("pub-key-display").textContent = state.senderKey;
     setProfileStatus("");
     el("backup-step").hidden = false;
+    await refreshProfileSelector();
   });
 
   withBusyButton(el("btn-backup-mnemonic"), async () => {
@@ -463,9 +505,15 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
       setDeviceLinkStatus("вкажіть passphrase профілю");
       return;
     }
+    if (!state.senderKey) {
+      setDeviceLinkStatus("спочатку створіть або розблокуйте профіль");
+      return;
+    }
+    // The active profile id is the identity fingerprint (= senderKey).
+    const activeProfileId = state.senderKey;
     // Re-deriving the raw identity from the vault both unlocks the bytes to
     // hand over AND makes linking require passphrase confirmation.
-    const identityRaw = await exportRawIdentity(passphrase);
+    const identityRaw = await exportRawIdentity(activeProfileId, passphrase);
     el("link-passphrase").value = "";
 
     const serverUrl = el("server-url").value;
@@ -500,9 +548,9 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
           state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify(grant)));
           // Record the new device in the own signed device list (Section 13):
           // contacts receiving the updated list will accept the new device.
-          const currentOwnList = (await get("profile", OWN_DEVICE_LIST_KEY)) ?? null;
+          const currentOwnList = (await get("profile", ownDeviceListKey(activeProfileId))) ?? null;
           const updatedOwnList = await appendDeviceToList(identityRaw, currentOwnList, grant.certificate);
-          await put("profile", OWN_DEVICE_LIST_KEY, updatedOwnList);
+          await put("profile", ownDeviceListKey(activeProfileId), updatedOwnList);
           setDeviceLinkStatus("пристрій прив'язано");
         }
       }
@@ -573,7 +621,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
     // Ephemeral mode has no vaultKey; an unverified peer has no fingerprint
     // to file the message under -- both skip silently.
     if (state.identityKeyPair && state.identityKeyPair.vaultKey && state.peerFingerprint) {
-      await appendMessage(state.identityKeyPair.vaultKey, state.peerFingerprint, {
+      await appendMessage(state.identityKeyPair.vaultKey, state.senderKey, state.peerFingerprint, {
         direction: "out",
         text,
         timestamp: Date.now()

@@ -4,6 +4,7 @@ import {
   createPermanentProfile,
   loadPermanentProfile,
   hasStoredProfile,
+  listProfiles,
   restoreProfileFromMnemonic,
   restoreProfileFromKeyfile,
   exportRawIdentity,
@@ -11,10 +12,10 @@ import {
   IncorrectPassphraseError,
   NoStoredProfileError
 } from "../js/profile.js";
-import { get } from "../js/db.js";
-import { exportPrivateKeyRaw, exportPrivateKeyScalar } from "../js/identity.js";
+import { get, put, listKeys } from "../js/db.js";
+import { exportPrivateKeyRaw, exportPrivateKeyScalar, fingerprint } from "../js/identity.js";
 import { bytesToBase64 } from "../js/codec.js";
-import { encryptForVault, decryptForVault } from "../js/vault.js";
+import { encryptForVault, decryptForVault, generateSalt, deriveVaultKey } from "../js/vault.js";
 import { appendMessage, listMessages } from "../js/historyStore.js";
 import { bytesToMnemonic } from "../js/mnemonic.js";
 import { createKeyfile } from "../js/keyfile.js";
@@ -23,40 +24,52 @@ beforeEach(() => {
   global.indexedDB = new IDBFactory();
 });
 
-describe("hasStoredProfile", () => {
-  it("returns false before any profile is created", async () => {
+describe("hasStoredProfile / listProfiles", () => {
+  it("reports no profiles before any is created", async () => {
     expect(await hasStoredProfile()).toBe(false);
+    expect(await listProfiles()).toEqual([]);
   });
 
-  it("returns true after a profile is created", async () => {
-    await createPermanentProfile("my passphrase");
+  it("lists every created profile by its identity fingerprint, without overwriting earlier ones", async () => {
+    const first = await createPermanentProfile("pass one");
+    const second = await createPermanentProfile("pass two");
+
     expect(await hasStoredProfile()).toBe(true);
+    const profiles = await listProfiles();
+    expect(profiles.map((p) => p.id).sort()).toEqual([first.profileId, second.profileId].sort());
+    expect(first.profileId).not.toBe(second.profileId);
+    // The id IS the identity fingerprint.
+    expect(first.profileId).toBe(await fingerprint(first.publicKey));
+  });
+
+  it("does not confuse non-account records in the profile store (e.g. device lists) with profiles", async () => {
+    const created = await createPermanentProfile("pass");
+    await put("profile", `deviceList:${created.profileId}`, { version: 1, certificates: [], signature: "S" });
+
+    expect((await listProfiles()).map((p) => p.id)).toEqual([created.profileId]);
   });
 });
 
 describe("createPermanentProfile", () => {
   it("generates an extractable ECDSA identity key pair and stores it encrypted in db", async () => {
-    const keyPair = await createPermanentProfile("my passphrase");
+    const created = await createPermanentProfile("my passphrase");
 
-    expect(keyPair.privateKey.algorithm.name).toBe("ECDSA");
-    expect(keyPair.publicKey.usages).toContain("verify");
+    expect(created.privateKey.algorithm.name).toBe("ECDSA");
+    expect(created.publicKey.usages).toContain("verify");
 
-    const record = await get("profile", "identity");
+    const record = await get("profile", `account:${created.profileId}`);
     expect(typeof record.salt).toBe("string");
     expect(typeof record.encryptedPrivateKey).toBe("string");
-    // The stored ciphertext value itself must not equal the raw exported key
-    // material -- i.e. it's genuinely encrypted, not stored as plaintext
-    // under a misleadingly-named field.
-    const rawPrivateKey = await exportPrivateKeyRaw(keyPair.privateKey);
+    const rawPrivateKey = await exportPrivateKeyRaw(created.privateKey);
     expect(record.encryptedPrivateKey).not.toBe(bytesToBase64(new Uint8Array(rawPrivateKey)));
   });
 });
 
 describe("loadPermanentProfile", () => {
-  it("restores a key pair that can sign/verify against the originally created key pair", async () => {
+  it("restores the selected profile's key pair (sign/verify cross-check with the original)", async () => {
     const created = await createPermanentProfile("correct horse battery staple");
 
-    const restored = await loadPermanentProfile("correct horse battery staple");
+    const restored = await loadPermanentProfile(created.profileId, "correct horse battery staple");
 
     const message = new TextEncoder().encode("profile-restore-check");
     const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, restored.privateKey, message);
@@ -65,11 +78,24 @@ describe("loadPermanentProfile", () => {
     expect(isValid).toBe(true);
   });
 
-  it("reuses the same stored salt across repeated loads (does not derive a fresh, incompatible key each time)", async () => {
-    await createPermanentProfile("same passphrase");
+  it("unlocks the RIGHT profile among several, each under its own passphrase", async () => {
+    const first = await createPermanentProfile("pass one");
+    const second = await createPermanentProfile("pass two");
 
-    const first = await loadPermanentProfile("same passphrase");
-    const second = await loadPermanentProfile("same passphrase");
+    const loadedFirst = await loadPermanentProfile(first.profileId, "pass one");
+    const loadedSecond = await loadPermanentProfile(second.profileId, "pass two");
+
+    expect(loadedFirst.profileId).toBe(first.profileId);
+    expect(loadedSecond.profileId).toBe(second.profileId);
+    // Cross-passphrase must fail: profiles are independent vaults.
+    await expect(loadPermanentProfile(first.profileId, "pass two")).rejects.toThrow(IncorrectPassphraseError);
+  });
+
+  it("reuses the same stored salt across repeated loads", async () => {
+    const created = await createPermanentProfile("same passphrase");
+
+    const first = await loadPermanentProfile(created.profileId, "same passphrase");
+    const second = await loadPermanentProfile(created.profileId, "same passphrase");
 
     const message = new TextEncoder().encode("consistency-check");
     const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, first.privateKey, message);
@@ -78,18 +104,46 @@ describe("loadPermanentProfile", () => {
     expect(isValid).toBe(true);
   });
 
-  it("throws IncorrectPassphraseError (a clear domain error) for a wrong passphrase", async () => {
-    await createPermanentProfile("the real passphrase");
-
-    await expect(loadPermanentProfile("a wrong passphrase")).rejects.toThrow(IncorrectPassphraseError);
+  it("throws IncorrectPassphraseError for a wrong passphrase", async () => {
+    const created = await createPermanentProfile("the real passphrase");
+    await expect(loadPermanentProfile(created.profileId, "a wrong passphrase")).rejects.toThrow(IncorrectPassphraseError);
   });
 
-  it("throws a clear error when no profile has been stored yet", async () => {
-    await expect(loadPermanentProfile("anything")).rejects.toThrow(NoStoredProfileError);
+  it("throws NoStoredProfileError for an unknown profile id", async () => {
+    await expect(loadPermanentProfile("f".repeat(64), "anything")).rejects.toThrow(NoStoredProfileError);
   });
 });
 
-describe("session vault key (history encryption, Section 11)", () => {
+describe("legacy single-profile record migration", () => {
+  async function plantLegacyRecord(passphrase) {
+    // Reproduce the exact pre-Section-15 storage shape under the "identity" key.
+    const created = await createPermanentProfile(passphrase);
+    const record = await get("profile", `account:${created.profileId}`);
+    await put("profile", "identity", record);
+    const { remove } = await import("../js/db.js");
+    await remove("profile", `account:${created.profileId}`);
+    return created;
+  }
+
+  it("lists the legacy record and lazily migrates it to a fingerprint key on unlock", async () => {
+    const created = await plantLegacyRecord("legacy pass");
+
+    const before = await listProfiles();
+    expect(before.map((p) => p.id)).toEqual(["identity"]);
+
+    const loaded = await loadPermanentProfile("identity", "legacy pass");
+    expect(loaded.profileId).toBe(created.profileId); // real fingerprint, not "identity"
+
+    // Migrated: now stored under the fingerprint, legacy key gone.
+    const after = await listProfiles();
+    expect(after.map((p) => p.id)).toEqual([created.profileId]);
+    expect(await get("profile", "identity")).toBeUndefined();
+    // And still loadable under the new key with the same passphrase.
+    await expect(loadPermanentProfile(created.profileId, "legacy pass")).resolves.toBeDefined();
+  });
+});
+
+describe("session vault key", () => {
   it("createPermanentProfile returns a usable vaultKey alongside the key pair", async () => {
     const profile = await createPermanentProfile("my passphrase");
 
@@ -99,18 +153,20 @@ describe("session vault key (history encryption, Section 11)", () => {
     expect(new Uint8Array(await decryptForVault(profile.vaultKey, ciphertext))).toEqual(new Uint8Array(plaintext));
   });
 
-  it("loadPermanentProfile returns the SAME vault key material (can decrypt what create's key encrypted)", async () => {
+  it("loadPermanentProfile returns the SAME vault key material", async () => {
     const created = await createPermanentProfile("my passphrase");
     const plaintext = new TextEncoder().encode("written at create time");
     const ciphertext = await encryptForVault(created.vaultKey, plaintext);
 
-    const loaded = await loadPermanentProfile("my passphrase");
+    const loaded = await loadPermanentProfile(created.profileId, "my passphrase");
 
     expect(new Uint8Array(await decryptForVault(loaded.vaultKey, ciphertext))).toEqual(new Uint8Array(plaintext));
   });
 });
 
-describe("vault key after restore/adopt (Section 14 gap from Section 11 review)", () => {
+describe("vault key and history isolation after restore/adopt", () => {
+  const CONTACT = "d".repeat(64);
+
   async function assertVaultKeyWorks(profile) {
     expect(profile.vaultKey).toBeDefined();
     const plaintext = new TextEncoder().encode("post-restore history");
@@ -118,11 +174,13 @@ describe("vault key after restore/adopt (Section 14 gap from Section 11 review)"
     expect(new Uint8Array(await decryptForVault(profile.vaultKey, ciphertext))).toEqual(new Uint8Array(plaintext));
   }
 
-  it("adoptIdentity returns a usable vaultKey (a linked device must be able to write history)", async () => {
+  it("adoptIdentity returns a usable vaultKey and profileId", async () => {
     const created = await createPermanentProfile("origin pass");
     const raw = await exportPrivateKeyRaw(created.privateKey);
 
-    await assertVaultKeyWorks(await adoptIdentity(raw, "device pass"));
+    const adopted = await adoptIdentity(raw, "device pass");
+    await assertVaultKeyWorks(adopted);
+    expect(adopted.profileId).toBe(created.profileId); // same identity, same id
   });
 
   it("restoreProfileFromMnemonic returns a usable vaultKey", async () => {
@@ -141,48 +199,48 @@ describe("vault key after restore/adopt (Section 14 gap from Section 11 review)"
     await assertVaultKeyWorks(await restoreProfileFromKeyfile(keyfile, "kf pass", "local pass"));
   });
 
-  it("createPermanentProfile over an old profile also clears its stale history", async () => {
-    const contactId = "e".repeat(64);
-    const first = await createPermanentProfile("first pass");
-    await appendMessage(first.vaultKey, contactId, { direction: "out", text: "first world", timestamp: 1000 });
-
-    const second = await createPermanentProfile("second pass");
-
-    await expect(listMessages(second.vaultKey, contactId)).resolves.toEqual([]);
-  });
-
-  it("adoptIdentity clears stale message history (undecryptable under the fresh vault key)", async () => {
-    const contactId = "d".repeat(64);
+  it("re-adopting the SAME identity clears its now-undecryptable history rows", async () => {
     const created = await createPermanentProfile("origin pass");
-    await appendMessage(created.vaultKey, contactId, { direction: "out", text: "old world", timestamp: 1000 });
+    await appendMessage(created.vaultKey, created.profileId, CONTACT, { direction: "out", text: "old", timestamp: 1000 });
     const raw = await exportPrivateKeyRaw(created.privateKey);
 
-    // Re-adopting the SAME identity generates a fresh salt -> different vault
-    // key; the old rows can never be decrypted again. Keeping them would make
-    // every later listMessages call throw on a benign stale-row condition.
     const adopted = await adoptIdentity(raw, "new device pass");
 
-    await expect(listMessages(adopted.vaultKey, contactId)).resolves.toEqual([]);
+    await expect(listMessages(adopted.vaultKey, adopted.profileId, CONTACT)).resolves.toEqual([]);
+  });
+
+  it("a DIFFERENT profile's history is isolated, not visible and not fatal to another profile", async () => {
+    const first = await createPermanentProfile("pass one");
+    await appendMessage(first.vaultKey, first.profileId, CONTACT, { direction: "out", text: "first's", timestamp: 1000 });
+
+    const second = await createPermanentProfile("pass two");
+
+    // Second profile sees nothing for the same contact -- and does NOT throw
+    // on first's rows (they're outside its namespace).
+    await expect(listMessages(second.vaultKey, second.profileId, CONTACT)).resolves.toEqual([]);
+    // And first's rows survive the second profile's creation.
+    const firstAgain = await loadPermanentProfile(first.profileId, "pass one");
+    expect((await listMessages(firstAgain.vaultKey, first.profileId, CONTACT)).map((m) => m.text)).toEqual(["first's"]);
   });
 });
 
 describe("exportRawIdentity", () => {
-  it("returns the stored raw private key bytes for the correct passphrase (device-linking needs them)", async () => {
+  it("returns the stored raw private key bytes for the correct profile and passphrase", async () => {
     const created = await createPermanentProfile("my passphrase");
     const expectedRaw = new Uint8Array(await exportPrivateKeyRaw(created.privateKey));
 
-    const raw = await exportRawIdentity("my passphrase");
+    const raw = await exportRawIdentity(created.profileId, "my passphrase");
 
     expect(new Uint8Array(raw)).toEqual(expectedRaw);
   });
 
   it("throws IncorrectPassphraseError for a wrong passphrase", async () => {
-    await createPermanentProfile("the real passphrase");
-    await expect(exportRawIdentity("wrong")).rejects.toThrow(IncorrectPassphraseError);
+    const created = await createPermanentProfile("the real passphrase");
+    await expect(exportRawIdentity(created.profileId, "wrong")).rejects.toThrow(IncorrectPassphraseError);
   });
 
-  it("throws NoStoredProfileError when no profile exists", async () => {
-    await expect(exportRawIdentity("anything")).rejects.toThrow(NoStoredProfileError);
+  it("throws NoStoredProfileError for an unknown profile id", async () => {
+    await expect(exportRawIdentity("f".repeat(64), "anything")).rejects.toThrow(NoStoredProfileError);
   });
 });
 
@@ -199,9 +257,7 @@ describe("restoreProfileFromMnemonic", () => {
     const isValid = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, created.publicKey, signature, message);
     expect(isValid).toBe(true);
 
-    // Persisted under the new local passphrase -- a subsequent independent
-    // load must succeed (proves it was actually saved, not just returned).
-    const reloaded = await loadPermanentProfile("new local passphrase");
+    const reloaded = await loadPermanentProfile(restored.profileId, "new local passphrase");
     const reloadedSignature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, reloaded.privateKey, message);
     const reloadedValid = await crypto.subtle.verify(
       { name: "ECDSA", hash: "SHA-256" },
@@ -213,10 +269,10 @@ describe("restoreProfileFromMnemonic", () => {
   });
 
   it("propagates mnemonic.js's own error for an invalid mnemonic, not a passphrase error", async () => {
-    const tooFewWords = Array(24).fill("abandon");
-    tooFewWords[0] = "not-a-real-bip39-word";
+    const badWords = Array(24).fill("abandon");
+    badWords[0] = "not-a-real-bip39-word";
 
-    await expect(restoreProfileFromMnemonic(tooFewWords, "local passphrase")).rejects.toThrow(
+    await expect(restoreProfileFromMnemonic(badWords, "local passphrase")).rejects.toThrow(
       /not in the BIP39 English wordlist/
     );
   });
@@ -235,7 +291,7 @@ describe("restoreProfileFromKeyfile", () => {
     const isValid = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, created.publicKey, signature, message);
     expect(isValid).toBe(true);
 
-    const reloaded = await loadPermanentProfile("new local passphrase");
+    const reloaded = await loadPermanentProfile(restored.profileId, "new local passphrase");
     const reloadedSignature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, reloaded.privateKey, message);
     const reloadedValid = await crypto.subtle.verify(
       { name: "ECDSA", hash: "SHA-256" },

@@ -12,7 +12,9 @@ vi.mock("../js/identity.js", () => ({
 }));
 vi.mock("../js/profile.js", () => ({
   createPermanentProfile: vi.fn(),
-  exportRawIdentity: vi.fn()
+  exportRawIdentity: vi.fn(),
+  listProfiles: vi.fn().mockResolvedValue([]),
+  loadPermanentProfile: vi.fn()
 }));
 vi.mock("../js/deviceLinking.js", () => ({
   generateDeviceKeyPair: vi.fn(),
@@ -75,7 +77,7 @@ import {
   exportPrivateKeyScalar,
   exportPrivateKeyRaw
 } from "../js/identity.js";
-import { createPermanentProfile, exportRawIdentity } from "../js/profile.js";
+import { createPermanentProfile, exportRawIdentity, listProfiles, loadPermanentProfile } from "../js/profile.js";
 import {
   generateDeviceKeyPair,
   createLinkRequest,
@@ -114,6 +116,9 @@ const HTML = `
     <div id="keyfile-display"></div>
   </div>
   <div id="backup-reminder" hidden>Ви не зробили резервну копію ключа</div>
+  <select id="profile-select"></select>
+  <input id="unlock-passphrase" type="password">
+  <button id="btn-profile-unlock" type="button">Розблокувати</button>
   <input id="link-passphrase" type="password">
   <button id="btn-link-device" type="button">Прив'язати новий пристрій</button>
   <input id="device-local-passphrase" type="password">
@@ -161,6 +166,69 @@ describe("btn-generate", () => {
 
     expect(generateIdentityKeyPair).toHaveBeenCalled();
     expect(fingerprint).toHaveBeenCalledWith(keyPair.publicKey);
+  });
+});
+
+describe("profile selector and unlock (Section 15)", () => {
+  it("populates the selector with stored profiles on init", async () => {
+    listProfiles.mockResolvedValue([{ id: "a".repeat(64) }, { id: "identity" }]);
+
+    initApp(document);
+
+    await vi.waitFor(() => {
+      const options = [...document.getElementById("profile-select").options].map((o) => o.value);
+      expect(options).toEqual(["a".repeat(64), "identity"]);
+    });
+  });
+
+  it("unlocks the selected profile with the entered passphrase and activates it", async () => {
+    listProfiles.mockResolvedValue([{ id: "identity" }]);
+    loadPermanentProfile.mockResolvedValue({
+      privateKey: { __tag: "unlocked-priv" },
+      publicKey: fakePublicKey("unlocked-pub"),
+      vaultKey: { __tag: "vault-key" },
+      profileId: "f".repeat(64)
+    });
+    fingerprint.mockResolvedValue("f".repeat(64));
+
+    initApp(document);
+    await vi.waitFor(() => expect(document.getElementById("profile-select").options.length).toBe(1));
+    document.getElementById("unlock-passphrase").value = "my pass";
+    document.getElementById("btn-profile-unlock").click();
+
+    await vi.waitFor(() =>
+      expect(document.getElementById("pub-key-display").textContent).toBe("f".repeat(64))
+    );
+    expect(loadPermanentProfile).toHaveBeenCalledWith("identity", "my pass");
+    // The secret must not linger in the DOM.
+    expect(document.getElementById("unlock-passphrase").value).toBe("");
+  });
+
+  it("refuses to unlock with an empty passphrase", async () => {
+    listProfiles.mockResolvedValue([{ id: "identity" }]);
+
+    initApp(document);
+    await vi.waitFor(() => expect(document.getElementById("profile-select").options.length).toBe(1));
+    document.getElementById("btn-profile-unlock").click();
+
+    await vi.waitFor(() =>
+      expect(document.getElementById("profile-status").textContent).toMatch(/passphrase/i)
+    );
+    expect(loadPermanentProfile).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a wrong-passphrase rejection as a status message", async () => {
+    listProfiles.mockResolvedValue([{ id: "identity" }]);
+    loadPermanentProfile.mockRejectedValue(new Error("Incorrect passphrase or corrupted data"));
+
+    initApp(document);
+    await vi.waitFor(() => expect(document.getElementById("profile-select").options.length).toBe(1));
+    document.getElementById("unlock-passphrase").value = "wrong";
+    document.getElementById("btn-profile-unlock").click();
+
+    await vi.waitFor(() =>
+      expect(document.getElementById("profile-status").textContent).toMatch(/Incorrect passphrase/)
+    );
   });
 });
 
@@ -818,7 +886,7 @@ describe("device-list transport (Section 13)", () => {
     createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
     encryptMessage.mockImplementation(async (_key, text) => `ENC(${text})`);
     dbGet.mockImplementation(async (store, key) =>
-      store === "profile" && key === "deviceList" ? ownDeviceList ?? undefined : undefined
+      store === "profile" && key === "deviceList:sender-fp" ? ownDeviceList ?? undefined : undefined
     );
 
     const channel = fakeChannel();
@@ -929,6 +997,12 @@ describe("device-list transport (Section 13)", () => {
   it("primary link flow appends the new device certificate to the own stored device list", async () => {
     const identityRaw = new Uint8Array([7, 7, 7]);
     exportRawIdentity.mockResolvedValue(identityRaw);
+    createPermanentProfile.mockResolvedValue({
+      privateKey: { __tag: "profile-priv" },
+      publicKey: fakePublicKey("profile-pub"),
+      vaultKey: { __tag: "vault-key" }
+    });
+    fingerprint.mockResolvedValue("profile-fp");
     generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
     createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
     createOffer.mockResolvedValue(undefined);
@@ -944,7 +1018,7 @@ describe("device-list transport (Section 13)", () => {
     encryptMessage.mockResolvedValue("ENCRYPTED_GRANT");
     const heldOwnList = { version: 1, certificates: [], signature: "OLD" };
     dbGet.mockImplementation(async (store, key) =>
-      store === "profile" && key === "deviceList" ? heldOwnList : undefined
+      store === "profile" && key === "deviceList:profile-fp" ? heldOwnList : undefined
     );
     const updatedOwnList = { version: 2, certificates: [certificate], signature: "NEW" };
     appendDeviceToList.mockResolvedValue(updatedOwnList);
@@ -957,6 +1031,10 @@ describe("device-list transport (Section 13)", () => {
     });
 
     initApp(document);
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "pass";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("profile-fp"));
     document.getElementById("link-passphrase").value = "my passphrase";
     document.getElementById("btn-link-device").click();
     await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
@@ -965,7 +1043,8 @@ describe("device-list transport (Section 13)", () => {
     await captured.onMessage("ENCRYPTED_REQUEST");
 
     await vi.waitFor(() => expect(appendDeviceToList).toHaveBeenCalledWith(identityRaw, heldOwnList, certificate));
-    expect(dbPut).toHaveBeenCalledWith("profile", "deviceList", updatedOwnList);
+    expect(exportRawIdentity).toHaveBeenCalledWith("profile-fp", "my passphrase");
+    expect(dbPut).toHaveBeenCalledWith("profile", "deviceList:profile-fp", updatedOwnList);
   });
 });
 
@@ -1030,7 +1109,7 @@ describe("chat history wiring (Section 14)", () => {
     document.getElementById("btn-send").click();
 
     await vi.waitFor(() => expect(appendMessage).toHaveBeenCalled());
-    expect(appendMessage).toHaveBeenCalledWith(VAULT_KEY, "peer-fp", {
+    expect(appendMessage).toHaveBeenCalledWith(VAULT_KEY, "profile-fp", "peer-fp", {
       direction: "out",
       text: "збережи мене",
       timestamp: expect.any(Number)
@@ -1044,7 +1123,7 @@ describe("chat history wiring (Section 14)", () => {
     await captured.onMessage("ENCRYPTED_TEXT");
 
     await vi.waitFor(() => expect(appendMessage).toHaveBeenCalled());
-    expect(appendMessage).toHaveBeenCalledWith(VAULT_KEY, "peer-fp", {
+    expect(appendMessage).toHaveBeenCalledWith(VAULT_KEY, "profile-fp", "peer-fp", {
       direction: "in",
       text: "вхідне для історії",
       timestamp: expect.any(Number)
@@ -1064,7 +1143,7 @@ describe("chat history wiring (Section 14)", () => {
       expect(log).toContain("давнє вихідне");
       expect(log).toContain("давнє вхідне");
     });
-    expect(listMessages).toHaveBeenCalledWith(VAULT_KEY, "peer-fp");
+    expect(listMessages).toHaveBeenCalledWith(VAULT_KEY, "profile-fp", "peer-fp");
   });
 
   it("writes nothing to history in ephemeral mode (send and receive)", async () => {
@@ -1131,10 +1210,25 @@ describe("device linking UI", () => {
       expect(createInvite).not.toHaveBeenCalled();
     });
 
+    it("refuses to link before an active profile exists", async () => {
+      initApp(document);
+      document.getElementById("link-passphrase").value = "some passphrase";
+      document.getElementById("btn-link-device").click();
+      await vi.waitFor(() =>
+        expect(document.getElementById("device-link-status").textContent).toMatch(/профіль/)
+      );
+      expect(exportRawIdentity).not.toHaveBeenCalled();
+    });
+
     it("unlocks the raw identity, creates an invite, and answers a link request with an encrypted grant", async () => {
       const identityRaw = new Uint8Array([7, 7, 7]);
       exportRawIdentity.mockResolvedValue(identityRaw);
-      fingerprint.mockResolvedValue("sender-fp");
+      createPermanentProfile.mockResolvedValue({
+        privateKey: { __tag: "profile-priv" },
+        publicKey: fakePublicKey("profile-pub"),
+        vaultKey: { __tag: "vault-key" }
+      });
+      fingerprint.mockResolvedValue("profile-fp");
       generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
       createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
       createOffer.mockResolvedValue(undefined);
@@ -1157,11 +1251,15 @@ describe("device linking UI", () => {
       });
 
       initApp(document);
+      document.getElementById("btn-create-profile").click();
+      document.getElementById("profile-passphrase").value = "pass";
+      document.getElementById("btn-profile-confirm").click();
+      await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("profile-fp"));
       document.getElementById("link-passphrase").value = "my passphrase";
       document.getElementById("btn-link-device").click();
       await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
 
-      expect(exportRawIdentity).toHaveBeenCalledWith("my passphrase");
+      expect(exportRawIdentity).toHaveBeenCalledWith("profile-fp", "my passphrase");
       // The secret must not linger in the DOM afterwards.
       expect(document.getElementById("link-passphrase").value).toBe("");
       expect(createInvite).toHaveBeenCalled();
