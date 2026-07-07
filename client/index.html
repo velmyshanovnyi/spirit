@@ -66,7 +66,9 @@
 
     <section>
       <h2>Інфраструктура</h2>
-      <label>Сигнальний вузол: <input id="server-url" type="text" value="http://localhost/spirit/index.php"></label>
+      <!-- Same-origin default (docs/signaling-protocol.md): the node that
+           serves this page also runs the signaling endpoint. -->
+      <label>Сигнальний вузол: <input id="server-url" type="text" value="spirit/public/index.php"></label>
       <label>STUN: <input id="stun-url" type="text" value="stun:stun.l.google.com:19302"></label>
       <label>Room ID: <input id="room-id" type="text"></label>
       <label>Invite token: <input id="invite-token" type="text"></label>
