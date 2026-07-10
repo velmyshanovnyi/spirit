@@ -23,7 +23,15 @@ import { createIdentityAnnounce, verifyIdentityAnnounce } from "./identityAnnoun
 import { rememberContact, getContact, updateContactDeviceList, listContacts } from "./contacts.js";
 import { appendMessage, listMessages, listConversations } from "./historyStore.js";
 
-import { startAsInitiator, startAsJoiner, applyRemoteAnswer } from "./webrtc.js";
+import {
+  startAsInitiator,
+  startAsJoiner,
+  applyRemoteAnswer,
+  addLocalMediaTracks,
+  createRenegotiationOffer,
+  createRenegotiationAnswer,
+  applyRenegotiationAnswer
+} from "./webrtc.js";
 import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer } from "./signalingClient.js";
 import { deriveSessionKey, encryptMessage, decryptMessage } from "./e2ee.js";
 import { promptGoogleSignIn, verifyGoogleIdToken } from "./googleOAuth.js";
@@ -109,7 +117,10 @@ export function initApp(
     peerFingerprint: null,
     // The verified peer identity key -- device-list announces are checked
     // against it (Section 13).
-    peerIdentityPublicKey: null
+    peerIdentityPublicKey: null,
+    // Own camera/mic MediaStream once a call has been started (Section V2);
+    // null before then and used by the camera/mic toggle buttons.
+    localStream: null
   };
 
   const el = (id) => doc.getElementById(id);
@@ -287,7 +298,28 @@ export function initApp(
     };
   }
 
-  const CONTROL_MESSAGE_TYPES = new Set(["identity-announce", "device-list-announce"]);
+  const CONTROL_MESSAGE_TYPES = new Set([
+    "identity-announce",
+    "device-list-announce",
+    "webrtc-call-offer",
+    "webrtc-call-answer"
+  ]);
+
+  const setVideoStatus = (text) => {
+    el("video-status").textContent = text;
+  };
+
+  // Auto-accept (Section V2, specs/ui/video-call.md): requesting our own
+  // camera+mic is how we both show local video AND have tracks to answer
+  // with -- there is no separate accept/reject step for the MVP.
+  async function acquireLocalStream() {
+    if (state.localStream) return state.localStream;
+    const stream = await doc.defaultView.navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    state.localStream = stream;
+    el("video-local").srcObject = stream;
+    addLocalMediaTracks(state.pc, stream);
+    return stream;
+  }
 
   /**
    * Default handler for decrypted chat-channel messages. Control messages
@@ -367,6 +399,28 @@ export function initApp(
       if (accepted !== heldList) {
         await updateContactDeviceList(state.peerFingerprint, accepted);
       }
+      return;
+    }
+
+    if (control.type === "webrtc-call-offer") {
+      // Same trust gate as plain chat text (line ~309 above): don't turn on
+      // the camera/mic for a peer whose identity hasn't been verified yet.
+      if (!state.peerFingerprint) {
+        setVideoStatus(t("status.incomingRejected"));
+        return;
+      }
+      try {
+        await acquireLocalStream();
+        const answer = await createRenegotiationAnswer(state.pc, control.sdp);
+        state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify({ type: "webrtc-call-answer", sdp: answer })));
+      } catch (err) {
+        setVideoStatus(t("status.error", { msg: err.message }));
+      }
+      return;
+    }
+
+    if (control.type === "webrtc-call-answer") {
+      await applyRenegotiationAnswer(state.pc, control.sdp);
     }
   }
 
@@ -406,6 +460,9 @@ export function initApp(
       onChannelOpen: (channel) => {
         state.channel = channel;
         setStatus(t("status.connected"));
+        for (const id of ["btn-start-call", "btn-toggle-camera", "btn-toggle-mic"]) {
+          el(id).disabled = false;
+        }
         if (afterChannelOpen) afterChannelOpen();
       },
       onMessage: async (payload) => {
@@ -419,7 +476,16 @@ export function initApp(
           setStatus(t("status.error", { msg: err.message }));
         }
       },
-      onChannelClose: () => setStatus(t("status.closed")),
+      onChannelClose: () => {
+        setStatus(t("status.closed"));
+        for (const id of ["btn-start-call", "btn-toggle-camera", "btn-toggle-mic"]) {
+          el(id).disabled = true;
+        }
+        if (state.localStream) {
+          for (const track of state.localStream.getTracks()) track.stop();
+          state.localStream = null;
+        }
+      },
       onError: (err) => {
         disarmIceTimeout(); // the local-description IIFE failed before onLocalOfferReady/onLocalAnswerReady
         // could ever fire to disarm it itself -- without this the stale ICE timeout
@@ -454,6 +520,9 @@ export function initApp(
     state.pc = startAsInitiator({
       rtcConfig,
       ...wireChannelCallbacks(disarmIceTimeout, channelOptions),
+      onRemoteTrack: (stream) => {
+        el("video-remote").srcObject = stream;
+      },
       onLocalOfferReady: async (offerSdp) => {
         disarmIceTimeout();
         try {
@@ -506,6 +575,9 @@ export function initApp(
       rtcConfig,
       offerSdp: JSON.parse(offer),
       ...wireChannelCallbacks(disarmIceTimeout, channelOptions),
+      onRemoteTrack: (stream) => {
+        el("video-remote").srcObject = stream;
+      },
       onLocalAnswerReady: async (answerSdp) => {
         disarmIceTimeout();
         try {
@@ -843,6 +915,36 @@ export function initApp(
         }
       }
     });
+  });
+
+  // Disabled until a chat channel connects (enabled in wireChannelCallbacks'
+  // onChannelOpen) -- there is no peer connection to add tracks to yet.
+  for (const id of ["btn-start-call", "btn-toggle-camera", "btn-toggle-mic"]) {
+    el(id).disabled = true;
+  }
+
+  withBusyButton(el("btn-start-call"), async () => {
+    try {
+      await acquireLocalStream();
+      const offer = await createRenegotiationOffer(state.pc);
+      state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify({ type: "webrtc-call-offer", sdp: offer })));
+    } catch (err) {
+      setVideoStatus(t("status.error", { msg: err.message }));
+    }
+  });
+
+  el("btn-toggle-camera").addEventListener("click", () => {
+    if (!state.localStream) return;
+    for (const track of state.localStream.getTracks()) {
+      if (track.kind === "video") track.enabled = !track.enabled;
+    }
+  });
+
+  el("btn-toggle-mic").addEventListener("click", () => {
+    if (!state.localStream) return;
+    for (const track of state.localStream.getTracks()) {
+      if (track.kind === "audio") track.enabled = !track.enabled;
+    }
   });
 
   el("btn-send").addEventListener("click", async () => {

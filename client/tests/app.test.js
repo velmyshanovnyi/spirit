@@ -58,7 +58,11 @@ vi.mock("../js/keyfile.js", () => ({
 vi.mock("../js/webrtc.js", () => ({
   startAsInitiator: vi.fn(),
   startAsJoiner: vi.fn(),
-  applyRemoteAnswer: vi.fn()
+  applyRemoteAnswer: vi.fn(),
+  addLocalMediaTracks: vi.fn(),
+  createRenegotiationOffer: vi.fn(),
+  createRenegotiationAnswer: vi.fn(),
+  applyRenegotiationAnswer: vi.fn()
 }));
 vi.mock("../js/signalingClient.js", () => ({
   createInvite: vi.fn(),
@@ -100,7 +104,15 @@ import { appendMessage, listMessages, listConversations } from "../js/historySto
 import { adminLogin, getAdminConfig } from "../js/adminAuth.js";
 import { bytesToMnemonic } from "../js/mnemonic.js";
 import { createKeyfile } from "../js/keyfile.js";
-import { startAsInitiator, startAsJoiner, applyRemoteAnswer } from "../js/webrtc.js";
+import {
+  startAsInitiator,
+  startAsJoiner,
+  applyRemoteAnswer,
+  addLocalMediaTracks,
+  createRenegotiationOffer,
+  createRenegotiationAnswer,
+  applyRenegotiationAnswer
+} from "../js/webrtc.js";
 import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer } from "../js/signalingClient.js";
 import { encryptMessage, decryptMessage, deriveSessionKey } from "../js/e2ee.js";
 import { promptGoogleSignIn, verifyGoogleIdToken } from "../js/googleOAuth.js";
@@ -173,9 +185,12 @@ const HTML = `
   </section>
 
   <section data-screen="conversation">
-    <button id="btn-start-call" type="button" disabled></button>
-    <button id="btn-toggle-camera" type="button" disabled></button>
-    <button id="btn-toggle-mic" type="button" disabled></button>
+    <video id="video-remote"></video>
+    <video id="video-local"></video>
+    <button id="btn-start-call" type="button"></button>
+    <button id="btn-toggle-camera" type="button"></button>
+    <button id="btn-toggle-mic" type="button"></button>
+    <div id="video-status"></div>
     <div id="chat-log"></div>
     <input id="message-input" type="text">
     <button id="btn-send" type="button">Надіслати</button>
@@ -1745,36 +1760,189 @@ describe("invite-link rendezvous (Section N6)", () => {
   });
 });
 
-describe("video call scaffold (Section N5)", () => {
-  it("shows disabled call/camera/mic controls on the conversation screen without blocking chat", async () => {
-    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+describe("video call (Section V2)", () => {
+  function fakeTrack(kind) {
+    return { kind, enabled: true, stop: vi.fn() };
+  }
+  function fakeStream(tracks) {
+    return { getTracks: () => tracks };
+  }
+
+  beforeEach(() => {
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn() },
+      configurable: true
+    });
+  });
+
+  // Drives the initiator chat flow up to an open channel + derived session
+  // key, mirroring establishedInitiatorChat() in the identity-announce suite
+  // above (that helper is scoped to its own describe block).
+  async function establishedInitiatorChat() {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: { __tag: "id-priv" }, publicKey: fakePublicKey("id-pub") });
     fingerprint.mockResolvedValue("sender-fp");
     generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
     createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
     createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
-    encryptMessage.mockResolvedValue("X");
+    encryptMessage.mockImplementation(async (_key, text) => `ENC(${text})`);
 
+    const channel = fakeChannel();
     let captured;
+    let pc;
     startAsInitiator.mockImplementation((opts) => {
       captured = opts;
-      return { __fakePc: true };
+      pc = { __fakePc: true };
+      return pc;
     });
 
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
-    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
     document.getElementById("btn-initiate").click();
     await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
-    captured.onChannelOpen(fakeChannel());
-    expect(visibleScreens()).toEqual(["conversation"]);
 
-    // Video controls are present but not yet functional (Section N5 scaffold).
+    captured.onChannelOpen(channel);
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+    return { captured, channel, pc };
+  }
+
+  // Calls are only auto-answered for a peer whose identity has already been
+  // verified via identity-announce (mirrors the chat-text gate in
+  // handleChatMessage) -- this drives that verification first.
+  async function establishedVerifiedInitiatorChat() {
+    verifyIdentityAnnounce.mockResolvedValue({ identityPublicKey: {}, identityPubkeyWire: "PEER", fingerprint: "peer-fp" });
+    const session = await establishedInitiatorChat();
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await session.captured.onMessage("ENCRYPTED_ANNOUNCE");
+    return session;
+  }
+
+  it("disables the call/camera/mic controls until the chat channel connects, then enables them", async () => {
+    initApp(document, { locale: "uk" });
     for (const id of ["btn-start-call", "btn-toggle-camera", "btn-toggle-mic"]) {
       expect(document.getElementById(id).disabled).toBe(true);
     }
-    // Chat itself is unaffected by the scaffold.
-    expect(document.getElementById("chat-log")).not.toBeNull();
-    expect(document.getElementById("message-input")).not.toBeNull();
+
+    await establishedInitiatorChat();
+    for (const id of ["btn-start-call", "btn-toggle-camera", "btn-toggle-mic"]) {
+      expect(document.getElementById(id).disabled).toBe(false);
+    }
+  });
+
+  it("registers onRemoteTrack when the peer connection is created", async () => {
+    const { captured } = await establishedInitiatorChat();
+    expect(typeof captured.onRemoteTrack).toBe("function");
+  });
+
+  it("clicking Дзвінок requests camera+mic, shows local video, and sends an encrypted call offer", async () => {
+    const localTracks = [fakeTrack("video"), fakeTrack("audio")];
+    const stream = fakeStream(localTracks);
+    navigator.mediaDevices.getUserMedia.mockResolvedValue(stream);
+    createRenegotiationOffer.mockResolvedValue({ type: "offer", sdp: "RENEG_OFFER" });
+
+    const { channel, pc } = await establishedInitiatorChat();
+    document.getElementById("btn-start-call").click();
+
+    await vi.waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({ video: true, audio: true }));
+    await vi.waitFor(() => expect(document.getElementById("video-local").srcObject).toBe(stream));
+    expect(addLocalMediaTracks).toHaveBeenCalledWith(pc, stream);
+    const expected = JSON.stringify({ type: "webrtc-call-offer", sdp: { type: "offer", sdp: "RENEG_OFFER" } });
+    await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith(`ENC(${expected})`));
+  });
+
+  it("auto-answers an incoming call offer with its own media and an encrypted call answer", async () => {
+    const localTracks = [fakeTrack("video"), fakeTrack("audio")];
+    const stream = fakeStream(localTracks);
+    navigator.mediaDevices.getUserMedia.mockResolvedValue(stream);
+    createRenegotiationAnswer.mockResolvedValue({ type: "answer", sdp: "RENEG_ANSWER" });
+
+    const { captured, channel, pc } = await establishedVerifiedInitiatorChat();
+    const offerMsg = { type: "webrtc-call-offer", sdp: { type: "offer", sdp: "PEER_OFFER" } };
+    decryptMessage.mockResolvedValueOnce(JSON.stringify(offerMsg));
+    await captured.onMessage("ENCRYPTED_CALL_OFFER");
+
+    await vi.waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({ video: true, audio: true }));
+    await vi.waitFor(() => expect(createRenegotiationAnswer).toHaveBeenCalledWith(pc, offerMsg.sdp));
+    const expected = JSON.stringify({ type: "webrtc-call-answer", sdp: { type: "answer", sdp: "RENEG_ANSWER" } });
+    await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith(`ENC(${expected})`));
+  });
+
+  it("does not auto-answer a call offer from a peer whose identity hasn't been verified yet", async () => {
+    const { captured } = await establishedInitiatorChat();
+    const offerMsg = { type: "webrtc-call-offer", sdp: { type: "offer", sdp: "PEER_OFFER" } };
+    decryptMessage.mockResolvedValueOnce(JSON.stringify(offerMsg));
+    await captured.onMessage("ENCRYPTED_CALL_OFFER");
+
+    expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+    expect(createRenegotiationAnswer).not.toHaveBeenCalled();
+  });
+
+  it("applies an incoming call answer via applyRenegotiationAnswer", async () => {
+    const { captured, pc } = await establishedInitiatorChat();
+    const answerMsg = { type: "webrtc-call-answer", sdp: { type: "answer", sdp: "PEER_ANSWER" } };
+    decryptMessage.mockResolvedValueOnce(JSON.stringify(answerMsg));
+    await captured.onMessage("ENCRYPTED_CALL_ANSWER");
+
+    await vi.waitFor(() => expect(applyRenegotiationAnswer).toHaveBeenCalledWith(pc, answerMsg.sdp));
+  });
+
+  it("sets the remote video's srcObject when a media track arrives", async () => {
+    const { captured } = await establishedInitiatorChat();
+    const remoteStream = fakeStream([fakeTrack("video")]);
+    captured.onRemoteTrack(remoteStream);
+    expect(document.getElementById("video-remote").srcObject).toBe(remoteStream);
+  });
+
+  it("toggles the camera/mic tracks without requesting getUserMedia again", async () => {
+    const localTracks = [fakeTrack("video"), fakeTrack("audio")];
+    const stream = fakeStream(localTracks);
+    navigator.mediaDevices.getUserMedia.mockResolvedValue(stream);
+    createRenegotiationOffer.mockResolvedValue({ type: "offer", sdp: "RENEG_OFFER" });
+
+    await establishedInitiatorChat();
+    document.getElementById("btn-start-call").click();
+    await vi.waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1));
+
+    document.getElementById("btn-toggle-camera").click();
+    expect(localTracks[0].enabled).toBe(false);
+    document.getElementById("btn-toggle-mic").click();
+    expect(localTracks[1].enabled).toBe(false);
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables the call controls and stops local tracks when the channel closes", async () => {
+    const localTracks = [fakeTrack("video"), fakeTrack("audio")];
+    const stream = fakeStream(localTracks);
+    navigator.mediaDevices.getUserMedia.mockResolvedValue(stream);
+    createRenegotiationOffer.mockResolvedValue({ type: "offer", sdp: "RENEG_OFFER" });
+
+    const { captured } = await establishedInitiatorChat();
+    document.getElementById("btn-start-call").click();
+    await vi.waitFor(() => expect(document.getElementById("video-local").srcObject).toBe(stream));
+
+    captured.onChannelClose();
+
+    for (const id of ["btn-start-call", "btn-toggle-camera", "btn-toggle-mic"]) {
+      expect(document.getElementById(id).disabled).toBe(true);
+    }
+    for (const track of localTracks) {
+      expect(track.stop).toHaveBeenCalled();
+    }
+  });
+
+  it("shows a status message instead of crashing when getUserMedia is denied", async () => {
+    navigator.mediaDevices.getUserMedia.mockRejectedValue(new Error("Permission denied"));
+
+    await establishedInitiatorChat();
+    document.getElementById("btn-start-call").click();
+
+    await vi.waitFor(() => expect(document.getElementById("video-status").textContent).toContain("Permission denied"));
   });
 });
 

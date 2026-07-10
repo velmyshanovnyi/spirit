@@ -189,21 +189,21 @@
       <section class="card card-wide">
         <h2 data-i18n="conversation.heading">Розмова</h2>
         <div class="video-area">
-          <div class="video-tile video-tile-remote" id="video-remote-placeholder" data-i18n="video.remotePlaceholder">Відео співрозмовника з'явиться тут</div>
-          <div class="video-tile video-tile-local" id="video-local-placeholder" data-i18n="video.localPlaceholder">Ваше відео</div>
+          <video id="video-remote" class="video-tile video-tile-remote" autoplay playsinline></video>
+          <video id="video-local" class="video-tile video-tile-local" autoplay playsinline muted></video>
         </div>
         <div class="btn-row">
-          <button id="btn-start-call" type="button" disabled data-i18n-title="video.comingSoon">
+          <button id="btn-start-call" type="button">
             <span aria-hidden="true">📞</span> <span data-i18n="video.startCall">Дзвінок</span>
           </button>
-          <button id="btn-toggle-camera" type="button" disabled data-i18n-title="video.comingSoon">
+          <button id="btn-toggle-camera" type="button">
             <span aria-hidden="true">🎥</span> <span data-i18n="video.toggleCamera">Камера</span>
           </button>
-          <button id="btn-toggle-mic" type="button" disabled data-i18n-title="video.comingSoon">
+          <button id="btn-toggle-mic" type="button">
             <span aria-hidden="true">🎤</span> <span data-i18n="video.toggleMic">Мікрофон</span>
           </button>
         </div>
-        <p class="hint-text" data-i18n="video.comingSoon">Відеодзвінок з'явиться найближчим часом</p>
+        <div id="video-status" class="status"></div>
 
         <div id="chat-log" class="chat-log"></div>
         <div class="chat-input-row">

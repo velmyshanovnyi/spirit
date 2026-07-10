@@ -422,7 +422,7 @@ button:disabled {
   display: contents;
 }
 
-/* ---------- Video call scaffold (Section N5 -- UI only, no media yet) ---------- */
+/* ---------- Video call (Section V, specs/ui/video-call.md) ---------- */
 
 .video-area {
   display: grid;
@@ -438,15 +438,11 @@ button:disabled {
 
 .video-tile {
   min-height: 140px;
-  display: grid;
-  place-items: center;
-  padding: 12px;
-  text-align: center;
-  font-size: 13px;
-  color: var(--muted);
+  width: 100%;
   background: var(--code-bg);
-  border: 1px dashed var(--border);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+  object-fit: cover;
 }
 
 .hint-text {
