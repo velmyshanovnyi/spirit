@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { IDBFactory } from "fake-indexeddb";
-import { rememberContact, getContact, updateContactDeviceList } from "../js/contacts.js";
+import { rememberContact, getContact, updateContactDeviceList, listContacts } from "../js/contacts.js";
 
 beforeEach(() => {
   global.indexedDB = new IDBFactory();
@@ -49,5 +49,27 @@ describe("updateContactDeviceList", () => {
 
   it("throws for an unknown contact instead of creating an orphan record", async () => {
     await expect(updateContactDeviceList("f".repeat(64), { version: 1 })).rejects.toThrow(/unknown contact/i);
+  });
+});
+
+describe("listContacts", () => {
+  it("returns an empty array when no contact has been remembered", async () => {
+    expect(await listContacts()).toEqual([]);
+  });
+
+  it("returns every remembered contact", async () => {
+    const other = "d".repeat(64);
+    await rememberContact({ fingerprint: FP, identityPubkeyWire: "PUB_WIRE_1", now: 1000 });
+    await rememberContact({ fingerprint: other, identityPubkeyWire: "PUB_WIRE_2", now: 2000 });
+
+    const contacts = await listContacts();
+
+    expect(contacts.map((c) => c.fingerprint).sort()).toEqual([FP, other].sort());
+    expect(contacts.find((c) => c.fingerprint === FP)).toEqual({
+      fingerprint: FP,
+      identityPubkeyWire: "PUB_WIRE_1",
+      firstSeen: 1000,
+      deviceList: null
+    });
   });
 });

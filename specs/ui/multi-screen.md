@@ -30,27 +30,27 @@
 
 ## Секція N2: Міграція наявних секцій у екрани
 
-- [ ] **Tests**: `client/tests/app.test.js` — усі наявні тести проходять (кожен екран рендериться прихованим, але елементи в DOM; тест перемикає на потрібний екран перед взаємодією або елементи доступні незалежно від видимості); нові: створення профілю авто-переходить на `#/profile`; channel-open авто-переходить на `#/conversation`.
-- [ ] **Impl**: `client/index.html` (розмітка `[data-screen]`-секцій + nav), `client/js/app.js` (виклик `initRouter`, авто-переходи), `client/css/style.css` (nav, приховані екрани). Ті самі id, та сама логіка.
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/app.test.js` — фікстура переписана під `[data-screen]`+nav, дзеркалить реальний index.html; усі 65 наявних тестів проходять без змін поведінки; нові (9): дефолтний екран, gated-редірект, ungated-доступ без identity, quick-chat→room, unlock→profile, backup-skip→profile, chat channel-open→conversation, device-linking channel-open НЕ переходить.
+- [x] **Impl**: `client/index.html` (7 `[data-screen]`-секцій + nav, перегрупування: account=онбординг, profile=адміністрування+пристрої+Google, server=інфра, room=кімната+з'єднання, conversation=чат+відео-каркас), `client/js/app.js` (`initRouter`, авто-переходи на 4 identity-точках + 2 chat-точках, dedup hashchange-listener для власного рендерингу), `client/css/style.css` (`.app-nav` fixed-sidebar/sticky-tabbar, `.screen{display:contents}`). Усі id збережені.
+- [x] **Exec review**: 1 ітерація (Sonnet, Opus недоступний — узгоджено з користувачем), конвергенція — [iter1](../reviews/multiscreen-N2-N4-iter1.md).
 
 ## Секція N3: Екран контактів
 
-- [ ] **Tests**: `client/tests/contacts.test.js` (доповнення) — `listContacts()` повертає всі TOFU-контакти (fingerprint, firstSeen, deviceList, verified-мітка); порожній масив без контактів. `client/tests/app.test.js` — екран контактів рендерить список збережених контактів активного профілю з форматованим Spirit ID; клік по контакту → перехід у розмову/історію з ним.
-- [ ] **Impl**: `client/js/contacts.js` (`listContacts`), `client/index.html`/`client/js/app.js` (екран).
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/contacts.test.js` (доповнення, 2) — `listContacts()` повертає всі TOFU-контакти; порожній масив без контактів. `client/tests/app.test.js` (2) — екран рендерить список з форматованим Spirit ID, приховує/показує empty-state.
+- [x] **Impl**: `client/js/contacts.js` (`listContacts`), `client/index.html`/`client/js/app.js` (екран, `renderContactsScreen`).
+- [x] **Exec review**: разом із N2 — [iter1](../reviews/multiscreen-N2-N4-iter1.md).
 
 ## Секція N4: Екран історії
 
-- [ ] **Tests**: `client/tests/historyStore.test.js` (доповнення) — `listConversations(vaultKey, profileId)` повертає розмови (contactId + к-сть/останнє повідомлення), не змішуючи профілі. `client/tests/app.test.js` — екран історії показує список розмов; вибір розмови рендерить повідомлення.
-- [ ] **Impl**: `client/js/historyStore.js` (`listConversations`), `client/index.html`/`client/js/app.js` (екран).
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/historyStore.test.js` (доповнення, 3) — `listConversations(vaultKey, profileId)` повертає {contactId, messageCount, lastMessage} на контакт, не змішуючи профілі. `client/tests/app.test.js` (2) — екран показує список розмов у профільному режимі, empty-state в ефемерному (без vaultKey).
+- [x] **Impl**: `client/js/historyStore.js` (`listConversations`), `client/index.html`/`client/js/app.js` (екран, `renderHistoryScreen`).
+- [x] **Exec review**: разом із N2 — [iter1](../reviews/multiscreen-N2-N4-iter1.md).
 
 ## Секція N5: Каркас відеодзвінка (рішення: каркас зараз, відео — наступним заходом)
 
-- [ ] **Tests**: `client/tests/app.test.js` — екран розмови містить область відео та кнопки дзвінка/камери/мікрофона, позначені «скоро» (disabled + `data-i18n` підказка); чат повністю робочий на цьому ж екрані (наявні send/receive-тести проходять після міграції).
-- [ ] **Impl**: `client/index.html` (місця під локальне/віддалене відео, disabled-кнопки дзвінка/камери/мікрофона з бейджем «скоро»), `client/css/style.css` (розкладка відео). Жодного медіа-коду у `webrtc.js` — окремий наступний захід.
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/app.test.js` — екран розмови показує disabled кнопки дзвінка/камери/мікрофона (з `data-i18n-title` "скоро") після встановлення чат-з'єднання; чат (chat-log/message-input) присутній і не заблокований каркасом.
+- [x] **Impl**: `client/index.html` (video-area з двома video-tile плейсхолдерами, три disabled-кнопки з іконкою+текстом окремими spans, hint-text "скоро"), `client/css/style.css` (`.video-area`/`.video-tile`/`.hint-text`). Жодного медіа-коду у `webrtc.js` — окремий наступний захід.
+- [x] **Exec review**: разом із N2 — [iter1](../reviews/multiscreen-N2-N4-iter1.md).
 
 ## Верифікація
 

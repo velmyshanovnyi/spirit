@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { IDBFactory } from "fake-indexeddb";
 import { generateSalt, deriveVaultKey } from "../js/vault.js";
-import { appendMessage, listMessages } from "../js/historyStore.js";
+import { appendMessage, listMessages, listConversations } from "../js/historyStore.js";
 import { get, listKeys } from "../js/db.js";
 
 beforeEach(() => {
@@ -101,5 +101,41 @@ describe("listMessages", () => {
     // Profile B sees nothing for the same contact -- and does NOT throw on
     // A's rows, which its vault key could never decrypt.
     expect(await listMessages(keyB, otherProfile, CONTACT_A)).toEqual([]);
+  });
+});
+
+describe("listConversations", () => {
+  it("returns an empty array when this profile has no history", async () => {
+    const vaultKey = await freshVaultKey();
+    expect(await listConversations(vaultKey, PROFILE)).toEqual([]);
+  });
+
+  it("returns one entry per contact, with the message count and the LAST message as preview", async () => {
+    const vaultKey = await freshVaultKey();
+    await appendMessage(vaultKey, PROFILE, CONTACT_A, { direction: "out", text: "hi", timestamp: 1000 });
+    await appendMessage(vaultKey, PROFILE, CONTACT_A, { direction: "in", text: "hey", timestamp: 2000 });
+    await appendMessage(vaultKey, PROFILE, CONTACT_A, { direction: "out", text: "latest for A", timestamp: 3000 });
+    await appendMessage(vaultKey, PROFILE, CONTACT_B, { direction: "in", text: "only one for B", timestamp: 1500 });
+
+    const conversations = await listConversations(vaultKey, PROFILE);
+
+    expect(conversations.map((c) => c.contactId).sort()).toEqual([CONTACT_A, CONTACT_B].sort());
+    const a = conversations.find((c) => c.contactId === CONTACT_A);
+    expect(a.messageCount).toBe(3);
+    expect(a.lastMessage).toEqual({ direction: "out", text: "latest for A", timestamp: 3000 });
+    const b = conversations.find((c) => c.contactId === CONTACT_B);
+    expect(b.messageCount).toBe(1);
+    expect(b.lastMessage).toEqual({ direction: "in", text: "only one for B", timestamp: 1500 });
+  });
+
+  it("does not mix conversations of different OWN profiles (multi-account)", async () => {
+    const keyA = await freshVaultKey("profile A");
+    const keyB = await freshVaultKey("profile B");
+    const otherProfile = "1".repeat(64);
+
+    await appendMessage(keyA, PROFILE, CONTACT_A, { direction: "out", text: "A's conversation", timestamp: 1000 });
+
+    // Profile B's own (empty) history must not throw on A's undecryptable rows.
+    expect(await listConversations(keyB, otherProfile)).toEqual([]);
   });
 });

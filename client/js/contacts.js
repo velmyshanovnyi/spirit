@@ -1,4 +1,4 @@
-import { get, put } from "./db.js";
+import { get, put, listKeys } from "./db.js";
 
 /**
  * TOFU contact registry (docs/accounts.md): a contact is keyed by its
@@ -22,6 +22,16 @@ export async function rememberContact({ fingerprint, identityPubkeyWire, now = D
 
 export async function getContact(fingerprint) {
   return get("contacts", fingerprint);
+}
+
+/**
+ * All TOFU-registered contacts (contacts screen, Section N3). The store is
+ * currently global across profiles on this device (a known, tracked latent
+ * gap -- see specs/reviews/phase2-section-15-multiaccounts-iter1.md).
+ */
+export async function listContacts() {
+  const keys = await listKeys("contacts");
+  return Promise.all(keys.map((key) => get("contacts", key)));
 }
 
 /**

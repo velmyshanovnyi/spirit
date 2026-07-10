@@ -49,3 +49,34 @@ export async function listMessages(vaultKey, profileId, contactId) {
   }
   return messages;
 }
+
+/**
+ * One entry per contact this profile has history with (history screen,
+ * Section N4): { contactId, messageCount, lastMessage }. Only the last
+ * message per contact is decrypted -- listing a large history shouldn't
+ * decrypt every row just to build a preview.
+ */
+export async function listConversations(vaultKey, profileId) {
+  const prefix = `${profileId}:`;
+  const keys = (await listKeys("messages")).filter((key) => key.startsWith(prefix)).sort();
+
+  const keysByContact = new Map();
+  for (const key of keys) {
+    const contactId = key.slice(prefix.length, key.indexOf(":", prefix.length));
+    if (!keysByContact.has(contactId)) keysByContact.set(contactId, []);
+    keysByContact.get(contactId).push(key);
+  }
+
+  const conversations = [];
+  for (const [contactId, contactKeys] of keysByContact) {
+    const lastKey = contactKeys[contactKeys.length - 1]; // sorted -> chronologically last
+    const ciphertext = await get("messages", lastKey);
+    const plaintext = await decryptForVault(vaultKey, ciphertext);
+    conversations.push({
+      contactId,
+      messageCount: contactKeys.length,
+      lastMessage: JSON.parse(new TextDecoder().decode(plaintext))
+    });
+  }
+  return conversations;
+}

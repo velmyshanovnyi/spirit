@@ -36,11 +36,13 @@ vi.mock("../js/identityAnnounce.js", () => ({
 vi.mock("../js/contacts.js", () => ({
   rememberContact: vi.fn(),
   getContact: vi.fn(),
-  updateContactDeviceList: vi.fn()
+  updateContactDeviceList: vi.fn(),
+  listContacts: vi.fn().mockResolvedValue([])
 }));
 vi.mock("../js/historyStore.js", () => ({
   appendMessage: vi.fn(),
-  listMessages: vi.fn().mockResolvedValue([])
+  listMessages: vi.fn().mockResolvedValue([]),
+  listConversations: vi.fn().mockResolvedValue([])
 }));
 vi.mock("../js/mnemonic.js", () => ({
   bytesToMnemonic: vi.fn()
@@ -87,9 +89,9 @@ import {
   acceptNewerDeviceList
 } from "../js/deviceLinking.js";
 import { createIdentityAnnounce, verifyIdentityAnnounce } from "../js/identityAnnounce.js";
-import { rememberContact, getContact, updateContactDeviceList } from "../js/contacts.js";
+import { rememberContact, getContact, updateContactDeviceList, listContacts } from "../js/contacts.js";
 import { get as dbGet, put as dbPut } from "../js/db.js";
-import { appendMessage, listMessages } from "../js/historyStore.js";
+import { appendMessage, listMessages, listConversations } from "../js/historyStore.js";
 import { bytesToMnemonic } from "../js/mnemonic.js";
 import { createKeyfile } from "../js/keyfile.js";
 import { startAsInitiator, startAsJoiner, applyRemoteAnswer } from "../js/webrtc.js";
@@ -98,48 +100,81 @@ import { encryptMessage, decryptMessage, deriveSessionKey } from "../js/e2ee.js"
 import { promptGoogleSignIn, verifyGoogleIdToken } from "../js/googleOAuth.js";
 import { initApp } from "../js/app.js";
 
+const ROUTES = ["account", "profile", "server", "room", "conversation", "contacts", "history"];
+
 const HTML = `
-  <button id="btn-generate" type="button">Швидкий чат</button>
-  <button id="btn-create-profile" type="button">Створити профіль</button>
-  <div>Ваш ID: <span id="pub-key-display" data-i18n="id.none">не згенеровано</span></div>
-  <div id="profile-setup" hidden>
-    <input id="profile-passphrase" type="password">
-    <button id="btn-profile-confirm" type="button">Створити</button>
-    <div id="profile-status"></div>
-  </div>
-  <div id="backup-step" hidden>
-    <button id="btn-backup-mnemonic" type="button">Показати мнемоніку</button>
-    <input id="keyfile-passphrase" type="password">
-    <button id="btn-backup-keyfile" type="button">Створити keyfile</button>
-    <button id="btn-backup-skip" type="button">Пропустити</button>
-    <div id="mnemonic-display"></div>
-    <div id="keyfile-display"></div>
-  </div>
-  <div id="backup-reminder" hidden>Ви не зробили резервну копію ключа</div>
   <button id="theme-toggle" type="button"></button>
   <select id="lang-select"></select>
-  <h2 id="account-heading" data-i18n="section.account"></h2>
-  <select id="profile-select"></select>
-  <input id="unlock-passphrase" type="password">
-  <button id="btn-profile-unlock" type="button">Розблокувати</button>
-  <input id="link-passphrase" type="password">
-  <button id="btn-link-device" type="button">Прив'язати новий пристрій</button>
-  <input id="device-local-passphrase" type="password">
-  <button id="btn-join-as-device" type="button">Приєднати цей пристрій</button>
-  <div id="device-link-status"></div>
-  <input id="google-client-id" type="text" value="test-client-id">
-  <button id="btn-google-verify" type="button">Підтвердити через Google</button>
-  <div id="google-verify-status"></div>
-  <input id="server-url" type="text" value="http://node.example/index.php">
-  <input id="stun-url" type="text" value="stun:stun.example:19302">
-  <input id="room-id" type="text">
-  <input id="invite-token" type="text">
-  <button id="btn-initiate" type="button">Ініціювати чат</button>
-  <button id="btn-join" type="button">Приєднатися до чату</button>
-  <div id="connection-status" data-i18n="conn.none">не з'єднано</div>
-  <div id="chat-log"></div>
-  <input id="message-input" type="text">
-  <button id="btn-send" type="button">Надіслати</button>
+  <nav>
+    ${ROUTES.map((r) => `<a class="nav-item" data-route="${r}" href="#/${r}">${r}</a>`).join("")}
+  </nav>
+
+  <section data-screen="account">
+    <h2 id="account-heading" data-i18n="section.account"></h2>
+    <button id="btn-generate" type="button">Швидкий чат</button>
+    <button id="btn-create-profile" type="button">Створити профіль</button>
+    <div id="profile-setup" hidden>
+      <input id="profile-passphrase" type="password">
+      <button id="btn-profile-confirm" type="button">Створити</button>
+    </div>
+    <div id="profile-status"></div>
+    <div id="backup-step" hidden>
+      <button id="btn-backup-mnemonic" type="button">Показати мнемоніку</button>
+      <input id="keyfile-passphrase" type="password">
+      <button id="btn-backup-keyfile" type="button">Створити keyfile</button>
+      <button id="btn-backup-skip" type="button">Пропустити</button>
+      <div id="mnemonic-display"></div>
+      <div id="keyfile-display"></div>
+    </div>
+    <div id="backup-reminder" hidden>Ви не зробили резервну копію ключа</div>
+  </section>
+
+  <section data-screen="profile">
+    <div>Ваш ID: <span id="pub-key-display" data-i18n="id.none">не згенеровано</span></div>
+    <select id="profile-select"></select>
+    <input id="unlock-passphrase" type="password">
+    <button id="btn-profile-unlock" type="button">Розблокувати</button>
+    <input id="link-passphrase" type="password">
+    <button id="btn-link-device" type="button">Прив'язати новий пристрій</button>
+    <input id="device-local-passphrase" type="password">
+    <button id="btn-join-as-device" type="button">Приєднати цей пристрій</button>
+    <div id="device-link-status"></div>
+    <input id="google-client-id" type="text" value="test-client-id">
+    <button id="btn-google-verify" type="button">Підтвердити через Google</button>
+    <div id="google-verify-status"></div>
+  </section>
+
+  <section data-screen="server">
+    <input id="server-url" type="text" value="http://node.example/index.php">
+    <input id="stun-url" type="text" value="stun:stun.example:19302">
+  </section>
+
+  <section data-screen="room">
+    <input id="room-id" type="text">
+    <input id="invite-token" type="text">
+    <button id="btn-initiate" type="button">Ініціювати чат</button>
+    <button id="btn-join" type="button">Приєднатися до чату</button>
+    <div id="connection-status" data-i18n="conn.none">не з'єднано</div>
+  </section>
+
+  <section data-screen="conversation">
+    <button id="btn-start-call" type="button" disabled></button>
+    <button id="btn-toggle-camera" type="button" disabled></button>
+    <button id="btn-toggle-mic" type="button" disabled></button>
+    <div id="chat-log"></div>
+    <input id="message-input" type="text">
+    <button id="btn-send" type="button">Надіслати</button>
+  </section>
+
+  <section data-screen="contacts">
+    <div id="contacts-list"></div>
+    <p id="contacts-empty"></p>
+  </section>
+
+  <section data-screen="history">
+    <div id="history-list"></div>
+    <p id="history-empty"></p>
+  </section>
 `;
 
 function fakePublicKey(tag) {
@@ -151,9 +186,18 @@ function fakeChannel() {
 }
 
 beforeEach(() => {
+  location.hash = "";
   document.body.innerHTML = HTML;
   vi.clearAllMocks();
+  listProfiles.mockResolvedValue([]);
+  listMessages.mockResolvedValue([]);
+  listConversations.mockResolvedValue([]);
+  listContacts.mockResolvedValue([]);
 });
+
+function visibleScreens() {
+  return [...document.querySelectorAll("[data-screen]")].filter((s) => !s.hidden).map((s) => s.dataset.screen);
+}
 
 describe("btn-generate", () => {
   it("generates an identity key pair and displays its fingerprint", async () => {
@@ -1391,6 +1435,263 @@ describe("device linking UI", () => {
       // The secret must not linger in the DOM afterwards.
       expect(document.getElementById("device-local-passphrase").value).toBe("");
     });
+  });
+});
+
+describe("video call scaffold (Section N5)", () => {
+  it("shows disabled call/camera/mic controls on the conversation screen without blocking chat", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(fakeChannel());
+    expect(visibleScreens()).toEqual(["conversation"]);
+
+    // Video controls are present but not yet functional (Section N5 scaffold).
+    for (const id of ["btn-start-call", "btn-toggle-camera", "btn-toggle-mic"]) {
+      expect(document.getElementById(id).disabled).toBe(true);
+    }
+    // Chat itself is unaffected by the scaffold.
+    expect(document.getElementById("chat-log")).not.toBeNull();
+    expect(document.getElementById("message-input")).not.toBeNull();
+  });
+});
+
+describe("multi-screen navigation (Section N2)", () => {
+  it("defaults to the account screen", () => {
+    initApp(document, { locale: "uk" });
+    expect(visibleScreens()).toEqual(["account"]);
+  });
+
+  it("redirects gated screens to account before any identity exists", () => {
+    initApp(document, { locale: "uk" });
+
+    location.hash = "#/profile";
+    window.dispatchEvent(new Event("hashchange"));
+    expect(visibleScreens()).toEqual(["account"]);
+
+    location.hash = "#/contacts";
+    window.dispatchEvent(new Event("hashchange"));
+    expect(visibleScreens()).toEqual(["account"]);
+  });
+
+  it("allows ungated screens (server, room) without any identity", () => {
+    initApp(document, { locale: "uk" });
+
+    location.hash = "#/server";
+    window.dispatchEvent(new Event("hashchange"));
+    expect(visibleScreens()).toEqual(["server"]);
+
+    location.hash = "#/room";
+    window.dispatchEvent(new Event("hashchange"));
+    expect(visibleScreens()).toEqual(["room"]);
+  });
+
+  it("quick-chat (ephemeral) navigates straight to the room screen", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+  });
+
+  it("unlocking a stored profile navigates to the profile screen", async () => {
+    listProfiles.mockResolvedValue([{ id: "identity" }]);
+    loadPermanentProfile.mockResolvedValue({
+      privateKey: {},
+      publicKey: fakePublicKey("unlocked-pub"),
+      vaultKey: { __tag: "vault-key" },
+      profileId: "f".repeat(64)
+    });
+
+    initApp(document, { locale: "uk" });
+    // Leave the default account screen first so the navigation is observable.
+    location.hash = "#/server";
+    window.dispatchEvent(new Event("hashchange"));
+    await vi.waitFor(() => expect(document.getElementById("profile-select").options.length).toBe(1));
+
+    document.getElementById("unlock-passphrase").value = "my pass";
+    document.getElementById("btn-profile-unlock").click();
+
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["profile"]));
+  });
+
+  it("skipping backup after creating a profile navigates to the profile screen", async () => {
+    createPermanentProfile.mockResolvedValue({
+      privateKey: {},
+      publicKey: fakePublicKey("profile-pub"),
+      vaultKey: { __tag: "vault-key" }
+    });
+    fingerprint.mockResolvedValue("profile-fp");
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "pass";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("backup-step").hidden).toBe(false));
+    // Still on account until backup is explicitly dismissed.
+    expect(visibleScreens()).toEqual(["account"]);
+
+    document.getElementById("btn-backup-skip").click();
+
+    expect(visibleScreens()).toEqual(["profile"]);
+  });
+
+  it("an established chat connection (initiator) navigates to the conversation screen", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+
+    captured.onChannelOpen(fakeChannel());
+
+    expect(visibleScreens()).toEqual(["conversation"]);
+  });
+
+  it("device-linking channels do NOT navigate to the conversation screen", async () => {
+    createPermanentProfile.mockResolvedValue({
+      privateKey: {},
+      publicKey: fakePublicKey("profile-pub"),
+      vaultKey: { __tag: "vault-key" }
+    });
+    fingerprint.mockResolvedValue("profile-fp");
+    exportRawIdentity.mockResolvedValue(new Uint8Array([1, 2, 3]));
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "pass";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("backup-step").hidden).toBe(false));
+    document.getElementById("btn-backup-skip").click();
+    expect(visibleScreens()).toEqual(["profile"]);
+
+    document.getElementById("link-passphrase").value = "my pass";
+    document.getElementById("btn-link-device").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+
+    captured.onChannelOpen(fakeChannel());
+
+    // Must stay on profile -- this channel is for device linking, not chat.
+    expect(visibleScreens()).toEqual(["profile"]);
+  });
+});
+
+describe("contacts and history screens (Sections N3/N4)", () => {
+  async function reachScreen(route) {
+    location.hash = `#/${route}`;
+    window.dispatchEvent(new Event("hashchange"));
+  }
+
+  it("contacts screen lists every stored contact and hides the empty-state message", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    listContacts.mockResolvedValue([
+      { fingerprint: "a".repeat(64), identityPubkeyWire: "W1", firstSeen: 1, deviceList: null },
+      { fingerprint: "b".repeat(64), identityPubkeyWire: "W2", firstSeen: 2, deviceList: null }
+    ]);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+
+    await reachScreen("contacts");
+    await vi.waitFor(() => expect(listContacts).toHaveBeenCalled());
+
+    const rows = document.querySelectorAll("#contacts-list .list-row");
+    expect(rows.length).toBe(2);
+    expect(document.getElementById("contacts-empty").hidden).toBe(true);
+  });
+
+  it("contacts screen shows the empty-state message when there are none", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+
+    await reachScreen("contacts");
+    await vi.waitFor(() => expect(listContacts).toHaveBeenCalled());
+
+    expect(document.getElementById("contacts-empty").hidden).toBe(false);
+    expect(document.querySelectorAll("#contacts-list .list-row").length).toBe(0);
+  });
+
+  it("history screen lists conversations for the active PROFILE-mode identity", async () => {
+    createPermanentProfile.mockResolvedValue({
+      privateKey: {},
+      publicKey: fakePublicKey("profile-pub"),
+      vaultKey: { __tag: "vault-key" }
+    });
+    fingerprint.mockResolvedValue("profile-fp");
+    listConversations.mockResolvedValue([
+      { contactId: "a".repeat(64), messageCount: 3, lastMessage: { direction: "out", text: "hi", timestamp: 1 } }
+    ]);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "pass";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("backup-step").hidden).toBe(false));
+    document.getElementById("btn-backup-skip").click();
+
+    await reachScreen("history");
+    await vi.waitFor(() => expect(listConversations).toHaveBeenCalledWith({ __tag: "vault-key" }, "profile-fp"));
+
+    expect(document.querySelectorAll("#history-list .list-row").length).toBe(1);
+    expect(document.getElementById("history-empty").hidden).toBe(true);
+  });
+
+  it("history screen shows the empty-state message in ephemeral mode (no vault key)", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+
+    await reachScreen("history");
+
+    expect(document.getElementById("history-empty").hidden).toBe(false);
+    expect(listConversations).not.toHaveBeenCalled();
   });
 });
 

@@ -26,114 +26,194 @@
     </div>
   </header>
 
+  <nav class="app-nav" aria-label="Screens">
+    <a class="nav-item" data-route="account" href="#/account">
+      <span class="nav-icon" aria-hidden="true">＋</span><span data-i18n="nav.account">Акаунт</span>
+    </a>
+    <a class="nav-item" data-route="profile" href="#/profile">
+      <span class="nav-icon" aria-hidden="true">☺</span><span data-i18n="nav.profile">Профіль</span>
+    </a>
+    <a class="nav-item" data-route="server" href="#/server">
+      <span class="nav-icon" aria-hidden="true">☁</span><span data-i18n="nav.server">Сервер</span>
+    </a>
+    <a class="nav-item" data-route="room" href="#/room">
+      <span class="nav-icon" aria-hidden="true">🔑</span><span data-i18n="nav.room">Кімната</span>
+    </a>
+    <a class="nav-item" data-route="conversation" href="#/conversation">
+      <span class="nav-icon" aria-hidden="true">💬</span><span data-i18n="nav.conversation">Розмова</span>
+    </a>
+    <a class="nav-item" data-route="contacts" href="#/contacts">
+      <span class="nav-icon" aria-hidden="true">☰</span><span data-i18n="nav.contacts">Контакти</span>
+    </a>
+    <a class="nav-item" data-route="history" href="#/history">
+      <span class="nav-icon" aria-hidden="true">🕘</span><span data-i18n="nav.history">Історія</span>
+    </a>
+  </nav>
+
   <main class="layout">
-    <section class="card">
-      <h2 data-i18n="section.account">Акаунт</h2>
-      <div class="btn-row">
-        <button id="btn-generate" type="button" data-i18n="btn.quickChat">Швидкий чат (ефемерний)</button>
-        <button id="btn-create-profile" type="button" class="btn-primary" data-i18n="btn.createProfile">Створити профіль</button>
-      </div>
-      <div class="identity"><span data-i18n="label.yourId">Ваш ID:</span> <code id="pub-key-display" data-i18n="id.none">не згенеровано</code></div>
 
-      <div class="subgroup">
-        <label class="field"><span data-i18n="label.storedProfiles">Збережені профілі:</span>
-          <select id="profile-select"></select>
-        </label>
-        <label class="field"><span data-i18n="label.unlockPassphrase">Passphrase:</span>
-          <input id="unlock-passphrase" type="password" autocomplete="current-password">
-        </label>
-        <div class="btn-row"><button id="btn-profile-unlock" type="button" data-i18n="btn.unlock">Розблокувати</button></div>
-      </div>
-
-      <div id="profile-setup" hidden class="subgroup">
-        <label class="field"><span data-i18n="label.profilePassphrase">Passphrase профілю:</span>
-          <input id="profile-passphrase" type="password" autocomplete="new-password">
-        </label>
-        <div class="btn-row"><button id="btn-profile-confirm" type="button" class="btn-primary" data-i18n="btn.createProfileConfirm">Створити</button></div>
-      </div>
-      <div id="profile-status" class="status"></div>
-
-      <div id="backup-step" hidden class="subgroup">
-        <h3 data-i18n="backup.heading">Резервна копія ключа</h3>
+    <!-- ================= Створення акаунта ================= -->
+    <section data-screen="account" class="screen">
+      <section class="card">
+        <h2 data-i18n="section.account">Акаунт</h2>
         <div class="btn-row">
-          <button id="btn-backup-mnemonic" type="button" data-i18n="btn.showMnemonic">Показати мнемоніку</button>
-          <button id="btn-backup-skip" type="button" data-i18n="btn.skip">Пропустити</button>
+          <button id="btn-generate" type="button" data-i18n="btn.quickChat">Швидкий чат (ефемерний)</button>
+          <button id="btn-create-profile" type="button" class="btn-primary" data-i18n="btn.createProfile">Створити профіль</button>
         </div>
-        <label class="field"><span data-i18n="label.keyfilePassphrase">Passphrase keyfile:</span>
-          <input id="keyfile-passphrase" type="password" autocomplete="new-password">
+
+        <div id="profile-setup" hidden class="subgroup">
+          <label class="field"><span data-i18n="label.profilePassphrase">Passphrase профілю:</span>
+            <input id="profile-passphrase" type="password" autocomplete="new-password">
+          </label>
+          <div class="btn-row"><button id="btn-profile-confirm" type="button" class="btn-primary" data-i18n="btn.createProfileConfirm">Створити</button></div>
+        </div>
+        <div id="profile-status" class="status"></div>
+
+        <div id="backup-step" hidden class="subgroup">
+          <h3 data-i18n="backup.heading">Резервна копія ключа</h3>
+          <div class="btn-row">
+            <button id="btn-backup-mnemonic" type="button" data-i18n="btn.showMnemonic">Показати мнемоніку</button>
+            <button id="btn-backup-skip" type="button" data-i18n="btn.skip">Пропустити</button>
+          </div>
+          <label class="field"><span data-i18n="label.keyfilePassphrase">Passphrase keyfile:</span>
+            <input id="keyfile-passphrase" type="password" autocomplete="new-password">
+          </label>
+          <div class="btn-row"><button id="btn-backup-keyfile" type="button" data-i18n="btn.createKeyfile">Створити keyfile</button></div>
+          <div id="mnemonic-display" class="secret-output"></div>
+          <div id="keyfile-display" class="secret-output"></div>
+        </div>
+
+        <div id="backup-reminder" hidden class="banner-warn" data-i18n="backup.reminder">⚠ Ви не зробили резервну копію ключа — без неї профіль неможливо відновити.</div>
+      </section>
+    </section>
+
+    <!-- ================= Адміністрування акаунта (профіль) ================= -->
+    <section data-screen="profile" class="screen">
+      <section class="card">
+        <h2 data-i18n="section.profileAdmin">Профіль</h2>
+        <div class="identity"><span data-i18n="label.yourId">Ваш ID:</span> <code id="pub-key-display" data-i18n="id.none">не згенеровано</code></div>
+
+        <div class="subgroup">
+          <label class="field"><span data-i18n="label.storedProfiles">Збережені профілі:</span>
+            <select id="profile-select"></select>
+          </label>
+          <label class="field"><span data-i18n="label.unlockPassphrase">Passphrase:</span>
+            <input id="unlock-passphrase" type="password" autocomplete="current-password">
+          </label>
+          <div class="btn-row"><button id="btn-profile-unlock" type="button" data-i18n="btn.unlock">Розблокувати</button></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2 data-i18n="devices.heading">Пристрої</h2>
+        <div class="subgroup">
+          <h3 data-i18n="devices.primary">На основному пристрої</h3>
+          <label class="field"><span data-i18n="label.linkPassphrase">Passphrase профілю:</span>
+            <input id="link-passphrase" type="password" autocomplete="current-password">
+          </label>
+          <div class="btn-row"><button id="btn-link-device" type="button" data-i18n="btn.linkDevice">Прив'язати новий пристрій</button></div>
+        </div>
+        <div class="subgroup">
+          <h3 data-i18n="devices.new">На новому пристрої</h3>
+          <p data-i18n="devices.instructions">Заповніть Room ID та invite token з основного пристрою (екран «Кімната»).</p>
+          <label class="field"><span data-i18n="label.deviceLocalPassphrase">Passphrase для цього пристрою:</span>
+            <input id="device-local-passphrase" type="password" autocomplete="new-password">
+          </label>
+          <div class="btn-row"><button id="btn-join-as-device" type="button" data-i18n="btn.joinAsDevice">Приєднати цей пристрій</button></div>
+        </div>
+        <div id="device-link-status" class="status"></div>
+      </section>
+
+      <section class="card">
+        <h2 data-i18n="verify.heading">Верифікація</h2>
+        <label class="field"><span data-i18n="label.googleClientId">Google Client ID:</span>
+          <input id="google-client-id" type="text">
         </label>
-        <div class="btn-row"><button id="btn-backup-keyfile" type="button" data-i18n="btn.createKeyfile">Створити keyfile</button></div>
-        <div id="mnemonic-display" class="secret-output"></div>
-        <div id="keyfile-display" class="secret-output"></div>
-      </div>
-
-      <div id="backup-reminder" hidden class="banner-warn" data-i18n="backup.reminder">⚠ Ви не зробили резервну копію ключа — без неї профіль неможливо відновити.</div>
+        <div class="btn-row"><button id="btn-google-verify" type="button" data-i18n="btn.googleVerify">Підтвердити через Google</button></div>
+        <div id="google-verify-status" class="status"></div>
+      </section>
     </section>
 
-    <section class="card">
-      <h2 data-i18n="devices.heading">Пристрої</h2>
-      <div class="subgroup">
-        <h3 data-i18n="devices.primary">На основному пристрої</h3>
-        <label class="field"><span data-i18n="label.linkPassphrase">Passphrase профілю:</span>
-          <input id="link-passphrase" type="password" autocomplete="current-password">
+    <!-- ================= Адміністрування сервера ================= -->
+    <section data-screen="server" class="screen">
+      <section class="card">
+        <h2 data-i18n="infra.heading">Інфраструктура</h2>
+        <label class="field"><span data-i18n="label.signalingNode">Сигнальний вузол:</span>
+          <!-- Same-origin default (docs/signaling-protocol.md): the node that
+               serves this page also runs the signaling endpoint. -->
+          <input id="server-url" type="text" value="spirit/public/index.php">
         </label>
-        <div class="btn-row"><button id="btn-link-device" type="button" data-i18n="btn.linkDevice">Прив'язати новий пристрій</button></div>
-      </div>
-      <div class="subgroup">
-        <h3 data-i18n="devices.new">На новому пристрої</h3>
-        <p data-i18n="devices.instructions">Заповніть Room ID та invite token з основного пристрою (розділ «Інфраструктура»).</p>
-        <label class="field"><span data-i18n="label.deviceLocalPassphrase">Passphrase для цього пристрою:</span>
-          <input id="device-local-passphrase" type="password" autocomplete="new-password">
+        <label class="field"><span data-i18n="label.stun">STUN:</span>
+          <input id="stun-url" type="text" value="stun:stun.l.google.com:19302">
         </label>
-        <div class="btn-row"><button id="btn-join-as-device" type="button" data-i18n="btn.joinAsDevice">Приєднати цей пристрій</button></div>
-      </div>
-      <div id="device-link-status" class="status"></div>
+      </section>
     </section>
 
-    <section class="card">
-      <h2 data-i18n="verify.heading">Верифікація</h2>
-      <label class="field"><span data-i18n="label.googleClientId">Google Client ID:</span>
-        <input id="google-client-id" type="text">
-      </label>
-      <div class="btn-row"><button id="btn-google-verify" type="button" data-i18n="btn.googleVerify">Підтвердити через Google</button></div>
-      <div id="google-verify-status" class="status"></div>
+    <!-- ================= Ініціація / приєднання до кімнати ================= -->
+    <section data-screen="room" class="screen">
+      <section class="card">
+        <h2 data-i18n="infra.roomHeading">Кімната</h2>
+        <label class="field"><span data-i18n="label.roomId">Room ID:</span>
+          <input id="room-id" type="text">
+        </label>
+        <label class="field"><span data-i18n="label.inviteToken">Invite token:</span>
+          <input id="invite-token" type="text">
+        </label>
+        <div class="btn-row">
+          <button id="btn-initiate" type="button" class="btn-primary" data-i18n="btn.initiate">Ініціювати чат</button>
+          <button id="btn-join" type="button" data-i18n="btn.join">Приєднатися до чату</button>
+        </div>
+        <div id="connection-status" class="status" data-i18n="conn.none">не з'єднано</div>
+      </section>
     </section>
 
-    <section class="card">
-      <h2 data-i18n="infra.heading">Інфраструктура</h2>
-      <label class="field"><span data-i18n="label.signalingNode">Сигнальний вузол:</span>
-        <!-- Same-origin default (docs/signaling-protocol.md): the node that
-             serves this page also runs the signaling endpoint. -->
-        <input id="server-url" type="text" value="spirit/public/index.php">
-      </label>
-      <label class="field"><span data-i18n="label.stun">STUN:</span>
-        <input id="stun-url" type="text" value="stun:stun.l.google.com:19302">
-      </label>
-      <label class="field"><span data-i18n="label.roomId">Room ID:</span>
-        <input id="room-id" type="text">
-      </label>
-      <label class="field"><span data-i18n="label.inviteToken">Invite token:</span>
-        <input id="invite-token" type="text">
-      </label>
+    <!-- ================= Розмова (чат + відеодзвінок) ================= -->
+    <section data-screen="conversation" class="screen">
+      <section class="card card-wide">
+        <h2 data-i18n="conversation.heading">Розмова</h2>
+        <div class="video-area">
+          <div class="video-tile video-tile-remote" id="video-remote-placeholder" data-i18n="video.remotePlaceholder">Відео співрозмовника з'явиться тут</div>
+          <div class="video-tile video-tile-local" id="video-local-placeholder" data-i18n="video.localPlaceholder">Ваше відео</div>
+        </div>
+        <div class="btn-row">
+          <button id="btn-start-call" type="button" disabled data-i18n-title="video.comingSoon">
+            <span aria-hidden="true">📞</span> <span data-i18n="video.startCall">Дзвінок</span>
+          </button>
+          <button id="btn-toggle-camera" type="button" disabled data-i18n-title="video.comingSoon">
+            <span aria-hidden="true">🎥</span> <span data-i18n="video.toggleCamera">Камера</span>
+          </button>
+          <button id="btn-toggle-mic" type="button" disabled data-i18n-title="video.comingSoon">
+            <span aria-hidden="true">🎤</span> <span data-i18n="video.toggleMic">Мікрофон</span>
+          </button>
+        </div>
+        <p class="hint-text" data-i18n="video.comingSoon">Відеодзвінок з'явиться найближчим часом</p>
+
+        <div id="chat-log" class="chat-log"></div>
+        <div class="chat-input-row">
+          <input id="message-input" type="text" data-i18n-placeholder="chat.placeholder">
+          <button id="btn-send" type="button" class="btn-primary" data-i18n="btn.send">Надіслати</button>
+        </div>
+      </section>
     </section>
 
-    <section class="card card-wide">
-      <h2 data-i18n="conn.heading">З'єднання</h2>
-      <div class="btn-row">
-        <button id="btn-initiate" type="button" class="btn-primary" data-i18n="btn.initiate">Ініціювати чат</button>
-        <button id="btn-join" type="button" data-i18n="btn.join">Приєднатися до чату</button>
-      </div>
-      <div id="connection-status" class="status" data-i18n="conn.none">не з'єднано</div>
+    <!-- ================= Контакти ================= -->
+    <section data-screen="contacts" class="screen">
+      <section class="card card-wide">
+        <h2 data-i18n="contacts.heading">Контакти</h2>
+        <div id="contacts-list" class="list-area"></div>
+        <p id="contacts-empty" class="hint-text" data-i18n="contacts.empty">Поки що немає жодного контакту</p>
+      </section>
     </section>
 
-    <section class="card card-wide">
-      <h2 data-i18n="chat.heading">Чат</h2>
-      <div id="chat-log" class="chat-log"></div>
-      <div class="chat-input-row">
-        <input id="message-input" type="text" data-i18n-placeholder="chat.placeholder">
-        <button id="btn-send" type="button" class="btn-primary" data-i18n="btn.send">Надіслати</button>
-      </div>
+    <!-- ================= Історія ================= -->
+    <section data-screen="history" class="screen">
+      <section class="card card-wide">
+        <h2 data-i18n="history.heading">Історія</h2>
+        <div id="history-list" class="list-area"></div>
+        <p id="history-empty" class="hint-text" data-i18n="history.empty">Поки що немає жодної розмови</p>
+      </section>
     </section>
+
   </main>
 
   <script type="module">

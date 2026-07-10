@@ -20,8 +20,8 @@ import {
 } from "./deviceLinking.js";
 import { listKeys, get, put } from "./db.js";
 import { createIdentityAnnounce, verifyIdentityAnnounce } from "./identityAnnounce.js";
-import { rememberContact, getContact, updateContactDeviceList } from "./contacts.js";
-import { appendMessage, listMessages } from "./historyStore.js";
+import { rememberContact, getContact, updateContactDeviceList, listContacts } from "./contacts.js";
+import { appendMessage, listMessages, listConversations } from "./historyStore.js";
 
 import { startAsInitiator, startAsJoiner, applyRemoteAnswer } from "./webrtc.js";
 import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer } from "./signalingClient.js";
@@ -30,6 +30,10 @@ import { promptGoogleSignIn, verifyGoogleIdToken } from "./googleOAuth.js";
 import { t, setLocale, detectLocale, applyTranslations, getLocale, SUPPORTED_LOCALES } from "./i18n.js";
 import { initTheme, toggleTheme } from "./theme.js";
 import { formatSpiritId } from "./spiritId.js";
+import { initRouter } from "./router.js";
+
+const ROUTES = ["account", "profile", "server", "room", "conversation", "contacts", "history"];
+const GATED_ROUTES = ["profile", "conversation", "contacts", "history"];
 
 // Per-profile own device list record key in the "profile" store (Section 15:
 // multiple accounts each maintain their own list).
@@ -97,6 +101,66 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
   const appendChat = (text) => {
     el("chat-log").textContent += text + "\n";
   };
+
+  async function renderContactsScreen() {
+    const list = el("contacts-list");
+    const empty = el("contacts-empty");
+    if (!list || !empty) return; // screen not present in this document (e.g. older test fixture)
+    const contacts = await listContacts();
+    list.innerHTML = "";
+    empty.hidden = contacts.length > 0;
+    for (const contact of contacts) {
+      const row = doc.createElement("div");
+      row.className = "list-row";
+      row.dataset.contactFingerprint = contact.fingerprint;
+      row.textContent = formatSpiritId(contact.fingerprint);
+      list.appendChild(row);
+    }
+  }
+
+  async function renderHistoryScreen() {
+    const list = el("history-list");
+    const empty = el("history-empty");
+    if (!list || !empty) return;
+    if (!state.identityKeyPair || !state.identityKeyPair.vaultKey) {
+      list.innerHTML = "";
+      empty.hidden = false;
+      return;
+    }
+    const conversations = await listConversations(state.identityKeyPair.vaultKey, state.senderKey);
+    list.innerHTML = "";
+    empty.hidden = conversations.length > 0;
+    for (const conversation of conversations) {
+      const row = doc.createElement("div");
+      row.className = "list-row";
+      row.dataset.contactFingerprint = conversation.contactId;
+      row.textContent = formatSpiritId(conversation.contactId);
+      list.appendChild(row);
+    }
+  }
+
+  const router = initRouter(doc, {
+    routes: ROUTES,
+    defaultRoute: "account",
+    gatedRoutes: GATED_ROUTES,
+    hasIdentity: () => !!state.senderKey
+  });
+
+  // Re-initializing (tests creating multiple app instances in one window)
+  // must not stack listeners -- only the latest initApp() call's handler,
+  // closing over its own `state`, should ever react (same pattern as
+  // router.js's own hashchange listener).
+  const win = doc.defaultView;
+  const onScreenChange = () => {
+    const route = win.location.hash.replace(/^#\/?/, "");
+    if (route === "contacts") renderContactsScreen();
+    if (route === "history") renderHistoryScreen();
+  };
+  if (win.__spiritAppHashListener) {
+    win.removeEventListener("hashchange", win.__spiritAppHashListener);
+  }
+  win.__spiritAppHashListener = onScreenChange;
+  win.addEventListener("hashchange", onScreenChange);
 
   function armIceTimeout() {
     let settled = false;
@@ -367,6 +431,10 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
     state.identityKeyPair = await generateIdentityKeyPair();
     state.senderKey = await fingerprint(state.identityKeyPair.publicKey);
     setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
+    // Ephemeral quick-chat has no profile to administer -- go straight to
+    // the room screen rather than the profile screen (used for permanent
+    // profiles: unlock, backup, devices).
+    router.navigate("room");
   });
 
   const setProfileStatus = (text) => {
@@ -410,6 +478,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
       setProfileStatus("");
       // A legacy record migrates on unlock -- its id changes to the fingerprint.
       await refreshProfileSelector();
+      router.navigate("profile");
     } catch (err) {
       setProfileStatus(err.message);
     }
@@ -452,6 +521,8 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
   el("btn-backup-skip").addEventListener("click", () => {
     el("backup-step").hidden = true;
     el("backup-reminder").hidden = false;
+    // Onboarding (account screen) is done -- move on to profile administration.
+    router.navigate("profile");
   });
 
   withBusyButton(el("btn-google-verify"), async () => {
@@ -505,7 +576,16 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
       inviteToken,
       serverUrl,
       rtcConfig,
-      channelOptions: { afterChannelOpen: announce },
+      // Chat entry point (unlike device linking, which reuses the same
+      // session helpers but must NOT jump to the conversation screen):
+      // once the data channel is actually open, the user has something to
+      // look at, so move them straight to the conversation screen.
+      channelOptions: {
+        afterChannelOpen: () => {
+          router.navigate("conversation");
+          announce();
+        }
+      },
       onSessionReady: announce
     });
   });
@@ -524,7 +604,12 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
       inviteToken: el("invite-token").value,
       serverUrl: el("server-url").value,
       rtcConfig: { iceServers: [{ urls: el("stun-url").value }] },
-      channelOptions: { afterChannelOpen: announce },
+      channelOptions: {
+        afterChannelOpen: () => {
+          router.navigate("conversation");
+          announce();
+        }
+      },
       onSessionReady: announce
     });
   });
@@ -637,6 +722,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
           state.senderKey = await fingerprint(identityKeyPair.publicKey);
           setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
           setDeviceLinkStatus(t("device.done"));
+          router.navigate("profile");
         }
       }
     });
