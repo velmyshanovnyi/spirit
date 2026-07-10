@@ -1,0 +1,12 @@
+# Deny direct HTTP access to node configuration files (docs/signaling-protocol.md).
+# Matches config.php AND config.secrets.php (server/config.php) -- keep this
+# pattern in sync if new config*.php files are ever added.
+<FilesMatch "^config.*\.php$">
+<IfModule mod_authz_core.c>
+Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+Order allow,deny
+Deny from all
+</IfModule>
+</FilesMatch>

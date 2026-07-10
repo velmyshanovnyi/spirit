@@ -1,0 +1,9 @@
+# Deny all direct HTTP access -- these classes are only meant to be
+# require()'d from server/public/index.php, never invoked directly.
+<IfModule mod_authz_core.c>
+Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+Order allow,deny
+Deny from all
+</IfModule>
