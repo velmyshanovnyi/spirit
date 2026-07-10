@@ -391,25 +391,15 @@ button:disabled {
 
 @media (min-width: 768px) {
   .app-nav {
-    position: fixed;
-    top: 0;
-    left: 0;
-    bottom: 0;
-    width: 84px;
-    flex-direction: column;
-    overflow-x: visible;
-    overflow-y: auto;
-    padding: 64px 8px 12px;
-    border-bottom: none;
-    border-right: 1px solid var(--border);
+    justify-content: center;
+    gap: 6px;
   }
 
   .nav-item {
-    min-width: unset;
-  }
-
-  .layout {
-    margin-left: 84px;
+    flex: 0 1 auto;
+    flex-direction: row;
+    gap: 6px;
+    padding: 8px 14px;
   }
 }
 

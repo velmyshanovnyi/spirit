@@ -79,6 +79,31 @@ describe("initRouter", () => {
     expect(visibleScreens()).toEqual(["profile"]);
   });
 
+  it("hides gated nav items when there is no identity, and shows them once one exists", () => {
+    let identity = false;
+    initRouter(document, {
+      routes: ROUTES,
+      defaultRoute: "account",
+      gatedRoutes: ["profile", "conversation", "contacts", "history"],
+      hasIdentity: () => identity
+    });
+
+    const navItem = (route) => document.querySelector(`.nav-item[data-route="${route}"]`);
+    for (const route of ["profile", "conversation", "contacts", "history"]) {
+      expect(navItem(route).hidden).toBe(true);
+    }
+    expect(navItem("account").hidden).toBe(false);
+    expect(navItem("server").hidden).toBe(false);
+    expect(navItem("room").hidden).toBe(false);
+
+    identity = true;
+    location.hash = "#/profile";
+    window.dispatchEvent(new Event("hashchange"));
+    for (const route of ["profile", "conversation", "contacts", "history"]) {
+      expect(navItem(route).hidden).toBe(false);
+    }
+  });
+
   it("marks the active nav item with aria-current and clears it from the others", () => {
     initRouter(document, { routes: ROUTES, defaultRoute: "account", hasIdentity: () => true });
 

@@ -44,6 +44,9 @@ export function initRouter(doc, { routes, defaultRoute, gatedRoutes = [], hasIde
       } else {
         item.removeAttribute("aria-current");
       }
+      // A gated item is dead weight without an identity -- clicking it would
+      // just redirect right back (see the gate above), so hide it instead.
+      item.hidden = gatedRoutes.includes(item.dataset.route) && !hasIdentity();
     }
   }
 

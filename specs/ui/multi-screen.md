@@ -60,6 +60,14 @@
 - [x] **Impl**: `client/index.html` (кнопка `btn-copy-invite`, вивід `invite-link-display`, статус `invite-status`, підказка `room.inviteHint` на екрані «Кімната»), `client/js/app.js` (parse query на старті, префіл полів, `postIdentityRoute()` — умовна авто-навігація на unlock/backup-skip, НЕ на device-linking), `client/js/i18n.js` (4 нові ключі × 11 локалей).
 - [x] **Exec review**: 1 ітерація, конвергенція без правок — [iter1](../reviews/multiscreen-N6-invite-link-iter1.md). Живо перевірено повний round-trip у реальному браузері (не jsdom).
 
+## Секція N7: Горизонтальне меню + приховування неактивних пунктів
+
+Контекст: на десктопі навігація була вертикальною бічною панеллю (fixed-left, 84px). Користувач попросив завжди горизонтальне меню зверху (усі viewport), і приховувати пункти гейтованих екранів (`profile`/`conversation`/`contacts`/`history`), поки немає ідентичності (`hasIdentity() === false`) — вони й так редіректять назад, тож клікабельні даремно.
+
+- [x] **Tests**: `client/tests/router.test.js` (1 новий тест) — гейтовані nav-пункти мають `hidden === true`, поки немає ідентичності; негейтовані (`account`/`server`/`room`) лишаються видимими; після появи ідентичності (`hashchange` на гейтований маршрут) усі пункти стають видимими без перезавантаження сторінки.
+- [x] **Impl**: `client/js/router.js` (`render()` тепер виставляє `item.hidden` для кожного nav-пункту за тим самим правилом, що й редірект-гейт), `client/css/style.css` (прибрано `@media (min-width: 768px)`-блок фіксованої бічної панелі; `.app-nav`/`.nav-item` тепер горизонтальні на всіх ширинах).
+- [x] **Exec review**: 1 ітерація, конвергенція без правок — [iter1](../reviews/multiscreen-N7-horizontal-nav-iter1.md). Живо перевірено в preview: меню горизонтальне зверху, гейтовані пункти зникають/з'являються коректно.
+
 ## Верифікація
 
 Секції N1, N3, N4, N6 — test-first без зовнішніх залежностей (jsdom + fake-indexeddb, Clipboard API best-effort/feature-detected). N2 — наявні 242 тести лишаються зеленими + нові переходи. N5 (якщо в обсязі) — юніт із fake getUserMedia/RTCPeerConnection; реальний відеозв'язок — жива перевірка користувачем (два браузери), як мультипристрій. Фінал: жива перевірка в preview (усі екрани, навігація, light/dark, mobile, invite-link round-trip) + деплой на обидва хости.
