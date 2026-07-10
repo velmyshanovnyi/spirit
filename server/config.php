@@ -30,7 +30,10 @@ return [
         'REQUEST_WINDOW_SECONDS' => 60,
         'MAX_REQUESTS_PER_WINDOW' => 20,
         'ROOM_CREATION_WINDOW_SECONDS' => 3600,
-        'MAX_ROOM_CREATIONS_PER_WINDOW' => 10,
+        // Raised from the original 10: our own dev/testing traffic
+        // (deploy smoke-checks + live 2-browser tests) routinely hit that
+        // ceiling. Still a real anti-abuse limit, just not testing-hostile.
+        'MAX_ROOM_CREATIONS_PER_WINDOW' => 100,
         'MAX_TRACKED_IPS' => 10000,
     ],
 
