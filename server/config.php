@@ -21,7 +21,10 @@ return [
 
     // CORS (docs/signaling-protocol.md "Транспорт і CORS"). Empty = same-origin
     // deploy, no CORS headers ever sent. Never put '*' in this list.
-    'ALLOWED_ORIGINS' => [],
+    // localhost:5500 permanently allowed: the local dev preview server used
+    // for live 2-browser testing against the real production backend
+    // (docs/deploy notes) -- not a public origin, no exposure to real users.
+    'ALLOWED_ORIGINS' => ['http://localhost:5500'],
 
     'RATE_LIMIT' => [
         'REQUEST_WINDOW_SECONDS' => 60,
