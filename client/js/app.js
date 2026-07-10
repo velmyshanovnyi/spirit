@@ -42,7 +42,18 @@ const ownDeviceListKey = (profileId) => `deviceList:${profileId}`;
 const DEFAULT_ICE_TIMEOUT_MS = 15000;
 const DEFAULT_ANSWER_WAIT_TIMEOUT_MS = 5 * 60 * 1000; // matches the signaling node's default session TTL
 
-export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWaitTimeoutMs = DEFAULT_ANSWER_WAIT_TIMEOUT_MS, locale } = {}) {
+export function initApp(
+  doc,
+  {
+    iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS,
+    answerWaitTimeoutMs = DEFAULT_ANSWER_WAIT_TIMEOUT_MS,
+    locale,
+    // Overridable for tests -- jsdom doesn't implement real navigation, so
+    // `location.search =` is a silent no-op there; production always uses
+    // the real value.
+    locationSearch = doc.defaultView.location.search
+  } = {}
+) {
   // Locale: explicit option (tests) -> stored choice -> browser language.
   setLocale(locale ?? detectLocale(typeof navigator !== "undefined" ? navigator.language : undefined));
   initTheme(doc);
@@ -101,6 +112,50 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
   const appendChat = (text) => {
     el("chat-log").textContent += text + "\n";
   };
+
+  // Cross-origin rendezvous (Section N6): two independent signaling nodes
+  // (e.g. spirit.kolo.media, spirit.kibr.com.ua) don't share a database or
+  // CORS allowlist by design (docs/signaling-protocol.md) -- a room created
+  // on one node doesn't exist on the other. An invite LINK sidesteps this
+  // entirely by pointing the receiver at the INITIATOR's own origin (not
+  // wherever they happen to be), so both ends always land on the same node.
+  const joinParams = new URLSearchParams(locationSearch);
+  const invitedRoomId = joinParams.get("room");
+  const invitedToken = joinParams.get("token");
+  const cameFromInviteLink = !!(invitedRoomId && invitedToken);
+  if (cameFromInviteLink) {
+    el("room-id").value = invitedRoomId;
+    el("invite-token").value = invitedToken;
+  }
+  // Once identity is established, an invite-link visitor should land where
+  // they can immediately join (room), not the usual profile-admin screen.
+  const postIdentityRoute = () => (cameFromInviteLink ? "room" : "profile");
+
+  const setInviteStatus = (text) => {
+    el("invite-status").textContent = text;
+  };
+
+  el("btn-copy-invite").addEventListener("click", () => {
+    const roomId = el("room-id").value;
+    const inviteToken = el("invite-token").value;
+    if (!roomId || !inviteToken) {
+      setInviteStatus(t("room.inviteMissing"));
+      return;
+    }
+    const link = new URL(doc.defaultView.location.pathname, doc.defaultView.location.origin);
+    link.search = `?room=${encodeURIComponent(roomId)}&token=${encodeURIComponent(inviteToken)}`;
+    link.hash = "#/room";
+    const linkText = link.toString();
+
+    el("invite-link-display").textContent = linkText;
+    setInviteStatus(t("room.inviteCopied"));
+    // Best-effort: Clipboard API needs a secure context and isn't available
+    // in every environment (jsdom, http://, older browsers) -- the visible
+    // link text above is the reliable fallback either way.
+    if (doc.defaultView.navigator.clipboard && doc.defaultView.navigator.clipboard.writeText) {
+      doc.defaultView.navigator.clipboard.writeText(linkText).catch(() => {});
+    }
+  });
 
   async function renderContactsScreen() {
     const list = el("contacts-list");
@@ -478,7 +533,7 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
       setProfileStatus("");
       // A legacy record migrates on unlock -- its id changes to the fingerprint.
       await refreshProfileSelector();
-      router.navigate("profile");
+      router.navigate(postIdentityRoute());
     } catch (err) {
       setProfileStatus(err.message);
     }
@@ -521,8 +576,10 @@ export function initApp(doc, { iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS, answerWait
   el("btn-backup-skip").addEventListener("click", () => {
     el("backup-step").hidden = true;
     el("backup-reminder").hidden = false;
-    // Onboarding (account screen) is done -- move on to profile administration.
-    router.navigate("profile");
+    // Onboarding (account screen) is done. Usually that means profile
+    // administration; an invite-link visitor instead goes straight to the
+    // room screen, where Room ID/token are already pre-filled.
+    router.navigate(postIdentityRoute());
   });
 
   withBusyButton(el("btn-google-verify"), async () => {

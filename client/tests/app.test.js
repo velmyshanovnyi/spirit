@@ -155,6 +155,9 @@ const HTML = `
     <button id="btn-initiate" type="button">Ініціювати чат</button>
     <button id="btn-join" type="button">Приєднатися до чату</button>
     <div id="connection-status" data-i18n="conn.none">не з'єднано</div>
+    <button id="btn-copy-invite" type="button">Скопіювати запрошення</button>
+    <div id="invite-link-display"></div>
+    <div id="invite-status"></div>
   </section>
 
   <section data-screen="conversation">
@@ -1435,6 +1438,130 @@ describe("device linking UI", () => {
       // The secret must not linger in the DOM afterwards.
       expect(document.getElementById("device-local-passphrase").value).toBe("");
     });
+  });
+});
+
+describe("invite-link rendezvous (Section N6)", () => {
+  it("pre-fills room-id/invite-token from ?room=&token= query params on load", () => {
+    initApp(document, { locale: "uk", locationSearch: "?room=room-from-link&token=token-from-link" });
+
+    expect(document.getElementById("room-id").value).toBe("room-from-link");
+    expect(document.getElementById("invite-token").value).toBe("token-from-link");
+  });
+
+  it("does not touch room-id/invite-token when no query params are present", () => {
+    initApp(document, { locale: "uk" });
+
+    expect(document.getElementById("room-id").value).toBe("");
+    expect(document.getElementById("invite-token").value).toBe("");
+  });
+
+  it("btn-copy-invite builds a link from the current field values and displays it", async () => {
+    initApp(document, { locale: "uk" });
+    document.getElementById("room-id").value = "my-room";
+    document.getElementById("invite-token").value = "my-token";
+
+    document.getElementById("btn-copy-invite").click();
+
+    await vi.waitFor(() => {
+      const link = document.getElementById("invite-link-display").textContent;
+      expect(link).toContain("room=my-room");
+      expect(link).toContain("token=my-token");
+      expect(link).toContain("#/room");
+    });
+  });
+
+  it("attempts navigator.clipboard.writeText best-effort when available", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("room-id").value = "my-room";
+    document.getElementById("invite-token").value = "my-token";
+    document.getElementById("btn-copy-invite").click();
+
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalled());
+    expect(writeText.mock.calls[0][0]).toContain("room=my-room");
+
+    delete navigator.clipboard;
+  });
+
+  it("does not throw when Clipboard API is unavailable (jsdom default / insecure context)", async () => {
+    initApp(document, { locale: "uk" });
+    document.getElementById("room-id").value = "my-room";
+    document.getElementById("invite-token").value = "my-token";
+
+    expect(() => document.getElementById("btn-copy-invite").click()).not.toThrow();
+    await vi.waitFor(() => expect(document.getElementById("invite-link-display").textContent).toContain("my-room"));
+  });
+
+  it("shows a status asking to create/enter Room ID and token first when both fields are empty", async () => {
+    initApp(document, { locale: "uk" });
+
+    document.getElementById("btn-copy-invite").click();
+
+    await vi.waitFor(() =>
+      expect(document.getElementById("invite-status").textContent).toMatch(/room id|invite token/i)
+    );
+    expect(document.getElementById("invite-link-display").textContent).toBe("");
+  });
+
+  it("an invite-link session navigates to room (not profile) after unlocking a stored profile", async () => {
+    listProfiles.mockResolvedValue([{ id: "identity" }]);
+    loadPermanentProfile.mockResolvedValue({
+      privateKey: {},
+      publicKey: fakePublicKey("unlocked-pub"),
+      vaultKey: { __tag: "vault-key" },
+      profileId: "f".repeat(64)
+    });
+
+    initApp(document, { locale: "uk", locationSearch: "?room=room-from-link&token=token-from-link" });
+    location.hash = "#/server"; // leave the default screen so the navigation is observable
+    window.dispatchEvent(new Event("hashchange"));
+    await vi.waitFor(() => expect(document.getElementById("profile-select").options.length).toBe(1));
+
+    document.getElementById("unlock-passphrase").value = "my pass";
+    document.getElementById("btn-profile-unlock").click();
+
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+  });
+
+  it("an invite-link session navigates to room (not profile) after skipping backup on a new profile", async () => {
+    createPermanentProfile.mockResolvedValue({
+      privateKey: {},
+      publicKey: fakePublicKey("profile-pub"),
+      vaultKey: { __tag: "vault-key" }
+    });
+    fingerprint.mockResolvedValue("profile-fp");
+
+    initApp(document, { locale: "uk", locationSearch: "?room=room-from-link&token=token-from-link" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "pass";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("backup-step").hidden).toBe(false));
+
+    document.getElementById("btn-backup-skip").click();
+
+    expect(visibleScreens()).toEqual(["room"]);
+  });
+
+  it("a normal (non-invite-link) session still navigates to profile as before", async () => {
+    createPermanentProfile.mockResolvedValue({
+      privateKey: {},
+      publicKey: fakePublicKey("profile-pub"),
+      vaultKey: { __tag: "vault-key" }
+    });
+    fingerprint.mockResolvedValue("profile-fp");
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "pass";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("backup-step").hidden).toBe(false));
+
+    document.getElementById("btn-backup-skip").click();
+
+    expect(visibleScreens()).toEqual(["profile"]);
   });
 });
 

@@ -52,9 +52,17 @@
 - [x] **Impl**: `client/index.html` (video-area з двома video-tile плейсхолдерами, три disabled-кнопки з іконкою+текстом окремими spans, hint-text "скоро"), `client/css/style.css` (`.video-area`/`.video-tile`/`.hint-text`). Жодного медіа-коду у `webrtc.js` — окремий наступний захід.
 - [x] **Exec review**: разом із N2 — [iter1](../reviews/multiscreen-N2-N4-iter1.md).
 
+## Секція N6: Посилання-запрошення (cross-origin rendezvous UX)
+
+Контекст: два незалежні деплойменти (spirit.kolo.media, spirit.kibr.com.ua) мають окремі сигнальні вузли (`ALLOWED_ORIGINS: []` — жодного CORS між ними за дизайном). Кімната, створена на одному вузлі, не існує на іншому. Щоб два користувачі зустрілись, обидва мають опинитись на **одному й тому самому** домені — розв'язання: посилання-запрошення веде саме на домен ініціатора (`${origin}${pathname}?room=...&token=...#/room`), а не покладається на те, який сайт відкрив другий учасник.
+
+- [x] **Tests**: `client/tests/app.test.js` (доповнення, 9 тестів) — query-параметри `?room=&token=` префілюють поля на завантаженні; без query — поля не чіпаються; кнопка будує посилання з поточних значень полів і показує його; best-effort `navigator.clipboard.writeText` (викликається коли доступний, не падає коли ні — jsdom за замовчуванням); порожні поля → статус-прохання; invite-link-сесія веде на `#/room` після unlock/backup-skip; звичайна сесія (без query) незмінно веде на `#/profile` (регресійний тест). Технічна деталь, виявлена в процесі: jsdom не реалізує навігацію (`location.search =` — мовчазний no-op) — `initApp` отримав ін'єктовану опцію `locationSearch` (той самий патерн, що й `locale`), продакшн завжди використовує реальний `location.search`.
+- [x] **Impl**: `client/index.html` (кнопка `btn-copy-invite`, вивід `invite-link-display`, статус `invite-status`, підказка `room.inviteHint` на екрані «Кімната»), `client/js/app.js` (parse query на старті, префіл полів, `postIdentityRoute()` — умовна авто-навігація на unlock/backup-skip, НЕ на device-linking), `client/js/i18n.js` (4 нові ключі × 11 локалей).
+- [x] **Exec review**: 1 ітерація, конвергенція без правок — [iter1](../reviews/multiscreen-N6-invite-link-iter1.md). Живо перевірено повний round-trip у реальному браузері (не jsdom).
+
 ## Верифікація
 
-Секції N1, N3, N4 — test-first без зовнішніх залежностей (jsdom + fake-indexeddb). N2 — наявні 242 тести лишаються зеленими + нові переходи. N5 (якщо в обсязі) — юніт із fake getUserMedia/RTCPeerConnection; реальний відеозв'язок — жива перевірка користувачем (два браузери), як мультипристрій. Фінал: жива перевірка в preview (усі екрани, навігація, light/dark, mobile) + деплой на обидва хости.
+Секції N1, N3, N4, N6 — test-first без зовнішніх залежностей (jsdom + fake-indexeddb, Clipboard API best-effort/feature-detected). N2 — наявні 242 тести лишаються зеленими + нові переходи. N5 (якщо в обсязі) — юніт із fake getUserMedia/RTCPeerConnection; реальний відеозв'язок — жива перевірка користувачем (два браузери), як мультипристрій. Фінал: жива перевірка в preview (усі екрани, навігація, light/dark, mobile, invite-link round-trip) + деплой на обидва хости.
 
 ## Рішення (узгоджено з користувачем)
 
