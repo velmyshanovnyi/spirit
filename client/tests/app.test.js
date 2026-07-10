@@ -44,6 +44,11 @@ vi.mock("../js/historyStore.js", () => ({
   listMessages: vi.fn().mockResolvedValue([]),
   listConversations: vi.fn().mockResolvedValue([])
 }));
+vi.mock("../js/adminAuth.js", () => ({
+  adminLogin: vi.fn(),
+  getAdminConfig: vi.fn(),
+  AdminAuthError: class AdminAuthError extends Error {}
+}));
 vi.mock("../js/mnemonic.js", () => ({
   bytesToMnemonic: vi.fn()
 }));
@@ -92,6 +97,7 @@ import { createIdentityAnnounce, verifyIdentityAnnounce } from "../js/identityAn
 import { rememberContact, getContact, updateContactDeviceList, listContacts } from "../js/contacts.js";
 import { get as dbGet, put as dbPut } from "../js/db.js";
 import { appendMessage, listMessages, listConversations } from "../js/historyStore.js";
+import { adminLogin, getAdminConfig } from "../js/adminAuth.js";
 import { bytesToMnemonic } from "../js/mnemonic.js";
 import { createKeyfile } from "../js/keyfile.js";
 import { startAsInitiator, startAsJoiner, applyRemoteAnswer } from "../js/webrtc.js";
@@ -147,6 +153,12 @@ const HTML = `
   <section data-screen="server">
     <input id="server-url" type="text" value="http://node.example/index.php">
     <input id="stun-url" type="text" value="stun:stun.example:19302">
+    <div id="admin-login-form">
+      <input id="admin-password" type="password">
+      <button id="btn-admin-login" type="button">Увійти</button>
+    </div>
+    <div id="admin-status"></div>
+    <div id="admin-config-list" hidden></div>
   </section>
 
   <section data-screen="room">
@@ -216,6 +228,92 @@ describe("btn-generate", () => {
 
     expect(generateIdentityKeyPair).toHaveBeenCalled();
     expect(fingerprint).toHaveBeenCalledWith(keyPair.publicKey);
+  });
+});
+
+describe("server admin panel (read-only, Section S)", () => {
+  it("shows the password form and keeps the config list hidden before login", () => {
+    initApp(document, { locale: "uk" });
+
+    expect(document.getElementById("admin-login-form").hidden).toBeFalsy();
+    expect(document.getElementById("admin-config-list").hidden).toBe(true);
+    expect(adminLogin).not.toHaveBeenCalled();
+  });
+
+  it("requires a password before attempting login", async () => {
+    initApp(document, { locale: "uk" });
+
+    document.getElementById("btn-admin-login").click();
+
+    await vi.waitFor(() => expect(document.getElementById("admin-status").textContent).toMatch(/пароль/i));
+    expect(adminLogin).not.toHaveBeenCalled();
+  });
+
+  it("on successful login, hides the form and renders the config fields with their values", async () => {
+    adminLogin.mockResolvedValue({ token: "signed.token", expiresAt: 12345 });
+    getAdminConfig.mockResolvedValue({
+      session_ttl_seconds: 300,
+      max_sessions: 1000,
+      allowed_origins: ["http://localhost:5500"]
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("admin-password").value = "correct horse";
+    document.getElementById("btn-admin-login").click();
+
+    await vi.waitFor(() => expect(document.getElementById("admin-config-list").hidden).toBe(false));
+
+    expect(adminLogin).toHaveBeenCalledWith("http://node.example/index.php", "correct horse");
+    expect(getAdminConfig).toHaveBeenCalledWith("http://node.example/index.php", "signed.token");
+    expect(document.getElementById("admin-login-form").hidden).toBe(true);
+    const listText = document.getElementById("admin-config-list").textContent;
+    expect(listText).toContain("300");
+    expect(listText).toContain("1000");
+    expect(listText).toContain("http://localhost:5500");
+    // The password must not linger in the DOM after use.
+    expect(document.getElementById("admin-password").value).toBe("");
+  });
+
+  it("only ever renders whitelisted fields, even if the server response includes something unexpected", async () => {
+    adminLogin.mockResolvedValue({ token: "signed.token", expiresAt: 12345 });
+    getAdminConfig.mockResolvedValue({
+      session_ttl_seconds: 300,
+      // Not in ADMIN_CONFIG_FIELDS -- simulates a server-side leak (e.g. a
+      // future field added to the PHP whitelist but not the client one, or
+      // a genuinely unexpected key). Defense-in-depth: the client must
+      // never render a field it doesn't explicitly recognize.
+      db_file: "/var/www/secret/database.json",
+      admin_password_hash: "$2b$10$should-never-render"
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("admin-password").value = "correct horse";
+    document.getElementById("btn-admin-login").click();
+
+    await vi.waitFor(() => expect(document.getElementById("admin-config-list").hidden).toBe(false));
+
+    const listText = document.getElementById("admin-config-list").textContent;
+    expect(listText).toContain("300");
+    expect(listText).not.toContain("secret");
+    expect(listText).not.toContain("should-never-render");
+    expect(listText).not.toContain("db_file");
+    expect(listText).not.toContain("admin_password_hash");
+  });
+
+  it("on a wrong password, shows the server's error message and keeps the form visible", async () => {
+    const { AdminAuthError } = await import("../js/adminAuth.js");
+    adminLogin.mockRejectedValue(new AdminAuthError("Invalid or expired admin credentials"));
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("admin-password").value = "wrong";
+    document.getElementById("btn-admin-login").click();
+
+    await vi.waitFor(() =>
+      expect(document.getElementById("admin-status").textContent).toMatch(/invalid or expired/i)
+    );
+    expect(document.getElementById("admin-login-form").hidden).toBeFalsy();
+    expect(document.getElementById("admin-config-list").hidden).toBe(true);
+    expect(getAdminConfig).not.toHaveBeenCalled();
   });
 });
 
@@ -790,6 +888,88 @@ describe("btn-send", () => {
     expect(encryptMessage).toHaveBeenCalledWith({ __tag: "session-key" }, "привіт");
     expect(channel.send).toHaveBeenCalledWith("ENCRYPTED_PAYLOAD");
     expect(channel.send).not.toHaveBeenCalledWith("привіт");
+  });
+
+  it("echoes the sent message into the sender's own chat log with a timestamp", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    encryptMessage.mockResolvedValue("ENCRYPTED_PAYLOAD");
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+
+    const channel = fakeChannel();
+    let capturedOnLocalOfferReady;
+    startAsInitiator.mockImplementation((opts) => {
+      capturedOnLocalOfferReady = opts.onLocalOfferReady;
+      return { __fakePc: true };
+    });
+
+    const fixedNow = new Date("2026-07-10T15:04:05Z").getTime();
+    vi.spyOn(Date, "now").mockReturnValue(fixedNow);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    const { onChannelOpen } = startAsInitiator.mock.calls[0][0];
+    onChannelOpen(channel);
+    await capturedOnLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    document.getElementById("message-input").value = "перше повідомлення";
+    document.getElementById("btn-send").click();
+    await vi.waitFor(() => expect(channel.send).toHaveBeenCalled());
+
+    const log = document.getElementById("chat-log").textContent;
+    expect(log).toContain("перше повідомлення");
+    // A recognizable HH:MM:SS timestamp accompanies the message.
+    expect(log).toMatch(/\d{2}:\d{2}:\d{2}/);
+  });
+
+  it("keeps sent messages in order in the sender's own log across multiple sends", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    encryptMessage.mockImplementation(async (_key, text) => `ENC(${text})`);
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+
+    const channel = fakeChannel();
+    let capturedOnLocalOfferReady;
+    startAsInitiator.mockImplementation((opts) => {
+      capturedOnLocalOfferReady = opts.onLocalOfferReady;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    const { onChannelOpen } = startAsInitiator.mock.calls[0][0];
+    onChannelOpen(channel);
+    await capturedOnLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    for (const word of ["один", "два", "три"]) {
+      document.getElementById("message-input").value = word;
+      document.getElementById("btn-send").click();
+      await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith(`ENC(${word})`));
+    }
+
+    const log = document.getElementById("chat-log").textContent;
+    expect(log.indexOf("один")).toBeLessThan(log.indexOf("два"));
+    expect(log.indexOf("два")).toBeLessThan(log.indexOf("три"));
   });
 });
 

@@ -53,8 +53,24 @@ class SignalingController
         }
 
         $action = $input['action'] ?? null;
+        if (!is_string($action) || $action === '') {
+            return $this->error(400, 'Bad Request: Missing arguments');
+        }
+
+        // Admin actions (specs/ui/server-admin-panel.md) are a DIFFERENT
+        // trust boundary -- password/token, not an identity sender_key --
+        // so they're dispatched before the sender_key/whitelist checks
+        // below, which don't apply to them. Still rate-limited (brute-force
+        // protection on admin_login) via the same per-IP throttle.
+        if ($action === 'admin_login' || $action === 'admin_get_config') {
+            if (!$this->rateLimiter->checkAndRecordRequest($clientIp)) {
+                return $this->error(429, 'Too Many Requests');
+            }
+            return $this->handleAdmin($action, $input);
+        }
+
         $senderKey = $input['sender_key'] ?? null;
-        if (!is_string($action) || $action === '' || !is_string($senderKey) || $senderKey === '') {
+        if (!is_string($senderKey) || $senderKey === '') {
             return $this->error(400, 'Bad Request: Missing arguments');
         }
 
@@ -202,6 +218,107 @@ class SignalingController
         }
 
         return $this->success(['body' => $result['body'], 'content_type' => $result['contentType']]);
+    }
+
+    /**
+     * Read-only admin panel (specs/ui/server-admin-panel.md): `admin_login`
+     * verifies the password and issues a short-lived signed token;
+     * `admin_get_config` requires that token and returns a hand-picked,
+     * safe-to-show subset of the node's own config -- never file paths
+     * (filesystem-layout disclosure), never WHITE_LIST (may contain other
+     * users' identity keys), never the password hash or token secret
+     * themselves. Both actions return 403 outright if the feature is
+     * unconfigured (empty ADMIN_PASSWORD_HASH) -- same off-by-default
+     * pattern as fetch_proof.
+     */
+    private function handleAdmin(string $action, array $input): array
+    {
+        $passwordHash = $this->config['ADMIN_PASSWORD_HASH'] ?? '';
+        $tokenSecret = $this->config['ADMIN_TOKEN_SECRET'] ?? '';
+        if ($passwordHash === '' || $tokenSecret === '') {
+            return $this->error(403, 'Admin access is disabled on this node');
+        }
+
+        if ($action === 'admin_login') {
+            $password = $input['password'] ?? null;
+            if (!is_string($password) || $password === '') {
+                return $this->error(400, 'Bad Request: Missing arguments');
+            }
+            if (!password_verify($password, $passwordHash)) {
+                // Deliberately identical to the malformed/expired-token
+                // message below -- neither response tells an attacker
+                // which check failed.
+                return $this->error(401, 'Invalid or expired admin credentials');
+            }
+            $ttl = $this->config['ADMIN_TOKEN_TTL_SECONDS'] ?? 900;
+            $token = $this->issueAdminToken($tokenSecret, time() + $ttl);
+            return $this->success(['token' => $token, 'expires_at' => time() + $ttl]);
+        }
+
+        // admin_get_config
+        $token = $input['token'] ?? null;
+        if (!is_string($token) || $token === '' || !$this->verifyAdminToken($tokenSecret, $token)) {
+            return $this->error(401, 'Invalid or expired admin credentials');
+        }
+
+        $rl = $this->config['RATE_LIMIT'];
+        $fp = $this->config['FETCH_PROOF'];
+        return $this->success(['config' => [
+            'session_ttl_seconds' => $this->config['SESSION_TTL_SECONDS'],
+            'max_sessions' => $this->config['MAX_SESSIONS'],
+            'global_access' => $this->config['GLOBAL_ACCESS'],
+            'allowed_origins' => $this->config['ALLOWED_ORIGINS'],
+            'request_window_seconds' => $rl['REQUEST_WINDOW_SECONDS'],
+            'max_requests_per_window' => $rl['MAX_REQUESTS_PER_WINDOW'],
+            'room_creation_window_seconds' => $rl['ROOM_CREATION_WINDOW_SECONDS'],
+            'max_room_creations_per_window' => $rl['MAX_ROOM_CREATIONS_PER_WINDOW'],
+            'enable_proof_proxy' => $this->config['ENABLE_PROOF_PROXY'] ?? false,
+            'fetch_proof_timeout_seconds' => $fp['TIMEOUT_SECONDS'],
+            'fetch_proof_max_bytes' => $fp['MAX_BYTES'],
+        ]]);
+    }
+
+    /**
+     * Self-contained signed token: base64url(json{exp}) + "." +
+     * HMAC-SHA256(that payload, secret). No server-side session storage --
+     * consistent with the rest of this stateless node.
+     */
+    private function issueAdminToken(string $secret, int $expiresAt): string
+    {
+        $payload = $this->base64UrlEncode(json_encode(['exp' => $expiresAt]));
+        $signature = hash_hmac('sha256', $payload, $secret);
+        return $payload . '.' . $signature;
+    }
+
+    private function verifyAdminToken(string $secret, string $token): bool
+    {
+        $parts = explode('.', $token, 2);
+        if (count($parts) !== 2) {
+            return false;
+        }
+        [$payload, $signature] = $parts;
+        $expectedSignature = hash_hmac('sha256', $payload, $secret);
+        // Constant-time comparison -- a signature check is exactly the kind
+        // of secret-dependent comparison timing attacks target.
+        if (!hash_equals($expectedSignature, $signature)) {
+            return false;
+        }
+        $decoded = json_decode($this->base64UrlDecode($payload), true);
+        if (!is_array($decoded) || !isset($decoded['exp']) || !is_int($decoded['exp'])) {
+            return false;
+        }
+        return $decoded['exp'] > time();
+    }
+
+    private function base64UrlEncode(string $data): string
+    {
+        return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+    }
+
+    private function base64UrlDecode(string $data): string
+    {
+        $padded = str_pad(strtr($data, '-_', '+/'), strlen($data) % 4 === 0 ? strlen($data) : strlen($data) + (4 - strlen($data) % 4), '=');
+        return base64_decode($padded) ?: '';
     }
 
     /**

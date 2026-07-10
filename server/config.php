@@ -7,7 +7,7 @@
 
 $dataDir = __DIR__ . '/data';
 
-return [
+$config = [
     'DB_FILE' => $dataDir . '/database.json',
     'RATE_LIMIT_FILE' => $dataDir . '/ratelimit.json',
     'LOCK_FILE' => $dataDir . '/signaling.lock',
@@ -45,4 +45,29 @@ return [
         'MAX_BYTES' => 65536,
         'MAX_REDIRECTS' => 2,
     ],
+
+    // Read-only admin panel (specs/ui/server-admin-panel.md): lets whoever
+    // knows this password view (never edit -- config stays FTP/file-only)
+    // operational parameters at /#/server. Empty hash = feature disabled
+    // (matches ENABLE_PROOF_PROXY's off-by-default pattern). The real
+    // hash/secret are NEVER committed here -- see config.secrets.php below,
+    // same gitignored-local-file pattern as deploy/*.local.* credentials.
+    'ADMIN_PASSWORD_HASH' => '',
+    // Signs the short-lived admin token returned by admin_login -- a
+    // separate secret from the password hash on purpose: different
+    // rotation lifecycle, and a leaked token-signing key alone can't be
+    // used to derive or brute-force the admin password.
+    'ADMIN_TOKEN_SECRET' => '',
+    'ADMIN_TOKEN_TTL_SECONDS' => 900,
 ];
+
+// Optional per-deployment secrets overlay, gitignored (server/*.secrets.php)
+// -- keeps real credentials (admin password hash, token-signing secret) out
+// of git entirely, mirroring deploy/*.local.* for FTP credentials. Absent
+// by default, so a fresh checkout has the admin panel safely disabled.
+$secretsFile = __DIR__ . '/config.secrets.php';
+if (is_file($secretsFile)) {
+    $config = array_replace($config, require $secretsFile);
+}
+
+return $config;

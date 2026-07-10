@@ -31,6 +31,22 @@ import { t, setLocale, detectLocale, applyTranslations, getLocale, SUPPORTED_LOC
 import { initTheme, toggleTheme } from "./theme.js";
 import { formatSpiritId } from "./spiritId.js";
 import { initRouter } from "./router.js";
+import { adminLogin, getAdminConfig } from "./adminAuth.js";
+
+// Order controls display order in the read-only admin panel.
+const ADMIN_CONFIG_FIELDS = [
+  "session_ttl_seconds",
+  "max_sessions",
+  "global_access",
+  "allowed_origins",
+  "request_window_seconds",
+  "max_requests_per_window",
+  "room_creation_window_seconds",
+  "max_room_creations_per_window",
+  "enable_proof_proxy",
+  "fetch_proof_timeout_seconds",
+  "fetch_proof_max_bytes"
+];
 
 const ROUTES = ["account", "profile", "server", "room", "conversation", "contacts", "history"];
 const GATED_ROUTES = ["profile", "conversation", "contacts", "history"];
@@ -109,8 +125,15 @@ export function initApp(
   const setGoogleStatus = (text) => {
     el("google-verify-status").textContent = text;
   };
-  const appendChat = (text) => {
-    el("chat-log").textContent += text + "\n";
+  const formatClockTime = (ms) => {
+    const d = new Date(ms);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  };
+  // direction: "out" (this device sent it) or "in" (received from the peer).
+  const appendChat = (text, direction, timestamp = Date.now()) => {
+    const arrow = direction === "out" ? "→" : "←";
+    el("chat-log").textContent += `[${formatClockTime(timestamp)}] ${arrow} ${text}\n`;
   };
 
   // Cross-origin rendezvous (Section N6): two independent signaling nodes
@@ -201,6 +224,42 @@ export function initApp(
     hasIdentity: () => !!state.senderKey
   });
 
+  const setAdminStatus = (text) => {
+    el("admin-status").textContent = text;
+  };
+
+  function renderAdminConfig(config) {
+    const list = el("admin-config-list");
+    list.innerHTML = "";
+    for (const field of ADMIN_CONFIG_FIELDS) {
+      if (!(field in config)) continue;
+      const row = doc.createElement("div");
+      row.className = "list-row";
+      const value = Array.isArray(config[field]) ? config[field].join(", ") : String(config[field]);
+      row.textContent = `${t(`admin.field.${field}`)}: ${value}`;
+      list.appendChild(row);
+    }
+    list.hidden = false;
+  }
+
+  withBusyButton(el("btn-admin-login"), async () => {
+    const password = el("admin-password").value;
+    if (!password) {
+      setAdminStatus(t("admin.needPassword"));
+      return;
+    }
+    try {
+      const { token } = await adminLogin(el("server-url").value, password);
+      el("admin-password").value = "";
+      const config = await getAdminConfig(el("server-url").value, token);
+      el("admin-login-form").hidden = true;
+      setAdminStatus("");
+      renderAdminConfig(config);
+    } catch (err) {
+      setAdminStatus(err.message);
+    }
+  });
+
   // Re-initializing (tests creating multiple app instances in one window)
   // must not stack listeners -- only the latest initApp() call's handler,
   // closing over its own `state`, should ever react (same pattern as
@@ -252,12 +311,13 @@ export function initApp(
         setStatus(t("status.incomingRejected"));
         return;
       }
-      appendChat(text);
+      const receivedAt = Date.now();
+      appendChat(text, "in", receivedAt);
       if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
         await appendMessage(state.identityKeyPair.vaultKey, state.senderKey, state.peerFingerprint, {
           direction: "in",
           text,
-          timestamp: Date.now()
+          timestamp: receivedAt
         });
       }
       return;
@@ -291,7 +351,7 @@ export function initApp(
       if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
         const history = await listMessages(state.identityKeyPair.vaultKey, state.senderKey, verified.fingerprint);
         for (const entry of history) {
-          appendChat(`${entry.direction === "out" ? "→" : "←"} ${entry.text}`);
+          appendChat(entry.text, entry.direction, entry.timestamp);
         }
       }
       return;
@@ -794,6 +854,8 @@ export function initApp(
     const payload = await encryptMessage(state.sessionKey, text);
     state.channel.send(payload);
     el("message-input").value = "";
+    const sentAt = Date.now();
+    appendChat(text, "out", sentAt);
     // Profile mode + verified peer: keep the encrypted history (Section 14).
     // Ephemeral mode has no vaultKey; an unverified peer has no fingerprint
     // to file the message under -- both skip silently.
@@ -801,7 +863,7 @@ export function initApp(
       await appendMessage(state.identityKeyPair.vaultKey, state.senderKey, state.peerFingerprint, {
         direction: "out",
         text,
-        timestamp: Date.now()
+        timestamp: sentAt
       });
     }
   });
