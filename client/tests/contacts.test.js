@@ -13,7 +13,7 @@ describe("rememberContact / getContact", () => {
     const { status, contact } = await rememberContact({ fingerprint: FP, identityPubkeyWire: "PUB_WIRE", now: 1234 });
 
     expect(status).toBe("new");
-    expect(contact).toEqual({ fingerprint: FP, identityPubkeyWire: "PUB_WIRE", firstSeen: 1234, deviceList: null });
+    expect(contact).toEqual({ fingerprint: FP, identityPubkeyWire: "PUB_WIRE", firstSeen: 1234, deviceList: null, nickname: null });
     expect(await getContact(FP)).toEqual(contact);
   });
 
@@ -43,7 +43,8 @@ describe("updateContactDeviceList", () => {
       fingerprint: FP,
       identityPubkeyWire: "PUB_WIRE",
       firstSeen: 1234,
-      deviceList
+      deviceList,
+      nickname: null
     });
   });
 
@@ -69,7 +70,28 @@ describe("listContacts", () => {
       fingerprint: FP,
       identityPubkeyWire: "PUB_WIRE_1",
       firstSeen: 1000,
-      deviceList: null
+      deviceList: null,
+      nickname: null
     });
+  });
+});
+
+describe("rememberContact nickname (Section 16)", () => {
+  it("stores the announced nickname on a new contact", async () => {
+    const { contact } = await rememberContact({ fingerprint: FP, identityPubkeyWire: "PUB_WIRE", nickname: "Оксана", now: 1234 });
+    expect(contact.nickname).toBe("Оксана");
+    expect((await getContact(FP)).nickname).toBe("Оксана");
+  });
+
+  it("updates the stored nickname when a known contact re-announces with a new one", async () => {
+    await rememberContact({ fingerprint: FP, identityPubkeyWire: "PUB_WIRE", nickname: "старе ім'я", now: 1234 });
+
+    const { status, contact } = await rememberContact({ fingerprint: FP, identityPubkeyWire: "PUB_WIRE", nickname: "нове ім'я", now: 9999 });
+
+    expect(status).toBe("known");
+    expect(contact.nickname).toBe("нове ім'я");
+    expect((await getContact(FP)).nickname).toBe("нове ім'я");
+    // firstSeen is still untouched by the nickname update.
+    expect((await getContact(FP)).firstSeen).toBe(1234);
   });
 });

@@ -9,6 +9,8 @@ import {
   restoreProfileFromKeyfile,
   exportRawIdentity,
   adoptIdentity,
+  setNickname,
+  getNickname,
   IncorrectPassphraseError,
   NoStoredProfileError
 } from "../js/profile.js";
@@ -312,5 +314,25 @@ describe("restoreProfileFromKeyfile", () => {
     await expect(restoreProfileFromKeyfile(keyfile, "wrong keyfile passphrase", "local passphrase")).rejects.toThrow(
       IncorrectPassphraseError
     );
+  });
+});
+
+describe("setNickname / getNickname (Section 16)", () => {
+  it("returns null for a profile with no stored nickname", async () => {
+    const created = await createPermanentProfile("pass");
+    expect(await getNickname(created.profileId)).toBeNull();
+  });
+
+  it("stores and retrieves a nickname, unencrypted (no passphrase needed to read it)", async () => {
+    const created = await createPermanentProfile("pass");
+    await setNickname(created.profileId, "Оксана");
+    expect(await getNickname(created.profileId)).toBe("Оксана");
+  });
+
+  it("overwrites a previously stored nickname", async () => {
+    const created = await createPermanentProfile("pass");
+    await setNickname(created.profileId, "перше ім'я");
+    await setNickname(created.profileId, "друге ім'я");
+    expect(await getNickname(created.profileId)).toBe("друге ім'я");
   });
 });

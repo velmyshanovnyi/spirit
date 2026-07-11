@@ -15,9 +15,9 @@ const ANNOUNCE_PAYLOAD_PREFIX = "spirit-identity-announce-v1";
  * different wire keys on each leg and can relay neither side's announce.
  * "|" is absent from base64, so the encoding is injective.
  */
-function announcePayload(identityPubkeyWire, senderEcdhWire, receiverEcdhWire) {
+function announcePayload(identityPubkeyWire, senderEcdhWire, receiverEcdhWire, nickname) {
   return new TextEncoder().encode(
-    `${ANNOUNCE_PAYLOAD_PREFIX}|${identityPubkeyWire}|${senderEcdhWire}|${receiverEcdhWire}`
+    `${ANNOUNCE_PAYLOAD_PREFIX}|${identityPubkeyWire}|${senderEcdhWire}|${receiverEcdhWire}|${nickname}`
   );
 }
 
@@ -28,15 +28,15 @@ function announcePayload(identityPubkeyWire, senderEcdhWire, receiverEcdhWire) {
  * session. `localEcdhWire` is the announcer's own session ECDH public key
  * (wire form), `peerEcdhWire` the other side's.
  */
-export async function createIdentityAnnounce(identityPrivateKey, identityPublicKey, localEcdhWire, peerEcdhWire) {
+export async function createIdentityAnnounce(identityPrivateKey, identityPublicKey, localEcdhWire, peerEcdhWire, nickname = "") {
   const spki = await crypto.subtle.exportKey("spki", identityPublicKey);
   const identityPubkey = bytesToBase64(new Uint8Array(spki));
   const signature = await crypto.subtle.sign(
     SIGNING_ALGORITHM,
     identityPrivateKey,
-    announcePayload(identityPubkey, localEcdhWire, peerEcdhWire)
+    announcePayload(identityPubkey, localEcdhWire, peerEcdhWire, nickname)
   );
-  return { type: "identity-announce", identityPubkey, signature: bytesToBase64(new Uint8Array(signature)) };
+  return { type: "identity-announce", identityPubkey, nickname, signature: bytesToBase64(new Uint8Array(signature)) };
 }
 
 /**
@@ -56,10 +56,12 @@ export async function verifyIdentityAnnounce(announce, localEcdhWire, peerEcdhWi
     !announce ||
     announce.type !== "identity-announce" ||
     typeof announce.identityPubkey !== "string" ||
-    typeof announce.signature !== "string"
+    typeof announce.signature !== "string" ||
+    (announce.nickname !== undefined && typeof announce.nickname !== "string")
   ) {
     return null;
   }
+  const nickname = announce.nickname ?? "";
 
   try {
     const identityPublicKey = await crypto.subtle.importKey(
@@ -74,14 +76,15 @@ export async function verifyIdentityAnnounce(announce, localEcdhWire, peerEcdhWi
       identityPublicKey,
       base64ToBytes(announce.signature),
       // Announcer's (sender, receiver) == our (peer, local).
-      announcePayload(announce.identityPubkey, peerEcdhWire, localEcdhWire)
+      announcePayload(announce.identityPubkey, peerEcdhWire, localEcdhWire, nickname)
     );
     if (!valid) return null;
 
     return {
       identityPublicKey,
       identityPubkeyWire: announce.identityPubkey,
-      fingerprint: await fingerprint(identityPublicKey)
+      fingerprint: await fingerprint(identityPublicKey),
+      nickname
     };
   } catch {
     return null;

@@ -41,6 +41,24 @@ export async function hasStoredProfile() {
   return (await listProfiles()).length > 0;
 }
 
+const NICKNAME_KEY_PREFIX = "nickname:";
+
+/**
+ * The nickname (Section 16, specs/phase2/onboarding-auth.md) is stored
+ * UNENCRYPTED, unlike the identity key material -- it's transmitted to
+ * every peer via identity-announce, so there is no confidentiality benefit
+ * to encrypting the local copy, and this lets the login screen show it
+ * before the passphrase has been entered.
+ */
+export async function setNickname(profileId, nickname) {
+  await put("profile", NICKNAME_KEY_PREFIX + profileId, nickname);
+}
+
+export async function getNickname(profileId) {
+  const nickname = await get("profile", NICKNAME_KEY_PREFIX + profileId);
+  return nickname ?? null;
+}
+
 async function persistRawIdentity(rawPrivateKey, passphrase, profileId) {
   const salt = generateSalt();
   const vaultKey = await deriveVaultKey(passphrase, salt);

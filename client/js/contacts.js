@@ -10,12 +10,19 @@ import { get, put, listKeys } from "./db.js";
  * `deviceList` starts null and is maintained by the device-list transport
  * (Section 13).
  */
-export async function rememberContact({ fingerprint, identityPubkeyWire, now = Date.now() }) {
+export async function rememberContact({ fingerprint, identityPubkeyWire, nickname = null, now = Date.now() }) {
   const existing = await get("contacts", fingerprint);
   if (existing) {
+    // Nicknames can change (unlike fingerprint/firstSeen) -- keep the latest
+    // one the peer announced, but never clobber a known one with a blank.
+    if (nickname && nickname !== existing.nickname) {
+      const updated = { ...existing, nickname };
+      await put("contacts", fingerprint, updated);
+      return { status: "known", contact: updated };
+    }
     return { status: "known", contact: existing };
   }
-  const contact = { fingerprint, identityPubkeyWire, firstSeen: now, deviceList: null };
+  const contact = { fingerprint, identityPubkeyWire, firstSeen: now, deviceList: null, nickname };
   await put("contacts", fingerprint, contact);
   return { status: "new", contact };
 }

@@ -7,7 +7,7 @@ import {
   exportPrivateKeyScalar,
   exportPrivateKeyRaw
 } from "./identity.js";
-import { createPermanentProfile, exportRawIdentity, listProfiles, loadPermanentProfile } from "./profile.js";
+import { createPermanentProfile, exportRawIdentity, listProfiles, loadPermanentProfile, setNickname, getNickname } from "./profile.js";
 import { bytesToMnemonic } from "./mnemonic.js";
 import { createKeyfile } from "./keyfile.js";
 import {
@@ -40,6 +40,7 @@ import { initTheme, toggleTheme } from "./theme.js";
 import { formatSpiritId } from "./spiritId.js";
 import { initRouter } from "./router.js";
 import { adminLogin, getAdminConfig } from "./adminAuth.js";
+import { rememberSession, getRememberedProfileId } from "./session.js";
 
 // Order controls display order in the read-only admin panel.
 const ADMIN_CONFIG_FIELDS = [
@@ -120,7 +121,10 @@ export function initApp(
     peerIdentityPublicKey: null,
     // Own camera/mic MediaStream once a call has been started (Section V2);
     // null before then and used by the camera/mic toggle buttons.
-    localStream: null
+    localStream: null,
+    // Own display name (Section 16), loaded from profile.js's unencrypted
+    // nickname record on create/unlock; null in ephemeral quick-chat mode.
+    nickname: null
   };
 
   const el = (id) => doc.getElementById(id);
@@ -373,11 +377,19 @@ export function initApp(
       if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
         const { status } = await rememberContact({
           fingerprint: verified.fingerprint,
-          identityPubkeyWire: verified.identityPubkeyWire
+          identityPubkeyWire: verified.identityPubkeyWire,
+          nickname: verified.nickname || null
         });
         continuity = status === "known" ? t("status.knownContact") : t("status.newContact");
       }
-      setStatus(t("status.peerVerified", { fp: formatSpiritId(verified.fingerprint) }) + continuity);
+      // A nickname is peer-CHOSEN, not proof of identity -- a different
+      // fingerprint could announce the same nickname (impersonation-by-name,
+      // flagged in exec review). The fingerprint must stay visible so TOFU
+      // continuity is still checkable, never replaced by the nickname alone.
+      const peerLabel = verified.nickname
+        ? `${verified.nickname} (${formatSpiritId(verified.fingerprint)})`
+        : formatSpiritId(verified.fingerprint);
+      setStatus(t("status.peerVerified", { fp: peerLabel }) + continuity);
       // Known contact in profile mode: bring the prior conversation back
       // into the chat log before any new messages arrive.
       if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
@@ -438,7 +450,8 @@ export function initApp(
           state.identityKeyPair.privateKey,
           state.identityKeyPair.publicKey,
           state.sessionEcdhWires.localEcdhWire,
-          state.sessionEcdhWires.peerEcdhWire
+          state.sessionEcdhWires.peerEcdhWire,
+          state.nickname ?? ""
         );
         state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify(announce)));
         // Follow up with the own device list, if this profile maintains one --
@@ -632,14 +645,47 @@ export function initApp(
     el("profile-setup").hidden = false;
   });
 
+  const DEFAULT_SESSION_TTL_HOURS = 24;
+
+  // A non-positive TTL would produce an expiresAt already in the past,
+  // silently making rememberSession() a no-op instead of erroring -- clamp
+  // rather than trust raw field input (exec review finding).
+  function readSessionTtlHours() {
+    const hours = Number(el("session-ttl-hours").value);
+    return Number.isFinite(hours) && hours >= 1 ? hours : DEFAULT_SESSION_TTL_HOURS;
+  }
+
+  // Section 18: TTL is user-configurable (Profile screen) but persists
+  // across reloads via the "profile" store -- localStorage alone would work
+  // too, but this keeps every durable setting in one place.
+  (async () => {
+    const stored = await get("profile", "settings:sessionTtlHours");
+    if (stored) el("session-ttl-hours").value = String(stored);
+  })().catch(() => {});
+  el("session-ttl-hours").addEventListener("change", () => {
+    put("profile", "settings:sessionTtlHours", readSessionTtlHours()).catch(() => {});
+  });
+
+  // Section 17/18: a returning user (stored profiles exist) sees the login
+  // block instead of the create-account flow; a remembered, not-yet-expired
+  // session preselects which profile so they only need to type the
+  // passphrase -- the passphrase itself is never skipped or persisted.
   async function refreshProfileSelector() {
     const select = el("profile-select");
     select.innerHTML = "";
-    for (const { id } of await listProfiles()) {
+    const profiles = await listProfiles();
+    for (const { id } of profiles) {
       const option = doc.createElement("option");
       option.value = id;
       option.textContent = id === "identity" ? t("profile.legacyOption") : formatSpiritId(id).slice(0, 26) + "…";
       select.appendChild(option);
+    }
+    // Hide once an identity is already active this session (e.g. right
+    // after creating a profile) -- there's nothing to log into anymore.
+    el("account-login-block").hidden = profiles.length === 0 || !!state.senderKey;
+    const remembered = getRememberedProfileId();
+    if (remembered && profiles.some((p) => p.id === remembered)) {
+      select.value = remembered;
     }
   }
   // Fire-and-forget at startup; an empty selector is the correct state on error too.
@@ -661,9 +707,14 @@ export function initApp(
       el("unlock-passphrase").value = "";
       state.identityKeyPair = profile;
       state.senderKey = profile.profileId;
+      state.nickname = await getNickname(state.senderKey);
       setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
       setProfileStatus("");
-      // A legacy record migrates on unlock -- its id changes to the fingerprint.
+      // A legacy record migrates on unlock -- its id changes to the
+      // fingerprint (profile.profileId), which is what must be remembered,
+      // not the pre-migration `selectedId` ("identity") -- otherwise the
+      // remembered id never matches on the next load's listProfiles().
+      rememberSession(profile.profileId, readSessionTtlHours());
       await refreshProfileSelector();
       router.navigate(postIdentityRoute());
     } catch (err) {
@@ -681,6 +732,11 @@ export function initApp(
     // Don't keep the secret sitting in a DOM input after it's been used.
     el("profile-passphrase").value = "";
     state.senderKey = await fingerprint(state.identityKeyPair.publicKey);
+    const nickname = el("nickname-input").value.trim();
+    if (nickname) {
+      await setNickname(state.senderKey, nickname);
+      state.nickname = nickname;
+    }
     setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
     setProfileStatus("");
     el("backup-step").hidden = false;

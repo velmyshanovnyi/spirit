@@ -14,7 +14,9 @@ vi.mock("../js/profile.js", () => ({
   createPermanentProfile: vi.fn(),
   exportRawIdentity: vi.fn(),
   listProfiles: vi.fn().mockResolvedValue([]),
-  loadPermanentProfile: vi.fn()
+  loadPermanentProfile: vi.fn(),
+  setNickname: vi.fn(),
+  getNickname: vi.fn().mockResolvedValue(null)
 }));
 vi.mock("../js/deviceLinking.js", () => ({
   generateDeviceKeyPair: vi.fn(),
@@ -88,7 +90,7 @@ import {
   exportPrivateKeyScalar,
   exportPrivateKeyRaw
 } from "../js/identity.js";
-import { createPermanentProfile, exportRawIdentity, listProfiles, loadPermanentProfile } from "../js/profile.js";
+import { createPermanentProfile, exportRawIdentity, listProfiles, loadPermanentProfile, setNickname, getNickname } from "../js/profile.js";
 import {
   generateDeviceKeyPair,
   createLinkRequest,
@@ -129,9 +131,15 @@ const HTML = `
 
   <section data-screen="account">
     <h2 id="account-heading" data-i18n="section.account"></h2>
+    <div id="account-login-block" hidden>
+      <select id="profile-select"></select>
+      <input id="unlock-passphrase" type="password">
+      <button id="btn-profile-unlock" type="button">Увійти</button>
+    </div>
     <button id="btn-generate" type="button">Швидкий чат</button>
     <button id="btn-create-profile" type="button">Створити профіль</button>
     <div id="profile-setup" hidden>
+      <input id="nickname-input" type="text">
       <input id="profile-passphrase" type="password">
       <button id="btn-profile-confirm" type="button">Створити</button>
     </div>
@@ -149,9 +157,7 @@ const HTML = `
 
   <section data-screen="profile">
     <div>Ваш ID: <span id="pub-key-display" data-i18n="id.none">не згенеровано</span></div>
-    <select id="profile-select"></select>
-    <input id="unlock-passphrase" type="password">
-    <button id="btn-profile-unlock" type="button">Розблокувати</button>
+    <input id="session-ttl-hours" type="number" value="24">
     <input id="link-passphrase" type="password">
     <button id="btn-link-device" type="button">Прив'язати новий пристрій</button>
     <input id="device-local-passphrase" type="password">
@@ -218,6 +224,7 @@ function fakeChannel() {
 beforeEach(() => {
   location.hash = "";
   document.body.innerHTML = HTML;
+  localStorage.clear();
   vi.clearAllMocks();
   listProfiles.mockResolvedValue([]);
   listMessages.mockResolvedValue([]);
@@ -439,6 +446,119 @@ describe("profile selector and unlock (Section 15)", () => {
       expect(document.getElementById("profile-status").textContent).toMatch(/Incorrect passphrase/)
     );
   });
+
+  it("shows the login block when stored profiles exist, hides it otherwise (Section 17)", async () => {
+    listProfiles.mockResolvedValue([]);
+    initApp(document, { locale: "uk" });
+    await vi.waitFor(() => expect(listProfiles).toHaveBeenCalled());
+    expect(document.getElementById("account-login-block").hidden).toBe(true);
+  });
+
+  it("shows the login block when there is at least one stored profile (Section 17)", async () => {
+    listProfiles.mockResolvedValue([{ id: "identity" }]);
+    initApp(document, { locale: "uk" });
+    await vi.waitFor(() => expect(document.getElementById("account-login-block").hidden).toBe(false));
+  });
+
+  it("preselects a remembered (not-yet-expired) profile in the login dropdown (Section 18)", async () => {
+    localStorage.setItem(
+      "spirit.session",
+      JSON.stringify({ profileId: "b".repeat(64), expiresAt: Date.now() + 3600_000 })
+    );
+    listProfiles.mockResolvedValue([{ id: "a".repeat(64) }, { id: "b".repeat(64) }]);
+
+    initApp(document, { locale: "uk" });
+
+    await vi.waitFor(() => expect(document.getElementById("profile-select").value).toBe("b".repeat(64)));
+  });
+
+  it("remembers the session (profile id + TTL) after a successful unlock", async () => {
+    listProfiles.mockResolvedValue([{ id: "identity" }]);
+    loadPermanentProfile.mockResolvedValue({
+      privateKey: {},
+      publicKey: fakePublicKey("unlocked-pub"),
+      vaultKey: { __tag: "vault-key" },
+      profileId: "f".repeat(64)
+    });
+    fingerprint.mockResolvedValue("f".repeat(64));
+
+    initApp(document, { locale: "uk" });
+    await vi.waitFor(() => expect(document.getElementById("profile-select").options.length).toBe(1));
+    document.getElementById("unlock-passphrase").value = "my pass";
+    document.getElementById("btn-profile-unlock").click();
+
+    await vi.waitFor(() => expect(localStorage.getItem("spirit.session")).not.toBeNull());
+    const remembered = JSON.parse(localStorage.getItem("spirit.session"));
+    // The migrated (post-unlock) id, not the pre-migration "identity" selector value.
+    expect(remembered.profileId).toBe("f".repeat(64));
+    // Default TTL is 24h -- the session-ttl-hours field in the fixture is "24".
+    expect(remembered.expiresAt).toBeGreaterThan(Date.now() + 23 * 3600_000);
+    expect(remembered.expiresAt).toBeLessThanOrEqual(Date.now() + 24 * 3600_000 + 1000);
+  });
+
+  it("uses the configured session TTL field instead of the default when remembering a session", async () => {
+    listProfiles.mockResolvedValue([{ id: "identity" }]);
+    loadPermanentProfile.mockResolvedValue({
+      privateKey: {},
+      publicKey: fakePublicKey("unlocked-pub"),
+      vaultKey: { __tag: "vault-key" },
+      profileId: "f".repeat(64)
+    });
+    fingerprint.mockResolvedValue("f".repeat(64));
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("session-ttl-hours").value = "2";
+    await vi.waitFor(() => expect(document.getElementById("profile-select").options.length).toBe(1));
+    document.getElementById("unlock-passphrase").value = "my pass";
+    document.getElementById("btn-profile-unlock").click();
+
+    await vi.waitFor(() => expect(localStorage.getItem("spirit.session")).not.toBeNull());
+    const remembered = JSON.parse(localStorage.getItem("spirit.session"));
+    expect(remembered.expiresAt).toBeLessThanOrEqual(Date.now() + 2 * 3600_000 + 1000);
+    expect(remembered.expiresAt).toBeGreaterThan(Date.now() + 1 * 3600_000);
+  });
+
+  it("falls back to the default TTL instead of a past expiry when the field holds a negative number", async () => {
+    listProfiles.mockResolvedValue([{ id: "identity" }]);
+    loadPermanentProfile.mockResolvedValue({
+      privateKey: {},
+      publicKey: fakePublicKey("unlocked-pub"),
+      vaultKey: { __tag: "vault-key" },
+      profileId: "f".repeat(64)
+    });
+    fingerprint.mockResolvedValue("f".repeat(64));
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("session-ttl-hours").value = "-5";
+    await vi.waitFor(() => expect(document.getElementById("profile-select").options.length).toBe(1));
+    document.getElementById("unlock-passphrase").value = "my pass";
+    document.getElementById("btn-profile-unlock").click();
+
+    await vi.waitFor(() => expect(localStorage.getItem("spirit.session")).not.toBeNull());
+    const remembered = JSON.parse(localStorage.getItem("spirit.session"));
+    // Must NOT be in the past (a negative TTL silently no-ops the remember).
+    expect(remembered.expiresAt).toBeGreaterThan(Date.now());
+  });
+
+  it("remembers the session under the MIGRATED profile id, not the legacy selector value", async () => {
+    listProfiles.mockResolvedValue([{ id: "identity" }]);
+    loadPermanentProfile.mockResolvedValue({
+      privateKey: {},
+      publicKey: fakePublicKey("unlocked-pub"),
+      vaultKey: { __tag: "vault-key" },
+      profileId: "f".repeat(64) // the real, post-migration id -- different from the "identity" selector value
+    });
+    fingerprint.mockResolvedValue("f".repeat(64));
+
+    initApp(document, { locale: "uk" });
+    await vi.waitFor(() => expect(document.getElementById("profile-select").options.length).toBe(1));
+    document.getElementById("unlock-passphrase").value = "my pass";
+    document.getElementById("btn-profile-unlock").click();
+
+    await vi.waitFor(() => expect(localStorage.getItem("spirit.session")).not.toBeNull());
+    const remembered = JSON.parse(localStorage.getItem("spirit.session"));
+    expect(remembered.profileId).toBe("f".repeat(64));
+  });
 });
 
 describe("permanent profile creation UI", () => {
@@ -487,6 +607,31 @@ describe("permanent profile creation UI", () => {
     expect(document.getElementById("backup-step").hidden).toBe(false);
     // The passphrase field must not keep the secret around after use.
     expect(document.getElementById("profile-passphrase").value).toBe("");
+  });
+
+  it("saves the entered nickname and uses it in this session's identity announces (Section 16)", async () => {
+    setupCreatedProfile();
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("nickname-input").value = "Оксана";
+    document.getElementById("profile-passphrase").value = "my local passphrase";
+    document.getElementById("btn-profile-confirm").click();
+
+    await vi.waitFor(() => expect(setNickname).toHaveBeenCalledWith("profile-fp", "Оксана"));
+  });
+
+  it("does not save a nickname when the field is left blank", async () => {
+    await createProfileThroughUi();
+    expect(setNickname).not.toHaveBeenCalled();
+  });
+
+  it("hides the login block after creating a profile in this session, even though it's now a stored profile (Section 17)", async () => {
+    // Real listProfiles() would include the just-created profile once
+    // refreshProfileSelector() re-runs after creation -- but there's nothing
+    // to log into, an identity is already active this session.
+    listProfiles.mockResolvedValue([{ id: "profile-fp" }]);
+    await createProfileThroughUi();
+    expect(document.getElementById("account-login-block").hidden).toBe(true);
   });
 
   it("shows a mnemonic that encodes the actually-created key's scalar", async () => {
@@ -1034,9 +1179,34 @@ describe("identity announce in chat flows (Section 12)", () => {
       { __tag: "id-priv" },
       fakePublicKey("id-pub"),
       "ECDH_PUB_WIRE",
-      "peer-ecdh-b64"
+      "peer-ecdh-b64",
+      ""
     );
     expect(encryptMessage).toHaveBeenCalledWith({ __tag: "session-key" }, JSON.stringify(announce));
+  });
+
+  it("shows the peer's announced nickname ALONGSIDE the fingerprint, never in place of it (Section 16)", async () => {
+    // A nickname is peer-CHOSEN, not proof of identity -- a different
+    // fingerprint could announce the same nickname (impersonation-by-name).
+    // The fingerprint must stay visible so TOFU continuity is still checkable.
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+    const incoming = { type: "identity-announce", identityPubkey: "PEER", signature: "SIG", nickname: "Оксана" };
+    decryptMessage.mockResolvedValue(JSON.stringify(incoming));
+    verifyIdentityAnnounce.mockResolvedValue({
+      identityPublicKey: {},
+      identityPubkeyWire: "PEER",
+      fingerprint: "peer-fp-123",
+      nickname: "Оксана"
+    });
+
+    const { captured } = await establishedInitiatorChat();
+    await captured.onMessage("ENCRYPTED_INCOMING_ANNOUNCE");
+
+    await vi.waitFor(() =>
+      expect(document.getElementById("connection-status").textContent).toContain("Оксана")
+    );
+    expect(document.getElementById("connection-status").textContent).toContain("spirit0001peer-fp-123");
   });
 
   it("verifies an incoming announce against the session's ECDH keys and shows the peer fingerprint", async () => {

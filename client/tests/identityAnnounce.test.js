@@ -80,6 +80,35 @@ describe("createIdentityAnnounce / verifyIdentityAnnounce", () => {
     expect(await verifyIdentityAnnounce(mismatched, ecdhB, ecdhA)).toBeNull();
   });
 
+  it("includes the announcer's nickname in the announce and in the verified result (Section 16)", async () => {
+    const { identity, ecdhA, ecdhB } = await sessionSetup();
+
+    const announce = await createIdentityAnnounce(identity.privateKey, identity.publicKey, ecdhA, ecdhB, "Оксана");
+    expect(announce.nickname).toBe("Оксана");
+
+    const verified = await verifyIdentityAnnounce(announce, ecdhB, ecdhA);
+    expect(verified.nickname).toBe("Оксана");
+  });
+
+  it("defaults to an empty nickname when none is given, without breaking verification", async () => {
+    const { identity, ecdhA, ecdhB } = await sessionSetup();
+
+    const announce = await createIdentityAnnounce(identity.privateKey, identity.publicKey, ecdhA, ecdhB);
+    expect(announce.nickname).toBe("");
+
+    const verified = await verifyIdentityAnnounce(announce, ecdhB, ecdhA);
+    expect(verified.nickname).toBe("");
+  });
+
+  it("rejects an announce whose nickname was changed after signing (not covered by a stale signature)", async () => {
+    const { identity, ecdhA, ecdhB } = await sessionSetup();
+
+    const announce = await createIdentityAnnounce(identity.privateKey, identity.publicKey, ecdhA, ecdhB, "Оксана");
+    const tampered = { ...announce, nickname: "Не Оксана" };
+
+    expect(await verifyIdentityAnnounce(tampered, ecdhB, ecdhA)).toBeNull();
+  });
+
   it("returns null (never throws) for malformed input", async () => {
     const { ecdhA, ecdhB } = await sessionSetup();
 

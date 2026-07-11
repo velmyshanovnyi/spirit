@@ -52,16 +52,31 @@
 
   <main class="layout">
 
-    <!-- ================= Створення акаунта ================= -->
+    <!-- ================= Створення акаунта / вхід ================= -->
     <section data-screen="account" class="screen">
       <section class="card">
         <h2 data-i18n="section.account">Акаунт</h2>
+
+        <div id="account-login-block" hidden class="subgroup">
+          <h3 data-i18n="account.loginHeading">Увійти</h3>
+          <label class="field"><span data-i18n="label.storedProfiles">Збережені профілі:</span>
+            <select id="profile-select"></select>
+          </label>
+          <label class="field"><span data-i18n="label.unlockPassphrase">Passphrase:</span>
+            <input id="unlock-passphrase" type="password" autocomplete="current-password">
+          </label>
+          <div class="btn-row"><button id="btn-profile-unlock" type="button" class="btn-primary" data-i18n="btn.login">Увійти</button></div>
+        </div>
+
         <div class="btn-row">
           <button id="btn-generate" type="button" data-i18n="btn.quickChat">Швидкий чат (ефемерний)</button>
-          <button id="btn-create-profile" type="button" class="btn-primary" data-i18n="btn.createProfile">Створити профіль</button>
+          <button id="btn-create-profile" type="button" class="btn-primary" data-i18n="btn.createProfile">Створити акаунт</button>
         </div>
 
         <div id="profile-setup" hidden class="subgroup">
+          <label class="field"><span data-i18n="label.nickname">Як вас називати:</span>
+            <input id="nickname-input" type="text" data-i18n-placeholder="nickname.placeholder">
+          </label>
           <label class="field"><span data-i18n="label.profilePassphrase">Passphrase профілю:</span>
             <input id="profile-passphrase" type="password" autocomplete="new-password">
           </label>
@@ -94,13 +109,9 @@
         <div class="identity"><span data-i18n="label.yourId">Ваш ID:</span> <code id="pub-key-display" data-i18n="id.none">не згенеровано</code></div>
 
         <div class="subgroup">
-          <label class="field"><span data-i18n="label.storedProfiles">Збережені профілі:</span>
-            <select id="profile-select"></select>
+          <label class="field"><span data-i18n="label.sessionTtl">Тримати сесію активною (годин):</span>
+            <input id="session-ttl-hours" type="number" min="1" value="24">
           </label>
-          <label class="field"><span data-i18n="label.unlockPassphrase">Passphrase:</span>
-            <input id="unlock-passphrase" type="password" autocomplete="current-password">
-          </label>
-          <div class="btn-row"><button id="btn-profile-unlock" type="button" data-i18n="btn.unlock">Розблокувати</button></div>
         </div>
       </section>
 
