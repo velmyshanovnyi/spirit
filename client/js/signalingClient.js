@@ -70,6 +70,18 @@ export async function submitAnswer(baseUrl, { senderKey, roomId, inviteToken, sd
   });
 }
 
+/**
+ * Section D (specs/phase2c/identity-verification.md): fetches a proof
+ * page's content through the signaling node's `fetch_proof` proxy -- the
+ * fallback for CORS-closed targets (e.g. Telegram). The node itself is
+ * SSRF-hardened (server/library/SignalingController.php); this client just
+ * maps the wire shape.
+ */
+export async function fetchProof(baseUrl, { senderKey, targetUrl }) {
+  const data = await apiRequest(baseUrl, { action: "fetch_proof", sender_key: senderKey, target_url: targetUrl });
+  return { body: data.body, contentType: data.content_type };
+}
+
 export async function checkAnswer(baseUrl, { senderKey, roomId }, { signal } = {}) {
   const data = await apiRequest(
     baseUrl,

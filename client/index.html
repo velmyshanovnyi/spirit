@@ -143,6 +143,19 @@
         <div class="btn-row"><button id="btn-google-verify" type="button" data-i18n="btn.googleVerify">Підтвердити через Google</button></div>
         <div id="google-verify-status" class="status"></div>
       </section>
+
+      <section class="card">
+        <h2 data-i18n="proofs.heading">Підтвердження акаунтів</h2>
+        <div class="btn-row"><button id="btn-generate-proof" type="button" data-i18n="btn.generateProof">Створити доказ</button></div>
+        <div id="proof-block-display" class="secret-output"></div>
+        <label class="field"><span data-i18n="label.proofUrl">URL опублікованого доказу:</span>
+          <input id="proof-url-input" type="text">
+        </label>
+        <div class="btn-row"><button id="btn-add-proof" type="button" class="btn-primary" data-i18n="btn.addProof">Додати</button></div>
+        <div id="proofs-status" class="status"></div>
+        <h3 data-i18n="proofs.myProofs">Мої докази</h3>
+        <div id="own-proofs-list" class="list-area"></div>
+      </section>
     </section>
 
     <!-- ================= Адміністрування сервера ================= -->
@@ -228,6 +241,8 @@
     <section data-screen="contacts" class="screen">
       <section class="card card-wide">
         <h2 data-i18n="contacts.heading">Контакти</h2>
+        <div class="btn-row"><button id="btn-check-proofs-now" type="button" data-i18n="btn.checkProofsNow">Перевірити зараз</button></div>
+        <div id="proofs-check-status" class="status"></div>
         <div id="contacts-list" class="list-area"></div>
         <p id="contacts-empty" class="hint-text" data-i18n="contacts.empty">Поки що немає жодного контакту</p>
       </section>

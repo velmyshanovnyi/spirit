@@ -464,3 +464,16 @@ button:disabled {
 .list-row:hover {
   border-color: var(--accent);
 }
+
+/* ---------- Linked-identity proof badges (Section E, specs/phase2c/identity-verification.md) ---------- */
+
+.proof-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 11.5px;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: var(--accent-soft);
+  border-radius: 999px;
+  color: var(--muted);
+}

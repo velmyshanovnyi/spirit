@@ -6,6 +6,7 @@ import {
   submitAnswer,
   checkAnswer,
   pollForAnswer,
+  fetchProof,
   SignalingError
 } from "../js/signalingClient.js";
 
@@ -65,6 +66,30 @@ describe("createOffer", () => {
           ecdh_pubkey: "ecdh-pub"
         })
       })
+    );
+  });
+});
+
+describe("fetchProof", () => {
+  it("posts action=fetch_proof and returns { body, contentType }", async () => {
+    mockFetchOnce(200, { status: "success", body: "<html>proof page</html>", content_type: "text/html" });
+
+    const result = await fetchProof(BASE_URL, { senderKey: "sk", targetUrl: "https://t.me/x/1?embed=1" });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      BASE_URL,
+      expect.objectContaining({
+        body: JSON.stringify({ action: "fetch_proof", sender_key: "sk", target_url: "https://t.me/x/1?embed=1" })
+      })
+    );
+    expect(result).toEqual({ body: "<html>proof page</html>", contentType: "text/html" });
+  });
+
+  it("throws a SignalingError when the node has the proxy disabled", async () => {
+    mockFetchOnce(403, { error: "fetch_proof is disabled on this node" });
+
+    await expect(fetchProof(BASE_URL, { senderKey: "sk", targetUrl: "https://example.com/" })).rejects.toBeInstanceOf(
+      SignalingError
     );
   });
 });

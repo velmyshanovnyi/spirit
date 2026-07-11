@@ -48,6 +48,14 @@ vi.mock("../js/proofSet.js", () => ({
   addProofToSet: vi.fn(),
   revokeProofFromSet: vi.fn()
 }));
+vi.mock("../js/proofs.js", () => ({
+  createProofBlock: vi.fn(),
+  parseProofBlock: vi.fn(),
+  verifyProofBlock: vi.fn()
+}));
+vi.mock("../js/fetchProof.js", () => ({
+  fetchProofPageText: vi.fn()
+}));
 vi.mock("../js/historyStore.js", () => ({
   appendMessage: vi.fn(),
   listMessages: vi.fn().mockResolvedValue([]),
@@ -109,6 +117,8 @@ import {
 import { createIdentityAnnounce, verifyIdentityAnnounce } from "../js/identityAnnounce.js";
 import { rememberContact, getContact, updateContactDeviceList, updateContactProofSet, listContacts } from "../js/contacts.js";
 import { acceptNewerProofSet, signProofSet, addProofToSet, revokeProofFromSet } from "../js/proofSet.js";
+import { createProofBlock, parseProofBlock, verifyProofBlock } from "../js/proofs.js";
+import { fetchProofPageText } from "../js/fetchProof.js";
 import { get as dbGet, put as dbPut } from "../js/db.js";
 import { appendMessage, listMessages, listConversations } from "../js/historyStore.js";
 import { adminLogin, getAdminConfig } from "../js/adminAuth.js";
@@ -174,6 +184,12 @@ const HTML = `
     <input id="google-client-id" type="text" value="test-client-id">
     <button id="btn-google-verify" type="button">Підтвердити через Google</button>
     <div id="google-verify-status"></div>
+    <button id="btn-generate-proof" type="button">Створити доказ</button>
+    <div id="proof-block-display"></div>
+    <input id="proof-url-input" type="text">
+    <button id="btn-add-proof" type="button">Додати</button>
+    <div id="proofs-status"></div>
+    <div id="own-proofs-list"></div>
   </section>
 
   <section data-screen="server">
@@ -213,6 +229,8 @@ const HTML = `
   <section data-screen="contacts">
     <div id="contacts-list"></div>
     <p id="contacts-empty"></p>
+    <button id="btn-check-proofs-now" type="button">Перевірити зараз</button>
+    <div id="proofs-check-status"></div>
   </section>
 
   <section data-screen="history">
@@ -2453,6 +2471,261 @@ describe("contacts and history screens (Sections N3/N4)", () => {
 
     expect(document.getElementById("history-empty").hidden).toBe(false);
     expect(listConversations).not.toHaveBeenCalled();
+  });
+});
+
+describe("identity verification proofs (Section E)", () => {
+  async function reachProfileScreen() {
+    createPermanentProfile.mockResolvedValue({
+      privateKey: { __tag: "profile-priv" },
+      publicKey: fakePublicKey("profile-pub"),
+      vaultKey: { __tag: "vault-key" }
+    });
+    fingerprint.mockResolvedValue("profile-fp");
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "pass";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("backup-step").hidden).toBe(false));
+    document.getElementById("btn-backup-skip").click();
+  }
+
+  it("generates and shows a proof block for copying", async () => {
+    await reachProfileScreen();
+    createProofBlock.mockResolvedValue("-----BEGIN SPIRIT PROOF-----\n...\n-----END SPIRIT PROOF-----");
+
+    document.getElementById("btn-generate-proof").click();
+
+    await vi.waitFor(() =>
+      expect(document.getElementById("proof-block-display").textContent).toContain("BEGIN SPIRIT PROOF")
+    );
+    expect(createProofBlock).toHaveBeenCalledWith(
+      { __tag: "profile-priv" },
+      fakePublicKey("profile-pub"),
+      "spirit0001profile-fp"
+    );
+  });
+
+  it("adds a proof after a successful sanity-check of its own publication", async () => {
+    await reachProfileScreen();
+    createProofBlock.mockResolvedValue("OWN_BLOCK_TEXT");
+    document.getElementById("btn-generate-proof").click();
+    await vi.waitFor(() => expect(document.getElementById("proof-block-display").textContent).toBe("OWN_BLOCK_TEXT"));
+
+    parseProofBlock.mockReturnValue({ identity: "OWN_WIRE", statement: "s", timestamp: 1, nonce: "n", signature: "sig" });
+    verifyProofBlock.mockResolvedValue(true);
+    fetchProofPageText.mockResolvedValue("page text containing the published block");
+    const newSet = { version: 1, proofs: [{ url: "https://example.com/me", label: "example.com", added_at: 123 }], revoked: [], signature: "S" };
+    addProofToSet.mockResolvedValue(newSet);
+
+    document.getElementById("proof-url-input").value = "https://example.com/me";
+    document.getElementById("btn-add-proof").click();
+
+    await vi.waitFor(() => expect(addProofToSet).toHaveBeenCalled());
+    expect(fetchProofPageText).toHaveBeenCalledWith("http://node.example/index.php", "profile-fp", "https://example.com/me");
+    expect(addProofToSet).toHaveBeenCalledWith(
+      { __tag: "profile-priv" },
+      null,
+      expect.objectContaining({ url: "https://example.com/me", label: "example.com" })
+    );
+    await vi.waitFor(() => expect(document.getElementById("own-proofs-list").textContent).toContain("example.com"));
+  });
+
+  it("blocks adding a proof when the sanity-check (fetched page vs published block) fails", async () => {
+    await reachProfileScreen();
+    createProofBlock.mockResolvedValue("OWN_BLOCK_TEXT");
+    document.getElementById("btn-generate-proof").click();
+    await vi.waitFor(() => expect(document.getElementById("proof-block-display").textContent).toBe("OWN_BLOCK_TEXT"));
+
+    parseProofBlock.mockReturnValue({ identity: "OWN_WIRE", statement: "s", timestamp: 1, nonce: "n", signature: "sig" });
+    verifyProofBlock.mockResolvedValue(false);
+    fetchProofPageText.mockResolvedValue("page text WITHOUT the block");
+
+    document.getElementById("proof-url-input").value = "https://example.com/me";
+    document.getElementById("btn-add-proof").click();
+
+    await vi.waitFor(() => expect(document.getElementById("proofs-status").textContent).not.toBe(""));
+    expect(addProofToSet).not.toHaveBeenCalled();
+  });
+
+  it("refuses to add a proof before a block has been generated this session", async () => {
+    await reachProfileScreen();
+    document.getElementById("proof-url-input").value = "https://example.com/me";
+    document.getElementById("btn-add-proof").click();
+
+    await vi.waitFor(() => expect(document.getElementById("proofs-status").textContent).not.toBe(""));
+    expect(fetchProofPageText).not.toHaveBeenCalled();
+    expect(addProofToSet).not.toHaveBeenCalled();
+  });
+
+  it("revoking an owned proof calls revokeProofFromSet, persists it, and re-renders the list", async () => {
+    await reachProfileScreen();
+    createProofBlock.mockResolvedValue("OWN_BLOCK_TEXT");
+    document.getElementById("btn-generate-proof").click();
+    await vi.waitFor(() => expect(document.getElementById("proof-block-display").textContent).toBe("OWN_BLOCK_TEXT"));
+    parseProofBlock.mockReturnValue({ identity: "OWN_WIRE", statement: "s", timestamp: 1, nonce: "n", signature: "sig" });
+    verifyProofBlock.mockResolvedValue(true);
+    fetchProofPageText.mockResolvedValue("page text");
+    const withProof = { version: 1, proofs: [{ url: "https://example.com/me", label: "example.com", added_at: 123 }], revoked: [], signature: "S" };
+    addProofToSet.mockResolvedValue(withProof);
+    document.getElementById("proof-url-input").value = "https://example.com/me";
+    document.getElementById("btn-add-proof").click();
+    await vi.waitFor(() => expect(document.getElementById("own-proofs-list").textContent).toContain("example.com"));
+
+    const afterRevoke = { version: 2, proofs: [], revoked: [{ url: "https://example.com/me", revoked_at: 999 }], signature: "S2" };
+    revokeProofFromSet.mockResolvedValue(afterRevoke);
+    document.querySelector("#own-proofs-list button").click();
+
+    await vi.waitFor(() => expect(revokeProofFromSet).toHaveBeenCalledWith({ __tag: "profile-priv" }, withProof, "https://example.com/me"));
+    await vi.waitFor(() => expect(document.getElementById("own-proofs-list").textContent).not.toContain("example.com"));
+  });
+
+  it("contacts screen shows a badge for each proof in a contact's held proof set", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    listContacts.mockResolvedValue([
+      {
+        fingerprint: "a".repeat(64),
+        identityPubkeyWire: "PEER_WIRE",
+        firstSeen: 1,
+        deviceList: null,
+        proofSet: { version: 1, proofs: [{ url: "https://t.me/x/1", label: "telegram", added_at: 1 }], revoked: [] }
+      }
+    ]);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+    location.hash = "#/contacts";
+    window.dispatchEvent(new Event("hashchange"));
+
+    await vi.waitFor(() => expect(document.getElementById("contacts-list").textContent).toContain("telegram"));
+  });
+
+  it("'Перевірити зараз' fetches and verifies every contact's proofs and updates their badges", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    const contact = {
+      fingerprint: "a".repeat(64),
+      identityPubkeyWire: "PEER_WIRE",
+      firstSeen: 1,
+      deviceList: null,
+      proofSet: { version: 1, proofs: [{ url: "https://t.me/x/1", label: "telegram", added_at: 1 }], revoked: [] }
+    };
+    listContacts.mockResolvedValue([contact]);
+    fetchProofPageText.mockResolvedValue("page text with the block embedded");
+    parseProofBlock.mockReturnValue({ identity: "PEER_WIRE", statement: "s", timestamp: 1, nonce: "n", signature: "sig" });
+    verifyProofBlock.mockResolvedValue(true);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+    location.hash = "#/contacts";
+    window.dispatchEvent(new Event("hashchange"));
+    await vi.waitFor(() => expect(document.getElementById("contacts-list").textContent).toContain("telegram"));
+
+    document.getElementById("btn-check-proofs-now").click();
+
+    await vi.waitFor(() => expect(fetchProofPageText).toHaveBeenCalledWith(expect.anything(), "sender-fp", "https://t.me/x/1"));
+    expect(verifyProofBlock).toHaveBeenCalledWith(expect.objectContaining({ identity: "PEER_WIRE" }), "PEER_WIRE");
+    await vi.waitFor(() =>
+      expect(document.getElementById("contacts-list").textContent).toMatch(/перевірено/i)
+    );
+  });
+
+  it("shows a distinct status after several consecutive verification failures, without the badge disappearing", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    const contact = {
+      fingerprint: "a".repeat(64),
+      identityPubkeyWire: "PEER_WIRE",
+      firstSeen: 1,
+      deviceList: null,
+      proofSet: { version: 1, proofs: [{ url: "https://t.me/x/1", label: "telegram", added_at: 1 }], revoked: [] }
+    };
+    listContacts.mockResolvedValue([contact]);
+    fetchProofPageText.mockRejectedValue(new Error("page unreachable"));
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+    location.hash = "#/contacts";
+    window.dispatchEvent(new Event("hashchange"));
+    await vi.waitFor(() => expect(document.getElementById("contacts-list").textContent).toContain("telegram"));
+
+    for (let i = 0; i < 3; i++) {
+      document.getElementById("btn-check-proofs-now").click();
+      await vi.waitFor(() => expect(fetchProofPageText).toHaveBeenCalledTimes(i + 1));
+    }
+
+    // Still present (not silently gone), but now flagged as failing.
+    expect(document.getElementById("contacts-list").textContent).toContain("telegram");
+    expect(document.getElementById("contacts-list").textContent).toMatch(/не вдалося підтвердити/i);
+  });
+
+  it("starts the periodic re-check timer once at init, without stacking across re-initializations", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    listContacts.mockResolvedValue([]);
+    // NOTE: this file's tests all share the same jsdom `window` (only
+    // document.body is reset between tests), so a prior test's initApp()
+    // call may already have an interval armed -- assert relative counts
+    // around THIS test's two calls, not an absolute "never called before".
+    const clearIntervalSpy = vi.spyOn(window, "clearInterval");
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+
+    initApp(document, { locale: "uk" });
+    expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+    const firstIntervalId = setIntervalSpy.mock.results[0].value;
+
+    initApp(document, { locale: "uk" }); // second init in the same window/tests -- must not stack a second interval
+    // The previous interval must be cleared before a new one is armed --
+    // exactly one live interval at any time, same contract as the
+    // hashchange-listener dedup elsewhere in this file.
+    expect(clearIntervalSpy).toHaveBeenCalledWith(firstIntervalId);
+    expect(setIntervalSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("resets own-proof state (cache + generated block) when a different profile becomes active in the same tab (exec review finding)", async () => {
+    // Profile A: unlock, generate + add a proof.
+    listProfiles.mockResolvedValue([{ id: "identity" }]);
+    loadPermanentProfile.mockResolvedValue({
+      privateKey: { __tag: "priv-A" },
+      publicKey: fakePublicKey("pub-A"),
+      vaultKey: { __tag: "vault-A" },
+      profileId: "profile-A"
+    });
+    fingerprint.mockResolvedValue("profile-A");
+
+    initApp(document, { locale: "uk" });
+    await vi.waitFor(() => expect(document.getElementById("profile-select").options.length).toBe(1));
+    document.getElementById("unlock-passphrase").value = "pass-A";
+    document.getElementById("btn-profile-unlock").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001profile-A"));
+
+    createProofBlock.mockResolvedValue("PROOF_BLOCK_A");
+    document.getElementById("btn-generate-proof").click();
+    await vi.waitFor(() => expect(document.getElementById("proof-block-display").textContent).toBe("PROOF_BLOCK_A"));
+
+    parseProofBlock.mockReturnValue({ identity: "WIRE_A", statement: "s", timestamp: 1, nonce: "n", signature: "sig" });
+    verifyProofBlock.mockResolvedValue(true);
+    fetchProofPageText.mockResolvedValue("page text");
+    const setA = { version: 1, proofs: [{ url: "https://a.example/", label: "a.example", added_at: 1 }], revoked: [], signature: "S" };
+    addProofToSet.mockResolvedValue(setA);
+    document.getElementById("proof-url-input").value = "https://a.example/";
+    document.getElementById("btn-add-proof").click();
+    await vi.waitFor(() => expect(document.getElementById("own-proofs-list").textContent).toContain("a.example"));
+
+    // Switch to profile B in the SAME tab (ephemeral quick-chat, simplest
+    // way to trigger a senderKey change without a second unlock flow).
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: { __tag: "priv-B" }, publicKey: fakePublicKey("pub-B") });
+    fingerprint.mockResolvedValue("profile-B");
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001profile-B"));
+
+    // Must NOT still show/act on profile A's proof state.
+    expect(document.getElementById("proof-block-display").textContent).toBe("");
+    expect(document.getElementById("own-proofs-list").textContent).not.toContain("a.example");
   });
 });
 

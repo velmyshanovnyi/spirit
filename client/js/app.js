@@ -22,7 +22,9 @@ import { listKeys, get, put } from "./db.js";
 import { createIdentityAnnounce, verifyIdentityAnnounce } from "./identityAnnounce.js";
 import { rememberContact, getContact, updateContactDeviceList, updateContactProofSet, listContacts } from "./contacts.js";
 import { appendMessage, listMessages, listConversations } from "./historyStore.js";
-import { acceptNewerProofSet } from "./proofSet.js";
+import { acceptNewerProofSet, addProofToSet, revokeProofFromSet } from "./proofSet.js";
+import { createProofBlock, parseProofBlock, verifyProofBlock } from "./proofs.js";
+import { fetchProofPageText } from "./fetchProof.js";
 
 import {
   startAsInitiator,
@@ -198,6 +200,14 @@ export function initApp(
     }
   });
 
+  // Section E (specs/phase2c/identity-verification.md): in-memory verification
+  // status per (contact fingerprint, proof url) -- re-derived from a live
+  // fetch each check, so it doesn't need to survive a reload. `null`
+  // verifiedAt/failedAt means "not checked yet this session".
+  const PROOF_FAILURE_THRESHOLD = 3;
+  const proofVerification = new Map();
+  const proofVerificationKey = (fingerprint, url) => `${fingerprint}|${url}`;
+
   async function renderContactsScreen() {
     const list = el("contacts-list");
     const empty = el("contacts-empty");
@@ -210,8 +220,60 @@ export function initApp(
       row.className = "list-row";
       row.dataset.contactFingerprint = contact.fingerprint;
       row.textContent = formatSpiritId(contact.fingerprint);
+      for (const proof of contact.proofSet?.proofs ?? []) {
+        const badge = doc.createElement("span");
+        badge.className = "proof-badge";
+        const v = proofVerification.get(proofVerificationKey(contact.fingerprint, proof.url));
+        if (v?.verifiedAt) {
+          badge.textContent = ` ${proof.label}: ${t("proofs.verifiedAt", { date: new Date(v.verifiedAt).toLocaleString() })}`;
+        } else if (v && v.consecutiveFailures >= PROOF_FAILURE_THRESHOLD) {
+          badge.textContent = ` ${proof.label}: ${t("proofs.failedSince", { date: new Date(v.failedAt).toLocaleString() })}`;
+        } else {
+          badge.textContent = ` ${proof.label}`;
+        }
+        row.appendChild(badge);
+      }
       list.appendChild(row);
     }
+  }
+
+  /**
+   * Re-checks every contact's held proofs against their live publication --
+   * called on demand ("Перевірити зараз") and on the periodic timer below.
+   * A single fetch/verify failure doesn't flip the badge to "failed"
+   * immediately (transient network hiccups are common); only
+   * PROOF_FAILURE_THRESHOLD consecutive failures do (docs/identity-verification.md).
+   */
+  async function checkContactProofs() {
+    const contacts = await listContacts();
+    for (const contact of contacts) {
+      for (const proof of contact.proofSet?.proofs ?? []) {
+        const key = proofVerificationKey(contact.fingerprint, proof.url);
+        const prev = proofVerification.get(key);
+        try {
+          const text = await fetchProofPageText(el("server-url").value, state.senderKey, proof.url);
+          const parsed = parseProofBlock(text);
+          const ok = await verifyProofBlock(parsed, contact.identityPubkeyWire);
+          if (ok) {
+            proofVerification.set(key, { verifiedAt: Date.now(), failedAt: null, consecutiveFailures: 0 });
+          } else {
+            proofVerification.set(key, {
+              verifiedAt: null,
+              failedAt: Date.now(),
+              consecutiveFailures: (prev?.consecutiveFailures ?? 0) + 1
+            });
+          }
+        } catch {
+          proofVerification.set(key, {
+            verifiedAt: null,
+            failedAt: Date.now(),
+            consecutiveFailures: (prev?.consecutiveFailures ?? 0) + 1
+          });
+        }
+      }
+    }
+    const route = win.location.hash.replace(/^#\/?/, "");
+    if (route === "contacts") await renderContactsScreen();
   }
 
   async function renderHistoryScreen() {
@@ -287,6 +349,7 @@ export function initApp(
     const route = win.location.hash.replace(/^#\/?/, "");
     if (route === "contacts") renderContactsScreen();
     if (route === "history") renderHistoryScreen();
+    if (route === "profile") renderOwnProofsList();
   };
   if (win.__spiritAppHashListener) {
     win.removeEventListener("hashchange", win.__spiritAppHashListener);
@@ -654,6 +717,7 @@ export function initApp(
     state.identityKeyPair = await generateIdentityKeyPair();
     state.senderKey = await fingerprint(state.identityKeyPair.publicKey);
     setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
+    resetOwnProofsState();
     // Ephemeral quick-chat has no profile to administer -- go straight to
     // the room screen rather than the profile screen (used for permanent
     // profiles: unlock, backup, devices).
@@ -688,6 +752,123 @@ export function initApp(
   el("session-ttl-hours").addEventListener("change", () => {
     put("profile", "settings:sessionTtlHours", readSessionTtlHours()).catch(() => {});
   });
+
+  // Section E: publishing/managing own linked-identity proofs.
+  const setProofsStatus = (text) => {
+    el("proofs-status").textContent = text;
+  };
+  // Kept only for this session (not persisted): re-parsed to get the exact
+  // identity wire this block was signed for, so "Додати" can sanity-check
+  // the fetched publication against OUR OWN block without needing to
+  // re-export the (possibly non-extractable) identity public key.
+  let lastGeneratedProofBlockText = null;
+  // Cached in memory rather than re-read from storage on every render --
+  // both because it avoids a round-trip and because it's simply the
+  // in-flight value this tab is editing (mirrors ownDeviceList's own
+  // get()-on-demand pattern, but this one changes multiple times per
+  // session via add/revoke, so a cache avoids a stale-read race between a
+  // just-completed put() and an immediately following get()).
+  let ownProofSetCache = undefined; // undefined = not loaded yet; null = loaded, empty
+
+  /**
+   * Called whenever a DIFFERENT identity becomes active in this tab
+   * (quick-chat, unlock, create-profile, device-join) -- without this, an
+   * earlier profile's cached proof set / just-generated block would leak
+   * into the newly-active profile's UI and, worse, get persisted under the
+   * new profile's storage key (exec review finding, Section E).
+   */
+  function resetOwnProofsState() {
+    lastGeneratedProofBlockText = null;
+    ownProofSetCache = undefined;
+    if (el("proof-block-display")) el("proof-block-display").textContent = "";
+    if (el("own-proofs-list")) el("own-proofs-list").innerHTML = "";
+  }
+
+  async function loadOwnProofSet() {
+    if (ownProofSetCache === undefined) {
+      ownProofSetCache = (await get("profile", ownProofSetKey(state.senderKey))) ?? null;
+    }
+    return ownProofSetCache;
+  }
+
+  async function renderOwnProofsList() {
+    const list = el("own-proofs-list");
+    if (!list) return;
+    list.innerHTML = "";
+    const ownSet = await loadOwnProofSet();
+    for (const proof of ownSet?.proofs ?? []) {
+      const row = doc.createElement("div");
+      row.className = "list-row";
+      row.textContent = `${proof.label}: ${proof.url} `;
+      const revokeBtn = doc.createElement("button");
+      revokeBtn.type = "button";
+      revokeBtn.textContent = t("btn.revokeProof");
+      revokeBtn.addEventListener("click", async () => {
+        ownProofSetCache = await revokeProofFromSet(state.identityKeyPair.privateKey, ownProofSetCache, proof.url);
+        await put("profile", ownProofSetKey(state.senderKey), ownProofSetCache);
+        await renderOwnProofsList();
+      });
+      row.appendChild(revokeBtn);
+      list.appendChild(row);
+    }
+  }
+
+  withBusyButton(el("btn-generate-proof"), async () => {
+    const block = await createProofBlock(
+      state.identityKeyPair.privateKey,
+      state.identityKeyPair.publicKey,
+      formatSpiritId(state.senderKey)
+    );
+    lastGeneratedProofBlockText = block;
+    el("proof-block-display").textContent = block;
+  });
+
+  withBusyButton(el("btn-add-proof"), async () => {
+    const url = el("proof-url-input").value.trim();
+    if (!url) {
+      setProofsStatus(t("proofs.needUrl"));
+      return;
+    }
+    if (!lastGeneratedProofBlockText) {
+      setProofsStatus(t("proofs.needGenerateFirst"));
+      return;
+    }
+    try {
+      const ownWire = parseProofBlock(lastGeneratedProofBlockText)?.identity;
+      const text = await fetchProofPageText(el("server-url").value, state.senderKey, url);
+      const parsed = parseProofBlock(text);
+      if (!(await verifyProofBlock(parsed, ownWire))) {
+        setProofsStatus(t("proofs.sanityCheckFailed"));
+        return;
+      }
+      const label = new URL(url).hostname;
+      const current = await loadOwnProofSet();
+      ownProofSetCache = await addProofToSet(state.identityKeyPair.privateKey, current, { url, label, added_at: Date.now() });
+      await put("profile", ownProofSetKey(state.senderKey), ownProofSetCache);
+      el("proof-url-input").value = "";
+      setProofsStatus("");
+      await renderOwnProofsList();
+    } catch (err) {
+      setProofsStatus(t("status.error", { msg: err.message }));
+    }
+  });
+
+  withBusyButton(el("btn-check-proofs-now"), async () => {
+    el("proofs-check-status").textContent = "";
+    await checkContactProofs();
+  });
+
+  // Periodic re-check (Section 18 decision: a real setInterval while the
+  // tab is open, not just on-screen-open) -- deduplicated the same way as
+  // the router's/app's own hashchange listeners, so re-initializing (tests,
+  // HMR) never stacks a second interval ticking in the background.
+  const PROOF_RECHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+  if (doc.defaultView.__spiritProofRecheckInterval) {
+    doc.defaultView.clearInterval(doc.defaultView.__spiritProofRecheckInterval);
+  }
+  doc.defaultView.__spiritProofRecheckInterval = doc.defaultView.setInterval(() => {
+    checkContactProofs().catch(() => {});
+  }, PROOF_RECHECK_INTERVAL_MS);
 
   // Section 17/18: a returning user (stored profiles exist) sees the login
   // block instead of the create-account flow; a remembered, not-yet-expired
@@ -731,6 +912,7 @@ export function initApp(
       state.identityKeyPair = profile;
       state.senderKey = profile.profileId;
       state.nickname = await getNickname(state.senderKey);
+      resetOwnProofsState();
       setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
       setProfileStatus("");
       // A legacy record migrates on unlock -- its id changes to the
@@ -755,6 +937,7 @@ export function initApp(
     // Don't keep the secret sitting in a DOM input after it's been used.
     el("profile-passphrase").value = "";
     state.senderKey = await fingerprint(state.identityKeyPair.publicKey);
+    resetOwnProofsState();
     const nickname = el("nickname-input").value.trim();
     if (nickname) {
       await setNickname(state.senderKey, nickname);
@@ -988,6 +1171,7 @@ export function initApp(
           el("device-local-passphrase").value = "";
           state.identityKeyPair = identityKeyPair;
           state.senderKey = await fingerprint(identityKeyPair.publicKey);
+          resetOwnProofsState();
           setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
           setDeviceLinkStatus(t("device.done"));
           router.navigate("profile");
