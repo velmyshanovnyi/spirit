@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { IDBFactory } from "fake-indexeddb";
-import { rememberContact, getContact, updateContactDeviceList, listContacts } from "../js/contacts.js";
+import { rememberContact, getContact, updateContactDeviceList, updateContactProofSet, listContacts } from "../js/contacts.js";
 
 beforeEach(() => {
   global.indexedDB = new IDBFactory();
@@ -13,7 +13,7 @@ describe("rememberContact / getContact", () => {
     const { status, contact } = await rememberContact({ fingerprint: FP, identityPubkeyWire: "PUB_WIRE", now: 1234 });
 
     expect(status).toBe("new");
-    expect(contact).toEqual({ fingerprint: FP, identityPubkeyWire: "PUB_WIRE", firstSeen: 1234, deviceList: null, nickname: null });
+    expect(contact).toEqual({ fingerprint: FP, identityPubkeyWire: "PUB_WIRE", firstSeen: 1234, deviceList: null, nickname: null, proofSet: null });
     expect(await getContact(FP)).toEqual(contact);
   });
 
@@ -44,12 +44,35 @@ describe("updateContactDeviceList", () => {
       identityPubkeyWire: "PUB_WIRE",
       firstSeen: 1234,
       deviceList,
-      nickname: null
+      nickname: null,
+      proofSet: null
     });
   });
 
   it("throws for an unknown contact instead of creating an orphan record", async () => {
     await expect(updateContactDeviceList("f".repeat(64), { version: 1 })).rejects.toThrow(/unknown contact/i);
+  });
+});
+
+describe("updateContactProofSet (Section C)", () => {
+  it("stores the proof set on the existing contact, preserving the rest of the record", async () => {
+    await rememberContact({ fingerprint: FP, identityPubkeyWire: "PUB_WIRE", now: 1234 });
+    const proofSet = { version: 1, proofs: [{ url: "https://t.me/x/1", label: "telegram", added_at: 1 }], revoked: [], signature: "SIG" };
+
+    await updateContactProofSet(FP, proofSet);
+
+    expect(await getContact(FP)).toEqual({
+      fingerprint: FP,
+      identityPubkeyWire: "PUB_WIRE",
+      firstSeen: 1234,
+      deviceList: null,
+      nickname: null,
+      proofSet
+    });
+  });
+
+  it("throws for an unknown contact instead of creating an orphan record", async () => {
+    await expect(updateContactProofSet("f".repeat(64), { version: 1 })).rejects.toThrow(/unknown contact/i);
   });
 });
 
@@ -71,7 +94,8 @@ describe("listContacts", () => {
       identityPubkeyWire: "PUB_WIRE_1",
       firstSeen: 1000,
       deviceList: null,
-      nickname: null
+      nickname: null,
+      proofSet: null
     });
   });
 });

@@ -20,8 +20,9 @@ import {
 } from "./deviceLinking.js";
 import { listKeys, get, put } from "./db.js";
 import { createIdentityAnnounce, verifyIdentityAnnounce } from "./identityAnnounce.js";
-import { rememberContact, getContact, updateContactDeviceList, listContacts } from "./contacts.js";
+import { rememberContact, getContact, updateContactDeviceList, updateContactProofSet, listContacts } from "./contacts.js";
 import { appendMessage, listMessages, listConversations } from "./historyStore.js";
+import { acceptNewerProofSet } from "./proofSet.js";
 
 import {
   startAsInitiator,
@@ -63,6 +64,8 @@ const GATED_ROUTES = ["profile", "conversation", "contacts", "history"];
 // Per-profile own device list record key in the "profile" store (Section 15:
 // multiple accounts each maintain their own list).
 const ownDeviceListKey = (profileId) => `deviceList:${profileId}`;
+// Per-profile own proof set (Section C, specs/phase2c/identity-verification.md).
+const ownProofSetKey = (profileId) => `proofSet:${profileId}`;
 
 const DEFAULT_ICE_TIMEOUT_MS = 15000;
 const DEFAULT_ANSWER_WAIT_TIMEOUT_MS = 5 * 60 * 1000; // matches the signaling node's default session TTL
@@ -305,6 +308,7 @@ export function initApp(
   const CONTROL_MESSAGE_TYPES = new Set([
     "identity-announce",
     "device-list-announce",
+    "proof-set-announce",
     "webrtc-call-offer",
     "webrtc-call-answer"
   ]);
@@ -414,6 +418,19 @@ export function initApp(
       return;
     }
 
+    if (control.type === "proof-set-announce") {
+      // Same gate as device-list-announce: meaningless before identity is
+      // verified, pointless in ephemeral mode (nothing persists).
+      if (!state.peerFingerprint || !state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
+      const contact = await getContact(state.peerFingerprint);
+      const heldSet = contact ? contact.proofSet : null;
+      const accepted = await acceptNewerProofSet(state.peerIdentityPublicKey, heldSet, control.set);
+      if (accepted !== heldSet) {
+        await updateContactProofSet(state.peerFingerprint, accepted);
+      }
+      return;
+    }
+
     if (control.type === "webrtc-call-offer") {
       // Same trust gate as plain chat text (line ~309 above): don't turn on
       // the camera/mic for a peer whose identity hasn't been verified yet.
@@ -460,6 +477,12 @@ export function initApp(
         if (ownDeviceList) {
           state.channel.send(
             await encryptMessage(state.sessionKey, JSON.stringify({ type: "device-list-announce", list: ownDeviceList }))
+          );
+        }
+        const ownProofSet = await get("profile", ownProofSetKey(state.senderKey));
+        if (ownProofSet) {
+          state.channel.send(
+            await encryptMessage(state.sessionKey, JSON.stringify({ type: "proof-set-announce", set: ownProofSet }))
           );
         }
       } catch (err) {

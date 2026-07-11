@@ -22,7 +22,7 @@ export async function rememberContact({ fingerprint, identityPubkeyWire, nicknam
     }
     return { status: "known", contact: existing };
   }
-  const contact = { fingerprint, identityPubkeyWire, firstSeen: now, deviceList: null, nickname };
+  const contact = { fingerprint, identityPubkeyWire, firstSeen: now, deviceList: null, nickname, proofSet: null };
   await put("contacts", fingerprint, contact);
   return { status: "new", contact };
 }
@@ -52,4 +52,17 @@ export async function updateContactDeviceList(fingerprint, deviceList) {
     throw new Error(`Unknown contact: ${fingerprint}`);
   }
   await put("contacts", fingerprint, { ...existing, deviceList });
+}
+
+/**
+ * Replaces the contact's held proof set (already validated by the caller
+ * via acceptNewerProofSet -- this is pure storage). Same orphan-record
+ * guard as updateContactDeviceList.
+ */
+export async function updateContactProofSet(fingerprint, proofSet) {
+  const existing = await get("contacts", fingerprint);
+  if (!existing) {
+    throw new Error(`Unknown contact: ${fingerprint}`);
+  }
+  await put("contacts", fingerprint, { ...existing, proofSet });
 }

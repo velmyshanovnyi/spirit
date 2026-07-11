@@ -39,7 +39,14 @@ vi.mock("../js/contacts.js", () => ({
   rememberContact: vi.fn(),
   getContact: vi.fn(),
   updateContactDeviceList: vi.fn(),
+  updateContactProofSet: vi.fn(),
   listContacts: vi.fn().mockResolvedValue([])
+}));
+vi.mock("../js/proofSet.js", () => ({
+  acceptNewerProofSet: vi.fn(),
+  signProofSet: vi.fn(),
+  addProofToSet: vi.fn(),
+  revokeProofFromSet: vi.fn()
 }));
 vi.mock("../js/historyStore.js", () => ({
   appendMessage: vi.fn(),
@@ -100,7 +107,8 @@ import {
   acceptNewerDeviceList
 } from "../js/deviceLinking.js";
 import { createIdentityAnnounce, verifyIdentityAnnounce } from "../js/identityAnnounce.js";
-import { rememberContact, getContact, updateContactDeviceList, listContacts } from "../js/contacts.js";
+import { rememberContact, getContact, updateContactDeviceList, updateContactProofSet, listContacts } from "../js/contacts.js";
+import { acceptNewerProofSet, signProofSet, addProofToSet, revokeProofFromSet } from "../js/proofSet.js";
 import { get as dbGet, put as dbPut } from "../js/db.js";
 import { appendMessage, listMessages, listConversations } from "../js/historyStore.js";
 import { adminLogin, getAdminConfig } from "../js/adminAuth.js";
@@ -1453,6 +1461,114 @@ describe("device-list transport (Section 13)", () => {
 
     expect(acceptNewerDeviceList).not.toHaveBeenCalled();
     expect(updateContactDeviceList).not.toHaveBeenCalled();
+  });
+
+  it("announces the own proof set right after the identity announce, when one exists (Section C)", async () => {
+    const ownSet = { version: 2, proofs: [], revoked: [], signature: "SIG" };
+    dbGet.mockImplementation(async (store, key) => {
+      if (store === "profile" && key === "deviceList:sender-fp") return undefined;
+      if (store === "profile" && key === "proofSet:sender-fp") return ownSet;
+      return undefined;
+    });
+
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: { __tag: "id-priv" }, publicKey: fakePublicKey("id-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockImplementation(async (_key, text) => `ENC(${text})`);
+
+    const channel = fakeChannel();
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(channel);
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    await vi.waitFor(() =>
+      expect(channel.send).toHaveBeenCalledWith(`ENC(${JSON.stringify({ type: "proof-set-announce", set: ownSet })})`)
+    );
+  });
+
+  it("applies an incoming proof-set announce via acceptNewerProofSet and persists it on the contact (profile mode)", async () => {
+    createPermanentProfile.mockResolvedValue({
+      privateKey: { __tag: "profile-priv" },
+      publicKey: fakePublicKey("profile-pub"),
+      vaultKey: { __tag: "vault-key" }
+    });
+    fingerprint.mockResolvedValue("profile-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+    dbGet.mockResolvedValue(undefined);
+
+    const peerIdentityKey = fakePublicKey("peer-identity");
+    verifyIdentityAnnounce.mockResolvedValue({
+      identityPublicKey: peerIdentityKey,
+      identityPubkeyWire: "PEER",
+      fingerprint: "peer-fp"
+    });
+    rememberContact.mockResolvedValue({ status: "new", contact: { proofSet: null } });
+    const heldSet = { version: 1, proofs: [], revoked: [], signature: "OLD" };
+    getContact.mockResolvedValue({ fingerprint: "peer-fp", proofSet: heldSet });
+    const incomingSet = { version: 2, proofs: [], revoked: [], signature: "NEW" };
+    acceptNewerProofSet.mockResolvedValue(incomingSet);
+
+    const channel = fakeChannel();
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "pass";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001profile-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(channel);
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "proof-set-announce", set: incomingSet }));
+    await captured.onMessage("ENCRYPTED_SET");
+
+    await vi.waitFor(() => expect(updateContactProofSet).toHaveBeenCalledWith("peer-fp", incomingSet));
+    expect(acceptNewerProofSet).toHaveBeenCalledWith(peerIdentityKey, heldSet, incomingSet);
+  });
+
+  it("ignores a proof-set announce arriving before the identity announce", async () => {
+    const { captured } = await establishedChat();
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "proof-set-announce", set: { version: 9 } }));
+
+    await captured.onMessage("ENCRYPTED_SET");
+
+    expect(acceptNewerProofSet).not.toHaveBeenCalled();
+    expect(updateContactProofSet).not.toHaveBeenCalled();
   });
 
   it("primary link flow appends the new device certificate to the own stored device list", async () => {
