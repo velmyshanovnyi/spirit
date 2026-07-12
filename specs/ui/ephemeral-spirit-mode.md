@@ -39,6 +39,19 @@
 - [x] **Impl**: `client/index.html` (`#ephemeral-identity-banner` на екрані `conversation`, кнопка `#btn-invite-from-chat`), `client/js/app.js` (`renderEphemeralBanner()`, виклик з трьох `afterChannelOpen`-точок і з `onScreenChange`; `copyInviteLink()` виділено зі спільного з `btn-copy-invite`).
 - [x] **Exec review**: iter1 — [reviews/ephemeral-spirit-mode-F1-F5-iter1.md](../reviews/ephemeral-spirit-mode-F1-F5-iter1.md). 1 знахідка якості тесту (не бив по потрібній гілці) — виправлено.
 
+## Секція G1: Центрування одно-карткових екранів на десктопі
+
+Follow-up: одно-карткові екрани (акаунт, кімната) залипали в лівій колонці 2-колоночного grid на десктопі.
+
+- [x] **Impl**: `client/css/style.css` — `.screen > .card:only-of-type:not(.card-wide)` центрується (`grid-column:1/-1; justify-self:center; max-width:520px`); виключення `.card-wide` додано в exec review (правило спочатку звужувало `conversation`/`contacts`/`history`).
+- [x] **Exec review**: iter1 — [reviews/account-centering-mru-iter1.md](../reviews/account-centering-mru-iter1.md). 1 знахідка (перекривало `.card-wide`) — виправлено.
+
+## Секція G2: MRU-список останніх 10 акаунтів (браузер, не сайт)
+
+- [x] **Tests**: `client/tests/session.test.js` (доповнення) — `recordRecentAccount`/`getRecentAccounts`: MRU-порядок, дедуп через переміщення на початок, обрізка до 10, пошкоджений JSON → `[]`. `client/tests/app.test.js` (доповнення) — `#profile-select` впорядковується за MRU-списком, обрізається до 10 опцій; успішний `btn-profile-unlock` записує акаунт у MRU.
+- [x] **Impl**: `client/js/session.js` (`recordRecentAccount`/`getRecentAccounts`, `localStorage` ключ `spirit.recentAccounts`, окремо від `rememberSession`/24-год preselect), `client/js/app.js` (`refreshProfileSelector()` впорядковує/обрізає, `btn-profile-unlock` викликає `recordRecentAccount`).
+- [x] **Exec review**: iter1 — [reviews/account-centering-mru-iter1.md](../reviews/account-centering-mru-iter1.md). Реальних знахідок для Секції G2 немає.
+
 ## Верифікація
 
 Test-first, jsdom + fake-indexeddb, як решта проєкту. Фінал: жива перевірка в preview (клік «Швидкий анонімний чат» на одній вкладці → копіювання посилання → відкриття в другій вкладці без жодних дій → обидві сторони бачать одна одну з анонімними ніками, чат працює).

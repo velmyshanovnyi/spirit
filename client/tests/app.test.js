@@ -494,6 +494,54 @@ describe("profile selector and unlock (Section 15)", () => {
     });
   });
 
+  it("orders the selector by the browser-wide MRU list (most recently used first)", async () => {
+    const ids = ["a".repeat(64), "b".repeat(64), "c".repeat(64)];
+    listProfiles.mockResolvedValue(ids.map((id) => ({ id })));
+    localStorage.setItem("spirit.recentAccounts", JSON.stringify(["c".repeat(64), "a".repeat(64)]));
+
+    initApp(document, { locale: "uk" });
+
+    await vi.waitFor(() => {
+      const options = [...document.getElementById("profile-select").options].map((o) => o.value);
+      // MRU entries first (in MRU order), then whatever's left over.
+      expect(options).toEqual(["c".repeat(64), "a".repeat(64), "b".repeat(64)]);
+    });
+  });
+
+  it("caps the selector at the 10 most recently used accounts", async () => {
+    const ids = Array.from({ length: 12 }, (_, i) => `p${i}`.padStart(64, "0"));
+    listProfiles.mockResolvedValue(ids.map((id) => ({ id })));
+    localStorage.setItem("spirit.recentAccounts", JSON.stringify(ids.slice(0, 10)));
+
+    initApp(document, { locale: "uk" });
+
+    await vi.waitFor(() => {
+      const options = [...document.getElementById("profile-select").options];
+      expect(options.length).toBe(10);
+    });
+  });
+
+  it("records the unlocked account in the browser-wide MRU list", async () => {
+    listProfiles.mockResolvedValue([{ id: "identity" }]);
+    loadPermanentProfile.mockResolvedValue({
+      privateKey: {},
+      publicKey: fakePublicKey("unlocked-pub"),
+      vaultKey: { __tag: "vault-key" },
+      profileId: "f".repeat(64)
+    });
+    fingerprint.mockResolvedValue("f".repeat(64));
+
+    initApp(document, { locale: "uk" });
+    await vi.waitFor(() => expect(document.getElementById("profile-select").options.length).toBe(1));
+    document.getElementById("unlock-passphrase").value = "my pass";
+    document.getElementById("btn-profile-unlock").click();
+
+    await vi.waitFor(() => {
+      const recent = JSON.parse(localStorage.getItem("spirit.recentAccounts") || "[]");
+      expect(recent).toContain("f".repeat(64));
+    });
+  });
+
   it("unlocks the selected profile with the entered passphrase and activates it", async () => {
     listProfiles.mockResolvedValue([{ id: "identity" }]);
     loadPermanentProfile.mockResolvedValue({

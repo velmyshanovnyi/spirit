@@ -24,3 +24,26 @@ export function getRememberedProfileId(now = Date.now()) {
 export function forgetSession() {
   localStorage.removeItem(SESSION_STORAGE_KEY);
 }
+
+// Browser-wide "recently used accounts" (not tied to one origin's IndexedDB
+// profile store) -- the login screen offers these first so the list can't
+// grow unboundedly on a shared/public machine. Most-recent-first, capped.
+const RECENT_ACCOUNTS_KEY = "spirit.recentAccounts";
+const MAX_RECENT_ACCOUNTS = 10;
+
+export function recordRecentAccount(profileId) {
+  const current = getRecentAccounts().filter((id) => id !== profileId);
+  const updated = [profileId, ...current].slice(0, MAX_RECENT_ACCOUNTS);
+  localStorage.setItem(RECENT_ACCOUNTS_KEY, JSON.stringify(updated));
+}
+
+export function getRecentAccounts() {
+  const raw = localStorage.getItem(RECENT_ACCOUNTS_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}

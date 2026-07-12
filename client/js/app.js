@@ -44,7 +44,7 @@ import { initTheme, toggleTheme } from "./theme.js";
 import { formatSpiritId } from "./spiritId.js";
 import { initRouter } from "./router.js";
 import { adminLogin, getAdminConfig } from "./adminAuth.js";
-import { rememberSession, getRememberedProfileId } from "./session.js";
+import { rememberSession, getRememberedProfileId, recordRecentAccount, getRecentAccounts } from "./session.js";
 
 // Order controls display order in the read-only admin panel.
 const ADMIN_CONFIG_FIELDS = [
@@ -899,7 +899,17 @@ export function initApp(
     const select = el("profile-select");
     select.innerHTML = "";
     const profiles = await listProfiles();
-    for (const { id } of profiles) {
+    // Browser-wide MRU list (Section G1) -- recently used accounts first,
+    // capped at 10 total so the list can't grow unboundedly on a
+    // shared/public machine; anything beyond that still exists in storage,
+    // it's just not offered here until it's used again some other way.
+    const recentIds = getRecentAccounts();
+    const byId = new Map(profiles.map((p) => [p.id, p]));
+    const ordered = [
+      ...recentIds.map((id) => byId.get(id)).filter(Boolean),
+      ...profiles.filter((p) => !recentIds.includes(p.id))
+    ].slice(0, 10);
+    for (const { id } of ordered) {
       const option = doc.createElement("option");
       option.value = id;
       option.textContent = id === "identity" ? t("profile.legacyOption") : formatSpiritId(id).slice(0, 26) + "…";
@@ -956,6 +966,7 @@ export function initApp(
       // not the pre-migration `selectedId` ("identity") -- otherwise the
       // remembered id never matches on the next load's listProfiles().
       rememberSession(profile.profileId, readSessionTtlHours());
+      recordRecentAccount(profile.profileId);
       await refreshProfileSelector();
       router.navigate(postIdentityRoute());
     } catch (err) {

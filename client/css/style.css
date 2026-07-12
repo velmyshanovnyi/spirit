@@ -130,6 +130,20 @@ body {
   .card-wide {
     grid-column: 1 / -1;
   }
+
+  /* A screen with a single, narrow card (account, room) should sit
+     centered on the page, not pinned to the left column of the 2-col
+     grid. Explicitly excludes .card-wide (conversation/contacts/history,
+     which already span the full grid via the rule above and must keep
+     their full width -- exec review caught this rule initially clobbering
+     them down to 520px) and multi-card screens (profile, server), which
+     :only-of-type doesn't match anyway. */
+  .screen > .card:only-of-type:not(.card-wide) {
+    grid-column: 1 / -1;
+    justify-self: center;
+    width: 100%;
+    max-width: 520px;
+  }
 }
 
 /* ---------- Cards ---------- */

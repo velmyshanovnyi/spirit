@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from "vitest";
-import { rememberSession, getRememberedProfileId, forgetSession } from "../js/session.js";
+import { rememberSession, getRememberedProfileId, forgetSession, recordRecentAccount, getRecentAccounts } from "../js/session.js";
 
 beforeEach(() => {
   localStorage.clear();
@@ -38,5 +38,39 @@ describe("rememberSession / getRememberedProfileId / forgetSession", () => {
     rememberSession("profile-1", 24);
     rememberSession("profile-2", 24);
     expect(getRememberedProfileId()).toBe("profile-2");
+  });
+});
+
+describe("recordRecentAccount / getRecentAccounts (browser-wide MRU list)", () => {
+  it("returns an empty list when nothing has been used yet", () => {
+    expect(getRecentAccounts()).toEqual([]);
+  });
+
+  it("records a used account, most-recent first", () => {
+    recordRecentAccount("profile-1");
+    recordRecentAccount("profile-2");
+    expect(getRecentAccounts()).toEqual(["profile-2", "profile-1"]);
+  });
+
+  it("moves a re-used account back to the front instead of duplicating it", () => {
+    recordRecentAccount("profile-1");
+    recordRecentAccount("profile-2");
+    recordRecentAccount("profile-1");
+    expect(getRecentAccounts()).toEqual(["profile-1", "profile-2"]);
+  });
+
+  it("caps the list at 10, dropping the oldest entry", () => {
+    for (let i = 1; i <= 11; i++) {
+      recordRecentAccount(`profile-${i}`);
+    }
+    const recent = getRecentAccounts();
+    expect(recent.length).toBe(10);
+    expect(recent[0]).toBe("profile-11");
+    expect(recent).not.toContain("profile-1"); // the oldest, pushed out
+  });
+
+  it("returns an empty list for corrupted localStorage content instead of throwing", () => {
+    localStorage.setItem("spirit.recentAccounts", "{not json");
+    expect(getRecentAccounts()).toEqual([]);
   });
 });
