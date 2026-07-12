@@ -25,6 +25,7 @@ import { appendMessage, listMessages, listConversations } from "./historyStore.j
 import { acceptNewerProofSet, addProofToSet, revokeProofFromSet } from "./proofSet.js";
 import { createProofBlock, parseProofBlock, verifyProofBlock } from "./proofs.js";
 import { fetchProofPageText } from "./fetchProof.js";
+import { generateAnonymousNickname } from "./anonymousNickname.js";
 
 import {
   startAsInitiator,
@@ -178,7 +179,7 @@ export function initApp(
     el("invite-status").textContent = text;
   };
 
-  el("btn-copy-invite").addEventListener("click", () => {
+  function copyInviteLink() {
     const roomId = el("room-id").value;
     const inviteToken = el("invite-token").value;
     if (!roomId || !inviteToken) {
@@ -198,7 +199,24 @@ export function initApp(
     if (doc.defaultView.navigator.clipboard && doc.defaultView.navigator.clipboard.writeText) {
       doc.defaultView.navigator.clipboard.writeText(linkText).catch(() => {});
     }
-  });
+  }
+  el("btn-copy-invite").addEventListener("click", copyInviteLink);
+
+  // Section F5 (specs/ui/ephemeral-spirit-mode.md): a temp nickname + invite
+  // button on the conversation screen itself, shown only in ephemeral mode
+  // (a nickname exists but there's no permanent-profile vault) -- a
+  // profile-mode identity with its own nickname (Section 16) has no need
+  // for this, since it isn't "one-time" in the same sense.
+  function renderEphemeralBanner() {
+    const banner = el("ephemeral-identity-banner");
+    if (!banner) return;
+    const isEphemeral = !!state.nickname && !(state.identityKeyPair && state.identityKeyPair.vaultKey);
+    banner.hidden = !isEphemeral;
+    if (isEphemeral) {
+      el("ephemeral-nickname-display").textContent = state.nickname;
+    }
+  }
+  el("btn-invite-from-chat").addEventListener("click", copyInviteLink);
 
   // Section E (specs/phase2c/identity-verification.md): in-memory verification
   // status per (contact fingerprint, proof url) -- re-derived from a live
@@ -350,6 +368,7 @@ export function initApp(
     if (route === "contacts") renderContactsScreen();
     if (route === "history") renderHistoryScreen();
     if (route === "profile") renderOwnProofsList();
+    if (route === "conversation") renderEphemeralBanner();
   };
   if (win.__spiritAppHashListener) {
     win.removeEventListener("hashchange", win.__spiritAppHashListener);
@@ -713,16 +732,18 @@ export function initApp(
     });
   }
 
-  el("btn-generate").addEventListener("click", async () => {
-    state.identityKeyPair = await generateIdentityKeyPair();
-    state.senderKey = await fingerprint(state.identityKeyPair.publicKey);
-    setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
-    resetOwnProofsState();
-    // Ephemeral quick-chat has no profile to administer -- go straight to
-    // the room screen rather than the profile screen (used for permanent
-    // profiles: unlock, backup, devices).
-    router.navigate("room");
-  });
+  // Superseded by btn-quick-chat (Section F3) in the real UI -- kept only
+  // for test fixtures that still use it as identity-setup boilerplate for
+  // unrelated features, so guarded rather than removed outright.
+  if (el("btn-generate")) {
+    el("btn-generate").addEventListener("click", async () => {
+      state.identityKeyPair = await generateIdentityKeyPair();
+      state.senderKey = await fingerprint(state.identityKeyPair.publicKey);
+      setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
+      resetOwnProofsState();
+      router.navigate("room");
+    });
+  }
 
   const setProfileStatus = (text) => {
     el("profile-status").textContent = text;
@@ -886,7 +907,10 @@ export function initApp(
     }
     // Hide once an identity is already active this session (e.g. right
     // after creating a profile) -- there's nothing to log into anymore.
+    // Create/login are mutually exclusive (Section F2) -- one always shows
+    // when the other is hidden, defaulting to login for a returning user.
     el("account-login-block").hidden = profiles.length === 0 || !!state.senderKey;
+    el("account-create-mode").hidden = !el("account-login-block").hidden;
     const remembered = getRememberedProfileId();
     if (remembered && profiles.some((p) => p.id === remembered)) {
       select.value = remembered;
@@ -894,6 +918,18 @@ export function initApp(
   }
   // Fire-and-forget at startup; an empty selector is the correct state on error too.
   refreshProfileSelector().catch(() => {});
+
+  // Section F2: manual override of the default create/login mode -- e.g. a
+  // returning user (default: login) wants to create ANOTHER account, or
+  // vice versa.
+  el("link-switch-to-login").addEventListener("click", () => {
+    el("account-login-block").hidden = false;
+    el("account-create-mode").hidden = true;
+  });
+  el("link-switch-to-create").addEventListener("click", () => {
+    el("account-create-mode").hidden = false;
+    el("account-login-block").hidden = true;
+  });
 
   withBusyButton(el("btn-profile-unlock"), async () => {
     const passphrase = el("unlock-passphrase").value;
@@ -1003,11 +1039,12 @@ export function initApp(
     }
   });
 
-  withBusyButton(el("btn-initiate"), async () => {
-    if (!state.senderKey) {
-      setStatus(t("status.createAccountFirst"));
-      return;
-    }
+  /**
+   * Shared by "Ініціювати чат" (explicit, profile-mode-friendly) and the
+   * zero-click "Швидкий анонімний чат" (Section F3, specs/ui/ephemeral-spirit-mode.md)
+   * -- both need an already-established state.senderKey/identityKeyPair.
+   */
+  async function initiateChatSession() {
     const serverUrl = el("server-url").value;
     const rtcConfig = { iceServers: [{ urls: el("stun-url").value }] };
     const senderKey = state.senderKey;
@@ -1034,11 +1071,33 @@ export function initApp(
       channelOptions: {
         afterChannelOpen: () => {
           router.navigate("conversation");
+          renderEphemeralBanner();
           announce();
         }
       },
       onSessionReady: announce
     });
+  }
+
+  withBusyButton(el("btn-initiate"), async () => {
+    if (!state.senderKey) {
+      setStatus(t("status.createAccountFirst"));
+      return;
+    }
+    await initiateChatSession();
+  });
+
+  // Section F3: fully automatic ephemeral "spirit mode" -- one click does
+  // everything btn-generate + btn-initiate used to require separately:
+  // ephemeral identity, a throwaway anonymous nickname, invite creation,
+  // and the handshake itself, landing straight on the conversation screen.
+  withBusyButton(el("btn-quick-chat"), async () => {
+    state.identityKeyPair = await generateIdentityKeyPair();
+    state.senderKey = await fingerprint(state.identityKeyPair.publicKey);
+    state.nickname = generateAnonymousNickname();
+    setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
+    resetOwnProofsState();
+    await initiateChatSession();
   });
 
   withBusyButton(el("btn-join"), async () => {
@@ -1058,6 +1117,7 @@ export function initApp(
       channelOptions: {
         afterChannelOpen: () => {
           router.navigate("conversation");
+          renderEphemeralBanner();
           announce();
         }
       },
@@ -1232,4 +1292,52 @@ export function initApp(
       });
     }
   });
+
+  // Section F4 (specs/ui/ephemeral-spirit-mode.md): visiting an invite link
+  // requires ZERO clicks -- no identity exists yet at this point in a fresh
+  // page load, so auto-generate one (+ a throwaway anonymous nickname) and
+  // join immediately, exactly like btn-quick-chat does for the initiator.
+  if (cameFromInviteLink) {
+    (async () => {
+      // Defensive (exec review): every real load starts with a clean
+      // `state`, so this is always true today, but it guards against a
+      // future auto-restore-session-on-load path silently clobbering an
+      // already-active identity's WebRTC session with a fresh ephemeral one.
+      if (state.senderKey) return;
+      // A manual click on btn-quick-chat while auto-join is still in
+      // flight would otherwise start a SECOND, competing initiator session
+      // that stomps state.identityKeyPair/senderKey/pc out from under the
+      // joiner session (exec review finding) -- disable it for the duration.
+      const quickChatButton = el("btn-quick-chat");
+      quickChatButton.disabled = true;
+      try {
+        state.identityKeyPair = await generateIdentityKeyPair();
+        state.senderKey = await fingerprint(state.identityKeyPair.publicKey);
+        state.nickname = generateAnonymousNickname();
+        setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
+        resetOwnProofsState();
+
+        state.peerFingerprint = null;
+        state.sessionEcdhWires = null;
+        const announce = makeIdentityAnnouncer();
+        await startJoinerSession({
+        senderKey: state.senderKey,
+        roomId: invitedRoomId,
+        inviteToken: invitedToken,
+        serverUrl: el("server-url").value,
+        rtcConfig: { iceServers: [{ urls: el("stun-url").value }] },
+        channelOptions: {
+          afterChannelOpen: () => {
+            router.navigate("conversation");
+            renderEphemeralBanner();
+            announce();
+          }
+        },
+          onSessionReady: announce
+        });
+      } finally {
+        quickChatButton.disabled = false;
+      }
+    })().catch((err) => setStatus(t("status.error", { msg: err.message })));
+  }
 }

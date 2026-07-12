@@ -53,6 +53,9 @@ vi.mock("../js/proofs.js", () => ({
   parseProofBlock: vi.fn(),
   verifyProofBlock: vi.fn()
 }));
+vi.mock("../js/anonymousNickname.js", () => ({
+  generateAnonymousNickname: vi.fn()
+}));
 vi.mock("../js/fetchProof.js", () => ({
   fetchProofPageText: vi.fn()
 }));
@@ -118,6 +121,7 @@ import { createIdentityAnnounce, verifyIdentityAnnounce } from "../js/identityAn
 import { rememberContact, getContact, updateContactDeviceList, updateContactProofSet, listContacts } from "../js/contacts.js";
 import { acceptNewerProofSet, signProofSet, addProofToSet, revokeProofFromSet } from "../js/proofSet.js";
 import { createProofBlock, parseProofBlock, verifyProofBlock } from "../js/proofs.js";
+import { generateAnonymousNickname } from "../js/anonymousNickname.js";
 import { fetchProofPageText } from "../js/fetchProof.js";
 import { get as dbGet, put as dbPut } from "../js/db.js";
 import { appendMessage, listMessages, listConversations } from "../js/historyStore.js";
@@ -153,14 +157,19 @@ const HTML = `
       <select id="profile-select"></select>
       <input id="unlock-passphrase" type="password">
       <button id="btn-profile-unlock" type="button">Увійти</button>
+      <button id="link-switch-to-create" type="button">Створити новий акаунт</button>
+    </div>
+    <div id="account-create-mode">
+      <button id="btn-create-profile" type="button">Створити профіль</button>
+      <div id="profile-setup" hidden>
+        <input id="nickname-input" type="text">
+        <input id="profile-passphrase" type="password">
+        <button id="btn-profile-confirm" type="button">Створити</button>
+      </div>
+      <button id="link-switch-to-login" type="button">Увійти в наявний акаунт</button>
     </div>
     <button id="btn-generate" type="button">Швидкий чат</button>
-    <button id="btn-create-profile" type="button">Створити профіль</button>
-    <div id="profile-setup" hidden>
-      <input id="nickname-input" type="text">
-      <input id="profile-passphrase" type="password">
-      <button id="btn-profile-confirm" type="button">Створити</button>
-    </div>
+    <button id="btn-quick-chat" type="button">Швидкий анонімний чат</button>
     <div id="profile-status"></div>
     <div id="backup-step" hidden>
       <button id="btn-backup-mnemonic" type="button">Показати мнемоніку</button>
@@ -215,6 +224,10 @@ const HTML = `
   </section>
 
   <section data-screen="conversation">
+    <div id="ephemeral-identity-banner" hidden>
+      <span id="ephemeral-nickname-display"></span>
+      <button id="btn-invite-from-chat" type="button">Запросити</button>
+    </div>
     <video id="video-remote"></video>
     <video id="video-local"></video>
     <button id="btn-start-call" type="button"></button>
@@ -256,6 +269,7 @@ beforeEach(() => {
   listMessages.mockResolvedValue([]);
   listConversations.mockResolvedValue([]);
   listContacts.mockResolvedValue([]);
+  generateAnonymousNickname.mockReturnValue("Тихий Привид");
 });
 
 function visibleScreens() {
@@ -276,6 +290,63 @@ describe("btn-generate", () => {
 
     expect(generateIdentityKeyPair).toHaveBeenCalled();
     expect(fingerprint).toHaveBeenCalledWith(keyPair.publicKey);
+  });
+});
+
+describe("btn-quick-chat: zero-click ephemeral 'spirit mode' (Section F3)", () => {
+  it("generates identity + a random anonymous nickname, creates an invite, and auto-navigates to conversation once the channel opens", async () => {
+    const keyPair = { privateKey: {}, publicKey: fakePublicKey("identity-pub") };
+    generateIdentityKeyPair.mockResolvedValue(keyPair);
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    generateAnonymousNickname.mockReturnValue("Тихий Привид");
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-quick-chat").click();
+
+    await vi.waitFor(() => expect(generateIdentityKeyPair).toHaveBeenCalled());
+    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledWith("http://node.example/index.php", "sender-fp"));
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+
+    // No manual click on btn-initiate anywhere in this test -- the whole
+    // handshake up to here happened from the single quick-chat click.
+    captured.onChannelOpen(fakeChannel());
+
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
+  });
+
+  it("ignores a second click while the auto-initiate flow is already in flight (re-entrancy guard)", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+
+    let resolveCreateInvite;
+    createInvite.mockReturnValue(
+      new Promise((resolve) => {
+        resolveCreateInvite = resolve;
+      })
+    );
+
+    initApp(document, { locale: "uk" });
+    const quickChatButton = document.getElementById("btn-quick-chat");
+    quickChatButton.click();
+    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledTimes(1));
+    expect(quickChatButton.disabled).toBe(true);
+
+    quickChatButton.click();
+    expect(createInvite).toHaveBeenCalledTimes(1);
+
+    resolveCreateInvite({ roomId: "room1", inviteToken: "tok1" });
+    await vi.waitFor(() => expect(quickChatButton.disabled).toBe(false));
   });
 });
 
@@ -484,6 +555,43 @@ describe("profile selector and unlock (Section 15)", () => {
     listProfiles.mockResolvedValue([{ id: "identity" }]);
     initApp(document, { locale: "uk" });
     await vi.waitFor(() => expect(document.getElementById("account-login-block").hidden).toBe(false));
+  });
+
+  it("create/login are mutually exclusive: no stored profiles shows create mode, hides login (Section F2)", async () => {
+    listProfiles.mockResolvedValue([]);
+    initApp(document, { locale: "uk" });
+    await vi.waitFor(() => expect(listProfiles).toHaveBeenCalled());
+    expect(document.getElementById("account-create-mode").hidden).toBe(false);
+    expect(document.getElementById("account-login-block").hidden).toBe(true);
+  });
+
+  it("create/login are mutually exclusive: stored profiles exist shows login mode, hides create (Section F2)", async () => {
+    listProfiles.mockResolvedValue([{ id: "identity" }]);
+    initApp(document, { locale: "uk" });
+    await vi.waitFor(() => expect(document.getElementById("account-login-block").hidden).toBe(false));
+    expect(document.getElementById("account-create-mode").hidden).toBe(true);
+  });
+
+  it("the switch-to-login toggle flips from create mode to login mode (Section F2)", async () => {
+    listProfiles.mockResolvedValue([]);
+    initApp(document, { locale: "uk" });
+    await vi.waitFor(() => expect(document.getElementById("account-create-mode").hidden).toBe(false));
+
+    document.getElementById("link-switch-to-login").click();
+
+    expect(document.getElementById("account-login-block").hidden).toBe(false);
+    expect(document.getElementById("account-create-mode").hidden).toBe(true);
+  });
+
+  it("the switch-to-create toggle flips from login mode back to create mode (Section F2)", async () => {
+    listProfiles.mockResolvedValue([{ id: "identity" }]);
+    initApp(document, { locale: "uk" });
+    await vi.waitFor(() => expect(document.getElementById("account-login-block").hidden).toBe(false));
+
+    document.getElementById("link-switch-to-create").click();
+
+    expect(document.getElementById("account-create-mode").hidden).toBe(false);
+    expect(document.getElementById("account-login-block").hidden).toBe(true);
   });
 
   it("preselects a remembered (not-yet-expired) profile in the login dropdown (Section 18)", async () => {
@@ -1937,6 +2045,158 @@ describe("device linking UI", () => {
       // The secret must not linger in the DOM afterwards.
       expect(document.getElementById("device-local-passphrase").value).toBe("");
     });
+  });
+});
+
+describe("ephemeral identity banner on conversation screen (Section F5)", () => {
+  it("shows the temp nickname and an invite button in ephemeral (quick-chat) mode", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    generateAnonymousNickname.mockReturnValue("Тихий Привид");
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-quick-chat").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(fakeChannel());
+
+    await vi.waitFor(() => expect(document.getElementById("ephemeral-identity-banner").hidden).toBe(false));
+    expect(document.getElementById("ephemeral-nickname-display").textContent).toBe("Тихий Привид");
+  });
+
+  it("hides the banner in permanent-profile mode", async () => {
+    createPermanentProfile.mockResolvedValue({
+      privateKey: { __tag: "profile-priv" },
+      publicKey: fakePublicKey("profile-pub"),
+      vaultKey: { __tag: "vault-key" }
+    });
+    fingerprint.mockResolvedValue("profile-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    // A nickname IS set here (unlike an earlier version of this test) --
+    // the invariant under test is specifically "vaultKey exists => hidden",
+    // not "no nickname => hidden" (exec review: those are different gates
+    // and a nickname-less test doesn't actually exercise the vaultKey check).
+    document.getElementById("nickname-input").value = "Оксана";
+    document.getElementById("profile-passphrase").value = "pass";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001profile-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(fakeChannel());
+
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
+    expect(document.getElementById("ephemeral-identity-banner").hidden).toBe(true);
+  });
+
+  it("btn-invite-from-chat copies the invite link, same as btn-copy-invite on the Room screen", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-quick-chat").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(fakeChannel());
+    await vi.waitFor(() => expect(document.getElementById("ephemeral-identity-banner").hidden).toBe(false));
+
+    document.getElementById("btn-invite-from-chat").click();
+
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalled());
+    expect(writeText.mock.calls[0][0]).toContain("room=room1");
+    delete navigator.clipboard;
+  });
+});
+
+describe("zero-click invite-link auto-join (Section F4)", () => {
+  it("auto-generates identity + nickname and auto-joins on load, with no click, when ?room=&token= are present", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    generateAnonymousNickname.mockReturnValue("Спритна Тінь");
+    getOffer.mockResolvedValue({ offer: JSON.stringify({ type: "offer", sdp: "OFFER_SDP" }), ecdhPubkey: "peer-ecdh-b64" });
+
+    let captured;
+    startAsJoiner.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk", locationSearch: "?room=room-from-link&token=token-from-link" });
+
+    // No button click anywhere in this test.
+    await vi.waitFor(() => expect(generateIdentityKeyPair).toHaveBeenCalled());
+    await vi.waitFor(() =>
+      expect(getOffer).toHaveBeenCalledWith("http://node.example/index.php", {
+        senderKey: "sender-fp",
+        roomId: "room-from-link",
+        inviteToken: "token-from-link"
+      })
+    );
+    await vi.waitFor(() => expect(startAsJoiner).toHaveBeenCalled());
+
+    captured.onChannelOpen(fakeChannel());
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
+  });
+
+  it("does not auto-join when there are no ?room=&token= query params", async () => {
+    initApp(document, { locale: "uk" });
+    await Promise.resolve();
+    expect(generateIdentityKeyPair).not.toHaveBeenCalled();
+    expect(getOffer).not.toHaveBeenCalled();
+  });
+
+  it("disables btn-quick-chat while auto-join is in flight, so a manual click can't start a competing initiator session (exec review finding)", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    let resolveGetOffer;
+    getOffer.mockReturnValue(
+      new Promise((resolve) => {
+        resolveGetOffer = resolve;
+      })
+    );
+
+    initApp(document, { locale: "uk", locationSearch: "?room=room-from-link&token=token-from-link" });
+
+    await vi.waitFor(() => expect(document.getElementById("btn-quick-chat").disabled).toBe(true));
+    document.getElementById("btn-quick-chat").click(); // must be a no-op while auto-join owns the session
+    expect(createInvite).not.toHaveBeenCalled();
+
+    resolveGetOffer({ offer: JSON.stringify({ type: "offer", sdp: "OFFER_SDP" }), ecdhPubkey: "peer-ecdh-b64" });
+    await vi.waitFor(() => expect(document.getElementById("btn-quick-chat").disabled).toBe(false));
   });
 });
 

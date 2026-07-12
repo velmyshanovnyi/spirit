@@ -66,21 +66,25 @@
             <input id="unlock-passphrase" type="password" autocomplete="current-password">
           </label>
           <div class="btn-row"><button id="btn-profile-unlock" type="button" class="btn-primary" data-i18n="btn.login">Увійти</button></div>
+          <p class="hint-text"><button id="link-switch-to-create" type="button" class="btn-link" data-i18n="account.switchToCreate">Створити новий акаунт</button></p>
         </div>
 
-        <div class="btn-row">
-          <button id="btn-generate" type="button" data-i18n="btn.quickChat">Швидкий чат (ефемерний)</button>
-          <button id="btn-create-profile" type="button" class="btn-primary" data-i18n="btn.createProfile">Створити акаунт</button>
-        </div>
+        <div id="account-create-mode">
+          <div class="btn-row">
+            <button id="btn-create-profile" type="button" class="btn-primary" data-i18n="btn.createProfile">Створити профіль</button>
+          </div>
 
-        <div id="profile-setup" hidden class="subgroup">
-          <label class="field"><span data-i18n="label.nickname">Як вас називати:</span>
-            <input id="nickname-input" type="text" data-i18n-placeholder="nickname.placeholder">
-          </label>
-          <label class="field"><span data-i18n="label.profilePassphrase">Passphrase профілю:</span>
-            <input id="profile-passphrase" type="password" autocomplete="new-password">
-          </label>
-          <div class="btn-row"><button id="btn-profile-confirm" type="button" class="btn-primary" data-i18n="btn.createProfileConfirm">Створити</button></div>
+          <div id="profile-setup" hidden class="subgroup">
+            <label class="field"><span data-i18n="label.nickname">Як вас називати:</span>
+              <input id="nickname-input" type="text" data-i18n-placeholder="nickname.placeholder">
+            </label>
+            <label class="field"><span data-i18n="label.profilePassphrase">Passphrase профілю:</span>
+              <input id="profile-passphrase" type="password" autocomplete="new-password">
+            </label>
+            <div class="btn-row"><button id="btn-profile-confirm" type="button" class="btn-primary" data-i18n="btn.createProfileConfirm">Створити</button></div>
+          </div>
+
+          <p class="hint-text"><button id="link-switch-to-login" type="button" class="btn-link" data-i18n="account.switchToLogin">Вже маєте акаунт? Увійти</button></p>
         </div>
         <div id="profile-status" class="status"></div>
 
@@ -99,6 +103,8 @@
         </div>
 
         <div id="backup-reminder" hidden class="banner-warn" data-i18n="backup.reminder">⚠ Ви не зробили резервну копію ключа — без неї профіль неможливо відновити.</div>
+
+        <p class="hint-text"><button id="btn-quick-chat" type="button" class="btn-link" data-i18n="btn.quickChat">Швидкий анонімний чат</button></p>
       </section>
     </section>
 
@@ -212,6 +218,10 @@
     <section data-screen="conversation" class="screen">
       <section class="card card-wide">
         <h2 data-i18n="conversation.heading">Розмова</h2>
+        <div id="ephemeral-identity-banner" hidden class="identity">
+          <span data-i18n="ephemeral.youAre">Ви зараз:</span> <strong id="ephemeral-nickname-display"></strong>
+          <button id="btn-invite-from-chat" type="button" class="btn-icon" data-i18n-title="btn.copyInvite" aria-label="Запросити">🔗</button>
+        </div>
         <div class="video-area">
           <video id="video-remote" class="video-tile video-tile-remote" autoplay playsinline></video>
           <video id="video-local" class="video-tile video-tile-local" autoplay playsinline muted></video>

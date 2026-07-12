@@ -442,6 +442,23 @@ button:disabled {
   font-style: italic;
 }
 
+/* A button styled to read as an inline text link (account create/login
+   toggle, de-emphasized quick-chat entry -- Section F2/F3, specs/ui/ephemeral-spirit-mode.md). */
+.btn-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-style: italic;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.btn-link:hover {
+  color: var(--accent-hover);
+}
+
 /* ---------- Lists (contacts, history) ---------- */
 
 .list-area {
