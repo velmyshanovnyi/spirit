@@ -1,9 +1,25 @@
 import { describe, it, expect } from "vitest";
-import { deriveAccountMaterial } from "../js/deterministicIdentity.js";
+import { deriveAccountMaterial, generateAccountName } from "../js/deterministicIdentity.js";
 
 // Argon2id at production parameters (128 MiB, t=3) is intentionally slow --
 // give these tests headroom well above the default 5s.
 const TIMEOUT_MS = 20000;
+
+describe("generateAccountName", () => {
+  it("returns a 10-character lowercase alphanumeric string", () => {
+    const name = generateAccountName();
+    expect(name.length).toBe(10);
+    expect(name).toMatch(/^[a-z0-9]{10}$/);
+  });
+
+  it("produces varied results across many calls", () => {
+    const results = new Set();
+    for (let i = 0; i < 20; i++) {
+      results.add(generateAccountName());
+    }
+    expect(results.size).toBeGreaterThan(1);
+  });
+});
 
 describe("deriveAccountMaterial", () => {
   it(

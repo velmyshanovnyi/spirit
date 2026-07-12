@@ -7,6 +7,7 @@ import {
   listProfiles,
   restoreProfileFromMnemonic,
   restoreProfileFromKeyfile,
+  adoptScalarIdentity,
   exportRawIdentity,
   adoptIdentity,
   setNickname,
@@ -279,6 +280,34 @@ describe("restoreProfileFromMnemonic", () => {
     await expect(restoreProfileFromMnemonic(badWords, "local passphrase")).rejects.toThrow(
       /not in the BIP39 English wordlist/
     );
+  });
+});
+
+describe("adoptScalarIdentity (Section H3, specs/phase3/deterministic-accounts.md)", () => {
+  it("reconstructs and persists a key pair from a raw 32-byte scalar, matching the source key", async () => {
+    const created = await createPermanentProfile("original passphrase");
+    const scalarBytes = await exportPrivateKeyScalar(created.privateKey);
+
+    const adopted = await adoptScalarIdentity(scalarBytes, "new local passphrase");
+
+    const message = new TextEncoder().encode("scalar-adopt-check");
+    const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, adopted.privateKey, message);
+    expect(await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, created.publicKey, signature, message)).toBe(true);
+
+    const reloaded = await loadPermanentProfile(adopted.profileId, "new local passphrase");
+    const reloadedSignature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, reloaded.privateKey, message);
+    expect(
+      await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, created.publicKey, reloadedSignature, message)
+    ).toBe(true);
+  });
+
+  it("is deterministic: the same scalar always yields the same profileId", async () => {
+    const scalarBytes = (await exportPrivateKeyScalar((await createPermanentProfile("p1")).privateKey));
+
+    const first = await adoptScalarIdentity(scalarBytes, "pass-a");
+    const second = await adoptScalarIdentity(scalarBytes, "pass-b");
+
+    expect(first.profileId).toBe(second.profileId);
   });
 });
 

@@ -213,6 +213,18 @@ export async function restoreProfileFromMnemonic(words, localPassphrase) {
   // derived internally by Web Crypto) from just the scalar, which is then
   // re-exported to the same pkcs8 shape everything else here expects.
   const scalarBytes = await mnemonicToBytes(words);
+  return adoptScalarIdentity(scalarBytes, localPassphrase);
+}
+
+/**
+ * Section H3 (specs/phase3/deterministic-accounts.md): reconstructs and
+ * persists an identity from a raw 32-byte scalar directly -- the same
+ * scalar-to-pkcs8 reconstruction restoreProfileFromMnemonic uses, minus the
+ * mnemonic-decode step, so a portable account's Argon2id-derived scalar
+ * (deterministicIdentity.js) can be adopted the exact same way a mnemonic
+ * restore is.
+ */
+export async function adoptScalarIdentity(scalarBytes, localPassphrase) {
   const extractablePrivateKey = await importPrivateKeyFromScalar(scalarBytes, IDENTITY_ALGORITHM, true);
   const rawPrivateKey = await exportPrivateKeyRaw(extractablePrivateKey);
   return adoptIdentity(rawPrivateKey, localPassphrase);

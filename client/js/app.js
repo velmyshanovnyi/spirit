@@ -7,7 +7,9 @@ import {
   exportPrivateKeyScalar,
   exportPrivateKeyRaw
 } from "./identity.js";
-import { createPermanentProfile, exportRawIdentity, listProfiles, loadPermanentProfile, setNickname, getNickname } from "./profile.js";
+import { createPermanentProfile, exportRawIdentity, listProfiles, loadPermanentProfile, setNickname, getNickname, adoptScalarIdentity } from "./profile.js";
+import { deriveAccountMaterial, generateAccountName } from "./deterministicIdentity.js";
+import { generateStrongPassword } from "./passwordGenerator.js";
 import { bytesToMnemonic } from "./mnemonic.js";
 import { createKeyfile } from "./keyfile.js";
 import {
@@ -753,6 +755,15 @@ export function initApp(
     el("profile-setup").hidden = false;
   });
 
+  // Section H3: offer a generated password by default when the user opts
+  // into a portable account, without clobbering anything they've already
+  // typed (e.g. re-checking the box after editing the field).
+  el("portable-account-checkbox").addEventListener("change", () => {
+    if (el("portable-account-checkbox").checked && !el("profile-passphrase").value) {
+      el("profile-passphrase").value = generateStrongPassword();
+    }
+  });
+
   const DEFAULT_SESSION_TTL_HOURS = 24;
 
   // A non-positive TTL would produce an expiresAt already in the past,
@@ -941,6 +952,50 @@ export function initApp(
     el("account-login-block").hidden = true;
   });
 
+  // Section H4 (specs/ui/deterministic-accounts.md): cross-node login --
+  // available regardless of whether this browser has any local profile
+  // record for this account (that's the entire point: it works on a node
+  // that has NEVER seen this account before).
+  const setPortableLoginStatus = (text) => {
+    el("portable-login-status").textContent = text;
+  };
+  el("link-toggle-portable-login").addEventListener("click", () => {
+    el("portable-login-form").hidden = !el("portable-login-form").hidden;
+  });
+  const PORTABLE_LOGIN_PATTERN = /^spirit([a-z0-9]{10})([A-Za-z0-9_-]{16})$/;
+  withBusyButton(el("btn-login-portable"), async () => {
+    const login = el("portable-login-input").value.trim();
+    const password = el("portable-password-input").value;
+    const match = PORTABLE_LOGIN_PATTERN.exec(login);
+    if (!match) {
+      setPortableLoginStatus(t("portable.invalidLogin"));
+      return;
+    }
+    const [, name, expectedTail] = match;
+    const { privateKeyScalar, verifierTail } = await deriveAccountMaterial(name, password);
+    if (verifierTail !== expectedTail) {
+      setPortableLoginStatus(t("portable.wrongCredentials"));
+      return;
+    }
+    state.identityKeyPair = await adoptScalarIdentity(privateKeyScalar, password);
+    state.senderKey = state.identityKeyPair.profileId;
+    // Exec review: every other identity-establishing path loads the
+    // account's own nickname -- skipping this would leak a STALE nickname
+    // (e.g. a prior ephemeral quick-chat one) to peers on the next
+    // identity-announce, under a completely different identity.
+    state.nickname = await getNickname(state.senderKey);
+    el("portable-password-input").value = "";
+    resetOwnProofsState();
+    setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
+    setPortableLoginStatus("");
+    // Exec review: same session/MRU bookkeeping as the regular unlock path,
+    // so this account is offered via profile-select on a later visit too.
+    rememberSession(state.senderKey, readSessionTtlHours());
+    recordRecentAccount(state.senderKey);
+    await refreshProfileSelector();
+    router.navigate(postIdentityRoute());
+  });
+
   withBusyButton(el("btn-profile-unlock"), async () => {
     const passphrase = el("unlock-passphrase").value;
     if (!passphrase) {
@@ -980,10 +1035,24 @@ export function initApp(
       setProfileStatus(t("profile.needPassphrase"));
       return;
     }
-    state.identityKeyPair = await createPermanentProfile(passphrase);
+    // Section H3 (specs/phase3/deterministic-accounts.md): opt-in portable
+    // account -- identity is derived from (name, password) via Argon2id
+    // instead of generated at random, so the SAME account can be recreated
+    // on any independent node (Section H4). Default (unchecked) path below
+    // is completely unchanged -- existing local-only accounts still work
+    // exactly as before.
+    if (el("portable-account-checkbox").checked) {
+      const name = generateAccountName();
+      const { privateKeyScalar, verifierTail } = await deriveAccountMaterial(name, passphrase);
+      state.identityKeyPair = await adoptScalarIdentity(privateKeyScalar, passphrase);
+      state.senderKey = state.identityKeyPair.profileId;
+      el("portable-login-display").textContent = `spirit${name}${verifierTail}`;
+    } else {
+      state.identityKeyPair = await createPermanentProfile(passphrase);
+      state.senderKey = await fingerprint(state.identityKeyPair.publicKey);
+    }
     // Don't keep the secret sitting in a DOM input after it's been used.
     el("profile-passphrase").value = "";
-    state.senderKey = await fingerprint(state.identityKeyPair.publicKey);
     resetOwnProofsState();
     const nickname = el("nickname-input").value.trim();
     if (nickname) {

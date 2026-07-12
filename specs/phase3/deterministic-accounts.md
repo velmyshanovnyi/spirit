@@ -31,15 +31,17 @@
 
 ## Секція H3: Створення портативного акаунта (UI)
 
-- [ ] **Tests**: `client/tests/app.test.js` (доповнення) — екран «Акаунт» → створення: показує згенерований пароль за замовчуванням (з можливістю замінити), генерує ім'я (10 символів), викликає `deriveAccountMaterial`, формує логін `spirit<ім'я><хвіст>`, реконструює identity keypair з `privateKeyScalar`.
-- [ ] **Impl**: `client/index.html`, `client/js/app.js`, `client/js/i18n.js`.
-- [ ] **Exec review**: —
+Реалізовано як ДОДАТКОВА опція (чекбокс `#portable-account-checkbox` на наявній формі створення), а не заміна — наявний `createPermanentProfile`-шлях (сотні наявних тестів по всьому проєкту) лишився повністю без змін, коли чекбокс unchecked (за замовчуванням).
+
+- [x] **Tests**: `client/tests/app.test.js` (доповнення) — за замовчуванням (unchecked) не викликає `deriveAccountMaterial`/`adoptScalarIdentity` (регресія-guard); checked → генерує ім'я, деривує, `adoptScalarIdentity`, показує повний логін `spirit<ім'я><хвіст>` у `#portable-login-display`; чекбокс автозаповнює поле паролю згенерованим (не перезаписуючи вже введений).
+- [x] **Impl**: `client/index.html` (чекбокс + `#portable-login-display`), `client/js/app.js` (`btn-profile-confirm` розгалужується за станом чекбокса; `change`-обробник чекбокса), `client/js/i18n.js`, `client/css/style.css` (`.checkbox-field`).
+- [x] **Exec review**: iter1 — [reviews/deterministic-accounts-H3-H4-iter1.md](../reviews/deterministic-accounts-H3-H4-iter1.md). Реальних знахідок для Секції H3 немає (перезапис локального акаунта А неможливий — різні `profileId`).
 
 ## Секція H4: Крос-серверний вхід (UI)
 
-- [ ] **Tests**: `client/tests/app.test.js` (доповнення) — введення повного логіна (32 символи) + пароль на БУДЬ-ЯКОМУ вузлі (без попереднього `listProfiles()`-запису для цього логіна) відтворює той самий keypair, звіряє хвіст локально (обчислений заново, без мережевого запиту), показує зрозумілу помилку при невідповідності.
-- [ ] **Impl**: `client/index.html` (поле повного логіна замість `<select>` для цього шляху), `client/js/app.js`.
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/app.test.js` (доповнення) — введення повного логіна (32 символи) + пароль на БУДЬ-ЯКОМУ вузлі (без попереднього `listProfiles()`-запису для цього логіна) відтворює той самий keypair, звіряє хвіст локально (обчислений заново, без мережевого запиту), показує зрозумілу помилку при невідповідності хвоста чи невалідному форматі логіна; завантажує власний нікнейм і записує сесію/MRU (виправлено в exec review).
+- [x] **Impl**: `client/index.html` (`#portable-login-form`, завжди доступна незалежно від наявності локальних профілів), `client/js/app.js` (`btn-login-portable`, regex-парсинг `spirit<name10><tail16>`).
+- [x] **Exec review**: iter1 — [reviews/deterministic-accounts-H3-H4-iter1.md](../reviews/deterministic-accounts-H3-H4-iter1.md). 2 знахідки (застарілий нік не завантажувався; відсутня сесія/MRU-фіксація) — обидві виправлено.
 
 ## Верифікація
 

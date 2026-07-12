@@ -199,6 +199,16 @@ body {
   color: var(--muted);
 }
 
+.checkbox-field {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-field input[type="checkbox"] {
+  width: auto;
+}
+
 input[type="text"],
 input[type="password"],
 select {

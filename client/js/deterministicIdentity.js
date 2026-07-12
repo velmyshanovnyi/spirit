@@ -20,6 +20,19 @@ const ARGON2ID_PARALLELISM = 1;
 const OUTPUT_LENGTH_BYTES = 64; // split into two independent 32-byte segments below
 
 const KEY_SCALAR_BYTES = 32;
+const NAME_LENGTH = 10;
+const NAME_CHARSET = "abcdefghijklmnopqrstuvwxyz0123456789"; // 36 chars, no case-folding ambiguity
+
+/**
+ * The public "name" segment of a portable login (spirit<name><tail>) --
+ * doubles as the Argon2id salt (Section H1). Not secret, only needs to be
+ * unique-ish (collision just means two accounts happen to share a salt,
+ * which is harmless -- Argon2id salts don't need to be unguessable).
+ */
+export function generateAccountName() {
+  const bytes = crypto.getRandomValues(new Uint8Array(NAME_LENGTH));
+  return Array.from(bytes, (b) => NAME_CHARSET[b % NAME_CHARSET.length]).join("");
+}
 
 function toBase64Url(bytes) {
   let binary = "";

@@ -16,7 +16,15 @@ vi.mock("../js/profile.js", () => ({
   listProfiles: vi.fn().mockResolvedValue([]),
   loadPermanentProfile: vi.fn(),
   setNickname: vi.fn(),
-  getNickname: vi.fn().mockResolvedValue(null)
+  getNickname: vi.fn().mockResolvedValue(null),
+  adoptScalarIdentity: vi.fn()
+}));
+vi.mock("../js/deterministicIdentity.js", () => ({
+  deriveAccountMaterial: vi.fn(),
+  generateAccountName: vi.fn()
+}));
+vi.mock("../js/passwordGenerator.js", () => ({
+  generateStrongPassword: vi.fn()
 }));
 vi.mock("../js/deviceLinking.js", () => ({
   generateDeviceKeyPair: vi.fn(),
@@ -108,7 +116,9 @@ import {
   exportPrivateKeyScalar,
   exportPrivateKeyRaw
 } from "../js/identity.js";
-import { createPermanentProfile, exportRawIdentity, listProfiles, loadPermanentProfile, setNickname, getNickname } from "../js/profile.js";
+import { createPermanentProfile, exportRawIdentity, listProfiles, loadPermanentProfile, setNickname, getNickname, adoptScalarIdentity } from "../js/profile.js";
+import { deriveAccountMaterial, generateAccountName } from "../js/deterministicIdentity.js";
+import { generateStrongPassword } from "../js/passwordGenerator.js";
 import {
   generateDeviceKeyPair,
   createLinkRequest,
@@ -159,11 +169,20 @@ const HTML = `
       <button id="btn-profile-unlock" type="button">Увійти</button>
       <button id="link-switch-to-create" type="button">Створити новий акаунт</button>
     </div>
+    <button id="link-toggle-portable-login" type="button">Увійти за портативним логіном</button>
+    <div id="portable-login-form" hidden>
+      <input id="portable-login-input" type="text">
+      <input id="portable-password-input" type="password">
+      <button id="btn-login-portable" type="button">Увійти за логіном</button>
+      <div id="portable-login-status"></div>
+    </div>
     <div id="account-create-mode">
       <button id="btn-create-profile" type="button">Створити профіль</button>
       <div id="profile-setup" hidden>
         <input id="nickname-input" type="text">
         <input id="profile-passphrase" type="password">
+        <input id="portable-account-checkbox" type="checkbox">
+        <div id="portable-login-display"></div>
         <button id="btn-profile-confirm" type="button">Створити</button>
       </div>
       <button id="link-switch-to-login" type="button">Увійти в наявний акаунт</button>
@@ -270,6 +289,7 @@ beforeEach(() => {
   listConversations.mockResolvedValue([]);
   listContacts.mockResolvedValue([]);
   generateAnonymousNickname.mockReturnValue("Тихий Привид");
+  generateStrongPassword.mockReturnValue("alpha bravo charlie delta echo foxtrot");
 });
 
 function visibleScreens() {
@@ -878,6 +898,143 @@ describe("permanent profile creation UI", () => {
     expect(document.getElementById("profile-setup").hidden).toBe(true);
     expect(document.getElementById("backup-step").hidden).toBe(true);
     expect(document.getElementById("backup-reminder").hidden).toBe(true);
+  });
+});
+
+describe("portable account creation (Section H3, exec-reviewed Argon2id core)", () => {
+  it("auto-fills the passphrase field with a generated password when the portable checkbox is checked", () => {
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+
+    document.getElementById("portable-account-checkbox").click();
+
+    expect(document.getElementById("profile-passphrase").value).toBe("alpha bravo charlie delta echo foxtrot");
+  });
+
+  it("does not overwrite a password the user already typed before checking the box", () => {
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "my own chosen password";
+
+    document.getElementById("portable-account-checkbox").click();
+
+    expect(document.getElementById("profile-passphrase").value).toBe("my own chosen password");
+  });
+
+  it("does NOT use the deterministic path when the portable checkbox is left unchecked (default, no regression)", async () => {
+    const keyPair = { privateKey: { __tag: "profile-priv" }, publicKey: fakePublicKey("profile-pub") };
+    createPermanentProfile.mockResolvedValue(keyPair);
+    fingerprint.mockResolvedValue("profile-fp");
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "my local passphrase";
+    document.getElementById("btn-profile-confirm").click();
+
+    await vi.waitFor(() => expect(createPermanentProfile).toHaveBeenCalledWith("my local passphrase"));
+    expect(deriveAccountMaterial).not.toHaveBeenCalled();
+    expect(adoptScalarIdentity).not.toHaveBeenCalled();
+  });
+
+  it("derives a portable login (spirit+name+tail) and adopts it locally when the checkbox is checked", async () => {
+    generateAccountName.mockReturnValue("abcdefghij");
+    deriveAccountMaterial.mockResolvedValue({
+      privateKeyScalar: new Uint8Array(32).fill(7),
+      verifierTail: "TAIL0000TAIL0000"
+    });
+    adoptScalarIdentity.mockResolvedValue({
+      privateKey: { __tag: "portable-priv" },
+      publicKey: fakePublicKey("portable-pub"),
+      vaultKey: { __tag: "vault-key" },
+      profileId: "portable-fp"
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("portable-account-checkbox").checked = true;
+    document.getElementById("profile-passphrase").value = "correct horse battery staple";
+    document.getElementById("btn-profile-confirm").click();
+
+    await vi.waitFor(() => expect(deriveAccountMaterial).toHaveBeenCalledWith("abcdefghij", "correct horse battery staple"));
+    expect(adoptScalarIdentity).toHaveBeenCalledWith(
+      new Uint8Array(32).fill(7),
+      "correct horse battery staple"
+    );
+    expect(createPermanentProfile).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(document.getElementById("portable-login-display").textContent).toContain("abcdefghijTAIL0000TAIL0000")
+    );
+  });
+});
+
+describe("portable cross-node login (Section H4)", () => {
+  it("toggles the portable-login form via the link button", () => {
+    initApp(document, { locale: "uk" });
+    expect(document.getElementById("portable-login-form").hidden).toBe(true);
+
+    document.getElementById("link-toggle-portable-login").click();
+
+    expect(document.getElementById("portable-login-form").hidden).toBe(false);
+  });
+
+  it("logs in on a node with no prior local record for this account, by re-deriving and checking the tail", async () => {
+    deriveAccountMaterial.mockResolvedValue({
+      privateKeyScalar: new Uint8Array(32).fill(9),
+      verifierTail: "matchingtail1234"
+    });
+    adoptScalarIdentity.mockResolvedValue({
+      privateKey: { __tag: "priv" },
+      publicKey: fakePublicKey("pub"),
+      vaultKey: { __tag: "vault-key" },
+      profileId: "cross-node-fp"
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("link-toggle-portable-login").click();
+    document.getElementById("portable-login-input").value = "spiritabcdefghijmatchingtail1234";
+    document.getElementById("portable-password-input").value = "the right password";
+    document.getElementById("btn-login-portable").click();
+
+    await vi.waitFor(() => expect(deriveAccountMaterial).toHaveBeenCalledWith("abcdefghij", "the right password"));
+    expect(adoptScalarIdentity).toHaveBeenCalledWith(new Uint8Array(32).fill(9), "the right password");
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toContain("cross-node-fp"));
+    // Exec review finding: must load this account's own nickname, not carry
+    // over whatever was in state.nickname from a previous identity/session
+    // (e.g. an ephemeral quick-chat nickname) -- a stale nickname would leak
+    // to peers on the next identity-announce.
+    expect(getNickname).toHaveBeenCalledWith("cross-node-fp");
+    // Exec review finding: session memory + MRU list should work the same
+    // as the regular unlock path, so a later visit offers this account via
+    // the normal profile-select/unlock flow.
+    await vi.waitFor(() => expect(localStorage.getItem("spirit.session")).not.toBeNull());
+    expect(JSON.parse(localStorage.getItem("spirit.recentAccounts") || "[]")).toContain("cross-node-fp");
+  });
+
+  it("shows a clear error and does NOT adopt anything when the derived tail doesn't match (wrong password)", async () => {
+    deriveAccountMaterial.mockResolvedValue({
+      privateKeyScalar: new Uint8Array(32).fill(9),
+      verifierTail: "differenttail000"
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("link-toggle-portable-login").click();
+    document.getElementById("portable-login-input").value = "spiritabcdefghijmatchingtail1234";
+    document.getElementById("portable-password-input").value = "the WRONG password";
+    document.getElementById("btn-login-portable").click();
+
+    await vi.waitFor(() => expect(document.getElementById("portable-login-status").textContent).not.toBe(""));
+    expect(adoptScalarIdentity).not.toHaveBeenCalled();
+  });
+
+  it("rejects a malformed login string instead of crashing", async () => {
+    initApp(document, { locale: "uk" });
+    document.getElementById("link-toggle-portable-login").click();
+    document.getElementById("portable-login-input").value = "not-a-valid-login";
+    document.getElementById("portable-password-input").value = "whatever";
+    document.getElementById("btn-login-portable").click();
+
+    await vi.waitFor(() => expect(document.getElementById("portable-login-status").textContent).not.toBe(""));
+    expect(deriveAccountMaterial).not.toHaveBeenCalled();
   });
 });
 

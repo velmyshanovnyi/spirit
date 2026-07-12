@@ -69,6 +69,18 @@
           <p class="hint-text"><button id="link-switch-to-create" type="button" class="btn-link" data-i18n="account.switchToCreate">Створити новий акаунт</button></p>
         </div>
 
+        <p class="hint-text"><button id="link-toggle-portable-login" type="button" class="btn-link" data-i18n="portable.toggleLogin">Увійти за портативним логіном</button></p>
+        <div id="portable-login-form" hidden class="subgroup">
+          <label class="field"><span data-i18n="portable.loginLabel">Логін (spirit...):</span>
+            <input id="portable-login-input" type="text">
+          </label>
+          <label class="field"><span data-i18n="label.unlockPassphrase">Passphrase:</span>
+            <input id="portable-password-input" type="password" autocomplete="current-password">
+          </label>
+          <div class="btn-row"><button id="btn-login-portable" type="button" class="btn-primary" data-i18n="btn.login">Увійти</button></div>
+          <div id="portable-login-status" class="status"></div>
+        </div>
+
         <div id="account-create-mode">
           <div class="btn-row">
             <button id="btn-create-profile" type="button" class="btn-primary" data-i18n="btn.createProfile">Створити профіль</button>
@@ -81,7 +93,12 @@
             <label class="field"><span data-i18n="label.profilePassphrase">Passphrase профілю:</span>
               <input id="profile-passphrase" type="password" autocomplete="new-password">
             </label>
+            <label class="field checkbox-field">
+              <input id="portable-account-checkbox" type="checkbox">
+              <span data-i18n="portable.makePortable">Портативний акаунт (можна увійти на іншому сервері)</span>
+            </label>
             <div class="btn-row"><button id="btn-profile-confirm" type="button" class="btn-primary" data-i18n="btn.createProfileConfirm">Створити</button></div>
+            <div id="portable-login-display" class="secret-output"></div>
           </div>
 
           <p class="hint-text"><button id="link-switch-to-login" type="button" class="btn-link" data-i18n="account.switchToLogin">Вже маєте акаунт? Увійти</button></p>
