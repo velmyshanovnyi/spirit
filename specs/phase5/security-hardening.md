@@ -14,10 +14,20 @@
 - [ ] **Impl**: (а) UI-перемикач "форсувати TURN-релей" на екрані «Сервер» (rtcConfig `iceTransportPolicy: 'relay'`) — приховує реальну IP від співрозмовника ціною затримки/потреби в реальному TURN-сервері (Google STUN не є TURN, TURN потребує окремого хостингу з полосою пропускання — дослідити безкоштовні/дешеві опції або власний coturn на kolomedi/kibr); (б) замінити дефолтний `stun:stun.l.google.com:19302` на власний STUN, якщо можливо на існуючій інфраструктурі; (в) дослідити opційний Tor-транспорт для сигналінгу (складніше — потребує WebSocket-based signaling over onion чи snowflake-подібний bridge, це вже суттєва зміна протоколу, не просто UI-перемикач — почати з дослідницької нотатки в `docs/`, не з коду).
 - [ ] **Exec review**: —
 
-## Секція P2: Ratchet поверх наявного ECDH-хендшейку
+## Секція P2a: Ratchet — чисте крипто-ядро (без інтеграції в чат)
 
-- [ ] **Tests**: `client/tests/e2ee.test.js` (доповнення чи новий `ratchet.test.js`) — новий сесійний ключ виводиться після N повідомлень чи по таймеру, старий ключ більше не відновлюваний (forward secrecy в межах сесії), сумісність з наявним `deriveSessionKey`/`encryptMessage`/`decryptMessage` API.
-- [ ] **Impl**: `client/js/e2ee.js` чи новий `client/js/ratchet.js` — почати з дослідження мінімального симетричного ratchet (KDF-chain на базі HKDF, без повного Double Ratchet зі скачками gaps/skipped-message handling, якщо це надмірна складність для MVP) поверх наявного per-сесійного `sessionKey`. Не змінювати сам ECDH-хендшейк (Секції 1-5, `specs/phase1/mvp.md`) без окремого обговорення — лише шар над ним.
+Той самий підхід, що вже виправдав себе для Argon2id-схеми (Фаза 3, Секції H1-H2): спочатку самодостатній, повністю протестований крипто-модуль, окремий exec review, і лише ПОТІМ (Секція P2b) — інтеграція в реальний потік повідомлень `app.js`/`e2ee.js`.
+
+Мінімальний симетричний ratchet (KDF-chain на базі HKDF, БЕЗ повного Double Ratchet — без DH-ratchet-кроку, без skipped-message/out-of-order handling). Дає forward secrecy в межах сесії (компрометація поточного chain-key не розкриває попередні message-keys), НЕ дає повного post-compromise security (немає нового DH-обміну — це відкладено як можливе розширення, якщо P2a-P2b виявляться недостатніми).
+
+- [x] **Tests**: `client/tests/ratchet.test.js` (новий файл) — `deriveRootKey(privateKey, publicKey)` (ECDH+HKDF, домен-розділений від `e2ee.js`'s `deriveSessionKey` тим самим shared secret — тобто криптографічно незалежний, той самий safety-перевірений patтерн, що й у `deterministicIdentity.js`); `deriveInitialChainKeys(rootKeyBytes, localEcdhWire, peerEcdhWire)` повертає `{sendChainKey, receiveChainKey}`, симетрично узгоджені для обох сторін (лексикографічне сортування wire-рядків визначає, яка сторона на якому "chain" шле/приймає — обидві сторони приходять до ОДНАКОВОГО розподілу); `ratchetStep(chainKeyBytes)` повертає `{messageKey, nextChainKeyBytes}` — `messageKey` не дозволяє відновити `chainKeyBytes` (forward secrecy), послідовні виклики дають різні `messageKey`, ланцюжок детермінований (той самий `chainKeyBytes` завжди дає той самий наступний крок). 9/9 тестів зелені.
+- [x] **Impl**: `client/js/ratchet.js` (новий, чиста крипто-логіка, без залежності від `app.js`/`e2ee.js`).
+- [x] **Exec review**: iter1 — [reviews/security-hardening-P2a-iter1.md](../reviews/security-hardening-P2a-iter1.md). Нуль знахідок, домен-розділення від `e2ee.js` підтверджено, forward secrecy та детермінізм ланцюжка перевірені.
+
+## Секція P2b: Інтеграція ratchet у потік повідомлень чату
+
+- [ ] **Tests**: `client/tests/app.test.js` (доповнення) — кожне надіслане/отримане чат-повідомлення використовує НОВИЙ `messageKey` (не той самий сесійний ключ на всі повідомлення, як зараз); ланцюжки send/receive синхронізовані між двома сесіями `startInitiatorSession`/`startJoinerSession`; сумісність зі старими control-типами (identity-announce, device-list-announce, proof-set-announce) — рішення, чи вони теж ratchet-uються, чи лишаються на статичному `sessionKey` (вимагає розгляду: чи ratchet ускладнює device-linking/re-announce флоу).
+- [ ] **Impl**: `client/js/app.js` (`state.sendChain`/`state.receiveChain` замість статичного використання `state.sessionKey` для шифрування нових повідомлень).
 - [ ] **Exec review**: —
 
 ## Секція P3: Encrypted push notifications
