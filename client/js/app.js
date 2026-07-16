@@ -40,6 +40,7 @@ import {
 } from "./webrtc.js";
 import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer } from "./signalingClient.js";
 import { deriveSessionKey, encryptMessage, decryptMessage } from "./e2ee.js";
+import { deriveRootKey, deriveInitialChainKeys, ratchetStep } from "./ratchet.js";
 import { promptGoogleSignIn, verifyGoogleIdToken } from "./googleOAuth.js";
 import { t, setLocale, detectLocale, applyTranslations, getLocale, SUPPORTED_LOCALES } from "./i18n.js";
 import { initTheme, toggleTheme } from "./theme.js";
@@ -121,6 +122,10 @@ export function initApp(
     // Set by the session helpers just before the session key is derived;
     // needed to bind/verify identity announces to THIS session's ECDH keys.
     sessionEcdhWires: null,
+    // Ratchet chains (Section P2b) -- only chat text uses these; every other
+    // message type (announces, calls, device-linking) stays on sessionKey.
+    sendChainKey: null,
+    receiveChainKey: null,
     // Fingerprint of the peer's VERIFIED identity (null until a valid
     // announce arrives; incoming chat text is refused while null).
     peerFingerprint: null,
@@ -587,8 +592,12 @@ export function initApp(
       },
       onMessage: async (payload) => {
         if (!state.sessionKey) return; // message arrived before session key derived; drop rather than throw
+        const isRatcheted = payload.startsWith(RATCHET_WIRE_PREFIX);
+        if (isRatcheted && !state.receiveChainKey) return; // arrived in the brief window before the chain was derived; drop rather than throw
         try {
-          const text = await decryptMessage(state.sessionKey, payload);
+          const text = isRatcheted
+            ? await decryptMessage(await nextReceiveMessageKey(), payload.slice(RATCHET_WIRE_PREFIX.length))
+            : await decryptMessage(state.sessionKey, payload);
           await onDecryptedMessage(text);
         } catch (err) {
           // This callback runs detached from any button handler, so nothing
@@ -613,6 +622,42 @@ export function initApp(
         setStatus(t("status.error", { msg: err.message }));
       }
     };
+  }
+
+  // Wire-format marker for ratchet-encrypted payloads (chat text only, Section
+  // P2b). Everything else (announces, calls, device-linking) stays on the
+  // unmarked static sessionKey, unchanged from before this section.
+  const RATCHET_WIRE_PREFIX = "R1:";
+
+  // ratchetStep is a stateful, sequential step over shared mutable state
+  // (state.sendChainKey/receiveChainKey): each call must read the current
+  // chain key, await the crypto step, then mutate it before the NEXT call
+  // reads it. Two overlapping calls (e.g. two chat messages arriving back to
+  // back) would otherwise both read the same chain key and desync the
+  // session irrecoverably. These locks force strictly sequential execution
+  // regardless of how many callers invoke them concurrently.
+  state.sendChainLock = Promise.resolve();
+  state.receiveChainLock = Promise.resolve();
+
+  function serializedChainStep(lockField, chainField) {
+    const step = state[lockField].then(async () => {
+      const { messageKey, nextChainKeyBytes } = await ratchetStep(state[chainField]);
+      state[chainField] = nextChainKeyBytes;
+      return messageKey;
+    });
+    state[lockField] = step.then(
+      () => {},
+      () => {} // keep the lock chain alive even if this step's crypto call rejects
+    );
+    return step;
+  }
+
+  async function nextSendMessageKey() {
+    return serializedChainStep("sendChainLock", "sendChainKey");
+  }
+
+  async function nextReceiveMessageKey() {
+    return serializedChainStep("receiveChainLock", "receiveChainKey");
   }
 
   // Signaling sender_key for the device-linking flows: an opaque one-off
@@ -673,6 +718,9 @@ export function initApp(
           const peerEcdhPubkey = await importEcdhPublicKeyFromWire(peerEcdhPubkeyWire);
           state.sessionEcdhWires = { localEcdhWire: ecdhPubkey, peerEcdhWire: peerEcdhPubkeyWire };
           state.sessionKey = await deriveSessionKey(ecdhKeyPair.privateKey, peerEcdhPubkey);
+          const rootKey = await deriveRootKey(ecdhKeyPair.privateKey, peerEcdhPubkey);
+          ({ sendChainKey: state.sendChainKey, receiveChainKey: state.receiveChainKey } =
+            await deriveInitialChainKeys(rootKey, ecdhPubkey, peerEcdhPubkeyWire));
           if (onSessionReady) await onSessionReady();
         } catch (err) {
           setStatus(t("status.error", { msg: err.message }));
@@ -712,6 +760,9 @@ export function initApp(
           const peerEcdhPubkey = await importEcdhPublicKeyFromWire(peerEcdhPubkeyWire);
           state.sessionEcdhWires = { localEcdhWire: ecdhPubkey, peerEcdhWire: peerEcdhPubkeyWire };
           state.sessionKey = await deriveSessionKey(ecdhKeyPair.privateKey, peerEcdhPubkey);
+          const rootKey = await deriveRootKey(ecdhKeyPair.privateKey, peerEcdhPubkey);
+          ({ sendChainKey: state.sendChainKey, receiveChainKey: state.receiveChainKey } =
+            await deriveInitialChainKeys(rootKey, ecdhPubkey, peerEcdhPubkeyWire));
           if (onSessionReady) await onSessionReady();
         } catch (err) {
           setStatus(t("status.error", { msg: err.message }));
@@ -1356,7 +1407,8 @@ export function initApp(
       return;
     }
     const text = el("message-input").value;
-    const payload = await encryptMessage(state.sessionKey, text);
+    const messageKey = await nextSendMessageKey();
+    const payload = RATCHET_WIRE_PREFIX + (await encryptMessage(messageKey, text));
     state.channel.send(payload);
     el("message-input").value = "";
     const sentAt = Date.now();

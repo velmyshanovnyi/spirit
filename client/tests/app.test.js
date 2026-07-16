@@ -104,6 +104,17 @@ vi.mock("../js/e2ee.js", () => ({
   encryptMessage: vi.fn(),
   decryptMessage: vi.fn()
 }));
+vi.mock("../js/ratchet.js", () => ({
+  deriveRootKey: vi.fn().mockResolvedValue(new Uint8Array(32)),
+  deriveInitialChainKeys: vi.fn().mockResolvedValue({
+    sendChainKey: new Uint8Array(32).fill(1),
+    receiveChainKey: new Uint8Array(32).fill(2)
+  }),
+  ratchetStep: vi.fn().mockResolvedValue({
+    messageKey: { __tag: "ratchet-message-key" },
+    nextChainKeyBytes: new Uint8Array(32).fill(3)
+  })
+}));
 vi.mock("../js/googleOAuth.js", () => ({
   promptGoogleSignIn: vi.fn(),
   verifyGoogleIdToken: vi.fn()
@@ -149,6 +160,7 @@ import {
 } from "../js/webrtc.js";
 import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer } from "../js/signalingClient.js";
 import { encryptMessage, decryptMessage, deriveSessionKey } from "../js/e2ee.js";
+import { deriveRootKey, deriveInitialChainKeys, ratchetStep } from "../js/ratchet.js";
 import { promptGoogleSignIn, verifyGoogleIdToken } from "../js/googleOAuth.js";
 import { initApp } from "../js/app.js";
 
@@ -1382,10 +1394,12 @@ describe("btn-send", () => {
 
     document.getElementById("message-input").value = "привіт";
     document.getElementById("btn-send").click();
-    await vi.waitFor(() => expect(channel.send).toHaveBeenCalled());
+    await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith("R1:ENCRYPTED_PAYLOAD"));
 
-    expect(encryptMessage).toHaveBeenCalledWith({ __tag: "session-key" }, "привіт");
-    expect(channel.send).toHaveBeenCalledWith("ENCRYPTED_PAYLOAD");
+    // Chat text is ratchet-encrypted (Section P2b), NOT the static session key.
+    expect(encryptMessage).toHaveBeenCalledWith({ __tag: "ratchet-message-key" }, "привіт");
+    expect(encryptMessage).not.toHaveBeenCalledWith({ __tag: "session-key" }, "привіт");
+    expect(channel.send).toHaveBeenCalledWith("R1:ENCRYPTED_PAYLOAD");
     expect(channel.send).not.toHaveBeenCalledWith("привіт");
   });
 
@@ -1423,7 +1437,7 @@ describe("btn-send", () => {
 
     document.getElementById("message-input").value = "перше повідомлення";
     document.getElementById("btn-send").click();
-    await vi.waitFor(() => expect(channel.send).toHaveBeenCalled());
+    await vi.waitFor(() => expect(document.getElementById("chat-log").textContent).toContain("перше повідомлення"));
 
     const log = document.getElementById("chat-log").textContent;
     expect(log).toContain("перше повідомлення");
@@ -1463,12 +1477,56 @@ describe("btn-send", () => {
     for (const word of ["один", "два", "три"]) {
       document.getElementById("message-input").value = word;
       document.getElementById("btn-send").click();
-      await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith(`ENC(${word})`));
+      await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith(`R1:ENC(${word})`));
     }
 
     const log = document.getElementById("chat-log").textContent;
     expect(log.indexOf("один")).toBeLessThan(log.indexOf("два"));
     expect(log.indexOf("два")).toBeLessThan(log.indexOf("три"));
+  });
+
+  it("advances the send chain so consecutive sent messages use different ratchet message keys (forward secrecy)", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    encryptMessage.mockResolvedValue("ENCRYPTED_PAYLOAD");
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    ratchetStep
+      .mockResolvedValueOnce({ messageKey: { __tag: "msg-key-1" }, nextChainKeyBytes: new Uint8Array(32).fill(11) })
+      .mockResolvedValueOnce({ messageKey: { __tag: "msg-key-2" }, nextChainKeyBytes: new Uint8Array(32).fill(12) });
+
+    const channel = fakeChannel();
+    let capturedOnLocalOfferReady;
+    startAsInitiator.mockImplementation((opts) => {
+      capturedOnLocalOfferReady = opts.onLocalOfferReady;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    const { onChannelOpen } = startAsInitiator.mock.calls[0][0];
+    onChannelOpen(channel);
+    await capturedOnLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    document.getElementById("message-input").value = "перше";
+    document.getElementById("btn-send").click();
+    await vi.waitFor(() => expect(encryptMessage).toHaveBeenCalledWith({ __tag: "msg-key-1" }, "перше"));
+
+    document.getElementById("message-input").value = "друге";
+    document.getElementById("btn-send").click();
+    await vi.waitFor(() => expect(encryptMessage).toHaveBeenCalledWith({ __tag: "msg-key-2" }, "друге"));
+
+    // The second call's ratchetStep must have advanced from the first call's next-chain-key output.
+    expect(ratchetStep.mock.calls[1][0]).toEqual(new Uint8Array(32).fill(11));
   });
 });
 
@@ -1621,6 +1679,113 @@ describe("identity announce in chat flows (Section 12)", () => {
     await vi.waitFor(() =>
       expect(document.getElementById("chat-log").textContent).toContain("привіт після підтвердження")
     );
+  });
+
+  it("decrypts an R1-marked incoming payload with the ratcheted receive-chain key, stripping the marker (Section P2b)", async () => {
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+    verifyIdentityAnnounce.mockResolvedValue({ identityPublicKey: {}, identityPubkeyWire: "PEER", fingerprint: "peer-fp" });
+
+    const { captured } = await establishedInitiatorChat();
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+    await vi.waitFor(() =>
+      expect(document.getElementById("connection-status").textContent).toContain("peer-fp")
+    );
+
+    ratchetStep.mockResolvedValueOnce({ messageKey: { __tag: "recv-msg-key-1" }, nextChainKeyBytes: new Uint8Array(32).fill(21) });
+    decryptMessage.mockResolvedValueOnce("ратчетоване вхідне");
+    await captured.onMessage("R1:ENCRYPTED_TEXT");
+
+    await vi.waitFor(() =>
+      expect(document.getElementById("chat-log").textContent).toContain("ратчетоване вхідне")
+    );
+    // The R1 marker must be stripped before decryption, and the receive-chain
+    // message key used instead of the static session key.
+    expect(decryptMessage).toHaveBeenCalledWith({ __tag: "recv-msg-key-1" }, "ENCRYPTED_TEXT");
+    expect(decryptMessage).not.toHaveBeenCalledWith({ __tag: "session-key" }, "R1:ENCRYPTED_TEXT");
+  });
+
+  it("serializes concurrent incoming R1 messages so the receive chain never desyncs (Section P2b review finding)", async () => {
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+    verifyIdentityAnnounce.mockResolvedValue({ identityPublicKey: {}, identityPubkeyWire: "PEER", fingerprint: "peer-fp" });
+
+    const { captured } = await establishedInitiatorChat();
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+    await vi.waitFor(() =>
+      expect(document.getElementById("connection-status").textContent).toContain("peer-fp")
+    );
+
+    // ratchetStep resolves asynchronously (a microtask delay), the same as
+    // the real crypto.subtle-backed implementation -- this is what makes two
+    // near-simultaneous onMessage calls interleave without serialization.
+    let call = 0;
+    ratchetStep.mockImplementation(async (chainKeyBytes) => {
+      await Promise.resolve();
+      call += 1;
+      return { messageKey: { __tag: `recv-key-${call}` }, nextChainKeyBytes: new Uint8Array(32).fill(call) };
+    });
+    decryptMessage.mockResolvedValueOnce("перше вхідне").mockResolvedValueOnce("друге вхідне");
+
+    // Fire both WITHOUT awaiting the first before starting the second --
+    // simulates two chat messages arriving back-to-back on the data channel.
+    const first = captured.onMessage("R1:FIRST_CIPHERTEXT");
+    const second = captured.onMessage("R1:SECOND_CIPHERTEXT");
+    await Promise.all([first, second]);
+
+    // The two ratchetStep calls must have run sequentially: the second call's
+    // input chain key must be the first call's OUTPUT, never the same input
+    // seen twice (which would mean both steps started from the same state).
+    expect(ratchetStep.mock.calls.length).toBe(2);
+    expect(ratchetStep.mock.calls[1][0]).toEqual(new Uint8Array(32).fill(1));
+    expect(ratchetStep.mock.calls[0][0]).not.toEqual(ratchetStep.mock.calls[1][0]);
+  });
+
+  it("drops an R1 message that arrives in the window where sessionKey is set but the receive chain isn't yet (Section P2b review finding)", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: { __tag: "id-priv" }, publicKey: fakePublicKey("id-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    // Restore a clean default -- a prior test in this file may have left a
+    // custom mockImplementation (with its own closure state) on this shared mock.
+    ratchetStep.mockReset();
+    ratchetStep.mockResolvedValue({ messageKey: { __tag: "ratchet-message-key" }, nextChainKeyBytes: new Uint8Array(32).fill(3) });
+    // deriveRootKey rejects: state.sessionKey (assigned first) IS set, but
+    // the chain derivation that follows it never completes.
+    deriveRootKey.mockRejectedValueOnce(new Error("boom"));
+
+    const channel = fakeChannel();
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(channel);
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    // The rejected deriveRootKey already surfaces its own error status from
+    // session establishment (unrelated to this guard) -- what matters here is
+    // that the subsequent R1 message is dropped silently rather than throwing
+    // from a null chain key.
+    await captured.onMessage("R1:SOME_CIPHERTEXT");
+
+    expect(decryptMessage).not.toHaveBeenCalled();
   });
 
   it("persists the verified contact when a permanent profile is active", async () => {
