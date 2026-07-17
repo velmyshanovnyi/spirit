@@ -322,6 +322,22 @@
     // (Section F6 follow-up, bug report 2026-07-17) -- app.js's own default
     // is 0 (instant), matching this file's test suite's expectations.
     initApp(document, { autoStartChat: true, localMediaPreviewDelayMs: 1500 });
+
+    // Section PN3 (specs/phase5/push-notifications.md): register the push
+    // Service Worker eagerly so it's ready by the time a permanent-profile
+    // user opts into notifications (Section PN4, not yet wired up). A
+    // missing navigator.serviceWorker (older/restricted browsers) is a
+    // silent no-op -- notifications are an optional enhancement, never
+    // required for the chat itself to work.
+    if ("serviceWorker" in navigator) {
+      // Served from the site ROOT (not js/sw.js) deliberately: a Service
+      // Worker's default scope is the directory it's served from, and a
+      // scope narrower than "/" means it never controls the main tab --
+      // WindowClient.navigate() then rejects on every client, silently
+      // breaking the notification-click "focus the open tab" path
+      // (exec review finding, Section PN3).
+      navigator.serviceWorker.register("./sw.js").catch(() => {});
+    }
   </script>
 </body>
 </html>

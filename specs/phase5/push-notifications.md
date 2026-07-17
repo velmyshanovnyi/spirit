@@ -34,9 +34,9 @@ Web Push вимагає VAPID-підпис (ES256 JWT) від "application serve
 
 ## Секція PN3: Service Worker — реєстрація, підписка, показ сповіщення
 
-- [ ] **Tests**: TBD — Service Worker тестується окремо від основного jsdom-сьюту (потрібен інший тестовий環境, наприклад `@vitest-environment` з мок `self`/`ServiceWorkerGlobalScope`, чи мінімальний integration-тест через `client/tests/serviceWorker.test.js` з ручним мокуванням `self.addEventListener`).
-- [ ] **Impl**: `client/js/sw.js` (новий Service Worker файл, реєструється з `index.html`), обробник `push`-події (розшифрування вбудованим `PushEvent.data.json()`/`.arrayBuffer()`, показ `self.registration.showNotification` з `data: {room, token}`), обробник `notificationclick` (відкриває/фокусує вкладку з `?room=&token=#/room`).
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/sw.test.js` (13 тестів) — чиста логіка винесена в експортовані функції, тестовані напряму в jsdom (реальні `PushEvent`/`Clients` API там недоступні, тому сам `self.addEventListener`-дротування — untestable-by-design runtime glue, позначена `/* c8 ignore */`): `parsePushData` (валідний payload, null/undefined, не-об'єкт, відсутні/порожні/невірного типу поля, зайві поля ігноруються); `buildNotificationOptions` (передача даних, стабільний `tag` для дедуплікації); `buildJoinUrl` (точний збіг з форматом invite-посилань F4, URL-encoding спецсимволів); `focusOrOpenClient` (фокус+навігація наявної вкладки, відкриття нової за відсутності, фокус навіть без методу `navigate`, фокус навіть якщо `navigate()` відхилено — exec review iter1 знахідка). 488/488 по проєкту.
+- [x] **Impl**: `client/sw.js` (у корені `client/`, НЕ в `client/js/` — критично для scope, exec review iter1 знахідка), `client/index.html` (`navigator.serviceWorker.register("./sw.js")`, беззастережна реєстрація — підписка (Секція PN4) ще не підключена).
+- [x] **Exec review**: iter1 — [reviews/push-notifications-PN3-iter1.md](../reviews/push-notifications-PN3-iter1.md). 2 знахідки (Service Worker мав хибний scope через шлях `js/sw.js`, через що `client.navigate()` завжди відхилявся б у реальному браузері; незахищений `await client.navigate()` міг зробити клік по сповіщенню тихим no-op) — обидві виправлено. iter2 — [reviews/push-notifications-PN3-iter2.md](../reviews/push-notifications-PN3-iter2.md), збіжність, нуль нових знахідок.
 
 ## Секція PN4: UI — увімкнення сповіщень, обмін підпискою через P2P
 
