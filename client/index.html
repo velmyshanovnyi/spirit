@@ -222,7 +222,12 @@
           <button id="btn-initiate" type="button" class="btn-primary" data-i18n="btn.initiate">Ініціювати чат</button>
           <button id="btn-join" type="button" data-i18n="btn.join">Приєднатися до чату</button>
         </div>
-        <div id="connection-status" class="status" data-i18n="conn.none">не з'єднано</div>
+        <!-- Mirrors #connection-status (exec review, Section F6 follow-up): a
+             guard message (e.g. "create an account first") can fire BEFORE
+             enterConversationLobby() ever navigates away from this screen,
+             so it needs its own visible target here too, not only on the
+             conversation screen this button jumps to on success. -->
+        <div id="room-status" class="status"></div>
 
         <p class="hint-text" data-i18n="room.inviteHint">Надішліть це посилання співрозмовнику — за клацанням Room ID і token заповняться автоматично.</p>
         <div class="btn-row"><button id="btn-copy-invite" type="button" data-i18n="btn.copyInvite">Скопіювати запрошення</button></div>
@@ -235,6 +240,7 @@
     <section data-screen="conversation" class="screen">
       <section class="card card-wide">
         <h2 data-i18n="conversation.heading">Розмова</h2>
+        <div id="connection-status" class="status" data-i18n="conn.none">не з'єднано</div>
         <div id="invite-bar" hidden class="identity">
           <button id="btn-invite-from-chat" type="button" class="btn-icon" aria-label="Запросити">🔗 <span data-i18n="btn.copyInvite">Скопіювати запрошення</span></button>
         </div>

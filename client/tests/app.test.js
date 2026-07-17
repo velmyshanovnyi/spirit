@@ -248,13 +248,14 @@ const HTML = `
     <input id="invite-token" type="text">
     <button id="btn-initiate" type="button">Ініціювати чат</button>
     <button id="btn-join" type="button">Приєднатися до чату</button>
-    <div id="connection-status" data-i18n="conn.none">не з'єднано</div>
+    <div id="room-status"></div>
     <button id="btn-copy-invite" type="button">Скопіювати запрошення</button>
     <div id="invite-link-display"></div>
     <div id="invite-status"></div>
   </section>
 
   <section data-screen="conversation">
+    <div id="connection-status" data-i18n="conn.none">не з'єднано</div>
     <div id="invite-bar" hidden>
       <button id="btn-invite-from-chat" type="button">Скопіювати запрошення</button>
     </div>
@@ -1164,6 +1165,19 @@ describe("btn-initiate", () => {
     expect(createInvite).not.toHaveBeenCalled();
   });
 
+  it("also mirrors the guard message onto the room screen's own status element (exec review, Section F6 follow-up)", async () => {
+    // This guard fires BEFORE enterConversationLobby() ever navigates away
+    // from the room screen -- #connection-status now lives only on the
+    // gated "conversation" screen, so a message written ONLY there would be
+    // invisible to a fresh visitor with no identity yet (bug report
+    // 2026-07-17). #room-status must show the same text.
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() =>
+      expect(document.getElementById("room-status").textContent).toMatch(/спочатку створіть акаунт/)
+    );
+  });
+
   it("surfaces a signaling failure as a status message instead of an unhandled rejection", async () => {
     generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
     fingerprint.mockResolvedValue("sender-fp");
@@ -1440,6 +1454,160 @@ describe("btn-send", () => {
     expect(encryptMessage).not.toHaveBeenCalledWith({ __tag: "session-key" }, "привіт");
     expect(channel.send).toHaveBeenCalledWith("R1:ENCRYPTED_PAYLOAD");
     expect(channel.send).not.toHaveBeenCalledWith("привіт");
+  });
+
+  it("sends the message on Enter, same as clicking Надіслати (bug report 2026-07-17)", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    encryptMessage.mockResolvedValue("ENCRYPTED_PAYLOAD");
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+
+    const channel = fakeChannel();
+    let capturedOnLocalOfferReady;
+    startAsInitiator.mockImplementation((opts) => {
+      capturedOnLocalOfferReady = opts.onLocalOfferReady;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    const { onChannelOpen } = startAsInitiator.mock.calls[0][0];
+    onChannelOpen(channel);
+    await capturedOnLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    const input = document.getElementById("message-input");
+    input.value = "привіт з Enter";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith("R1:ENCRYPTED_PAYLOAD"));
+    expect(encryptMessage).toHaveBeenCalledWith({ __tag: "ratchet-message-key" }, "привіт з Enter");
+    expect(input.value).toBe("");
+  });
+
+  it("does not send on an unrelated keypress", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+
+    const channel = fakeChannel();
+    let capturedOnLocalOfferReady;
+    startAsInitiator.mockImplementation((opts) => {
+      capturedOnLocalOfferReady = opts.onLocalOfferReady;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    const { onChannelOpen } = startAsInitiator.mock.calls[0][0];
+    onChannelOpen(channel);
+    await capturedOnLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    // The identity-announce that fires once the channel opens already calls
+    // encryptMessage/channel.send once, independent of this key press --
+    // the invariant under test is that the "a" keydown doesn't trigger an
+    // ADDITIONAL send, not that these mocks were never called at all.
+    const callsBeforeKeydown = channel.send.mock.calls.length;
+    const input = document.getElementById("message-input");
+    input.value = "чернетка";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+
+    expect(channel.send).toHaveBeenCalledTimes(callsBeforeKeydown);
+    expect(input.value).toBe("чернетка");
+  });
+
+  it("does not send on Shift+Enter (reserved for a future multi-line newline, exec review test-quality fix)", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+
+    const channel = fakeChannel();
+    let capturedOnLocalOfferReady;
+    startAsInitiator.mockImplementation((opts) => {
+      capturedOnLocalOfferReady = opts.onLocalOfferReady;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    const { onChannelOpen } = startAsInitiator.mock.calls[0][0];
+    onChannelOpen(channel);
+    await capturedOnLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    const callsBeforeKeydown = channel.send.mock.calls.length;
+    const input = document.getElementById("message-input");
+    input.value = "чернетка";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true }));
+
+    expect(channel.send).toHaveBeenCalledTimes(callsBeforeKeydown);
+    expect(input.value).toBe("чернетка");
+  });
+
+  it("does not send on Enter while an IME composition is in progress (exec review finding)", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+
+    const channel = fakeChannel();
+    let capturedOnLocalOfferReady;
+    startAsInitiator.mockImplementation((opts) => {
+      capturedOnLocalOfferReady = opts.onLocalOfferReady;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    const { onChannelOpen } = startAsInitiator.mock.calls[0][0];
+    onChannelOpen(channel);
+    await capturedOnLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    const callsBeforeKeydown = channel.send.mock.calls.length;
+    const input = document.getElementById("message-input");
+    input.value = "候補";
+    // isComposing:true -- an IME candidate-commit Enter, not a real send intent.
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true }));
+
+    expect(channel.send).toHaveBeenCalledTimes(callsBeforeKeydown);
+    expect(input.value).toBe("候補");
   });
 
   it("echoes the sent message into the sender's own chat log with a timestamp", async () => {

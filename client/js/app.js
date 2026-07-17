@@ -163,6 +163,11 @@ export function initApp(
   };
   const setStatus = (text) => {
     setDynamicText(el("connection-status"), text);
+    // Section F6 follow-up (exec review): a guard message can fire while the
+    // user is still on the "room" screen, BEFORE enterConversationLobby()
+    // ever navigates away -- mirror it there too so it isn't invisible.
+    const roomStatus = el("room-status");
+    if (roomStatus) setDynamicText(roomStatus, text);
   };
   const setGoogleStatus = (text) => {
     el("google-verify-status").textContent = text;
@@ -1474,7 +1479,7 @@ export function initApp(
     }
   });
 
-  el("btn-send").addEventListener("click", async () => {
+  async function sendChatMessage() {
     if (!state.channel || !state.sessionKey) {
       setStatus(t("status.noActiveConnection"));
       return;
@@ -1495,6 +1500,21 @@ export function initApp(
         text,
         timestamp: sentAt
       });
+    }
+  }
+
+  el("btn-send").addEventListener("click", sendChatMessage);
+  // Bug report 2026-07-17: Enter alone must send, same as clicking "Надіслати"
+  // -- Shift+Enter is left alone in case a future multi-line input wants it
+  // for a newline (the input is a single-line <input> today, so it's a no-op,
+  // but reserving the combination now avoids relitigating it later).
+  el("message-input").addEventListener("keydown", (event) => {
+    // event.isComposing (and the legacy keyCode 229 fallback some browsers
+    // still use during IME composition) -- an Enter that COMMITS a CJK/other
+    // composed-input candidate must not also send the still-in-progress text.
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
+      event.preventDefault();
+      void sendChatMessage();
     }
   });
 
