@@ -2983,6 +2983,80 @@ describe("zero-click invite-link auto-join (Section F4)", () => {
   });
 });
 
+describe("zero-click default landing on chat, no registration (Section H5)", () => {
+  it("does NOT auto-start when initApp is called the normal way (regression guard for the ~166 other tests in this file)", async () => {
+    initApp(document, { locale: "uk" });
+    await Promise.resolve();
+    expect(generateIdentityKeyPair).not.toHaveBeenCalled();
+    expect(createInvite).not.toHaveBeenCalled();
+  });
+
+  it("auto-starts an ephemeral chat with zero clicks on a fresh visit when explicitly enabled", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    generateAnonymousNickname.mockReturnValue("Тихий Привид");
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    startAsInitiator.mockImplementation(() => ({ __fakePc: true }));
+
+    initApp(document, { locale: "uk", autoStartChat: true });
+
+    // No button click anywhere in this test.
+    await vi.waitFor(() => expect(generateIdentityKeyPair).toHaveBeenCalled());
+    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledWith("http://node.example/index.php", "sender-fp"));
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
+    expect(document.getElementById("invite-bar").hidden).toBe(false); // owns the invite, like btn-quick-chat
+  });
+
+  it("does not auto-start if a remembered session exists (a returning profiled user isn't hijacked into an ephemeral identity)", async () => {
+    localStorage.setItem("spirit.session", JSON.stringify({ profileId: "some-profile-id", expiresAt: Date.now() + 3600_000 }));
+
+    initApp(document, { locale: "uk", autoStartChat: true });
+    await Promise.resolve();
+
+    expect(generateIdentityKeyPair).not.toHaveBeenCalled();
+    expect(visibleScreens()).toEqual(["account"]);
+  });
+
+  it("does not auto-start if there's an invite link -- Section F4's auto-join takes over instead", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    getOffer.mockResolvedValue({ offer: JSON.stringify({ type: "offer", sdp: "OFFER_SDP" }), ecdhPubkey: "peer-ecdh-b64" });
+    startAsJoiner.mockImplementation(() => ({ __fakePc: true }));
+
+    initApp(document, {
+      locale: "uk",
+      autoStartChat: true,
+      locationSearch: "?room=room-from-link&token=token-from-link"
+    });
+
+    await vi.waitFor(() => expect(getOffer).toHaveBeenCalled());
+    // The initiator-side createInvite must never fire -- F4 (joiner) owns this load.
+    expect(createInvite).not.toHaveBeenCalled();
+  });
+
+  it("ignores a manual btn-quick-chat click while the auto-start is already in flight (re-entrancy guard, mirrors the F4 finding)", async () => {
+    let resolveCreateInvite;
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockReturnValue(
+      new Promise((resolve) => {
+        resolveCreateInvite = resolve;
+      })
+    );
+
+    initApp(document, { locale: "uk", autoStartChat: true });
+
+    await vi.waitFor(() => expect(document.getElementById("btn-quick-chat").disabled).toBe(true));
+    document.getElementById("btn-quick-chat").click();
+    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledTimes(1));
+
+    resolveCreateInvite({ roomId: "room1", inviteToken: "tok1" });
+    await vi.waitFor(() => expect(document.getElementById("btn-quick-chat").disabled).toBe(false));
+  });
+});
+
 describe("instant conversation lobby: local camera/mic preview while waiting (Section F6)", () => {
   function fakeTrack(kind) {
     return { kind, enabled: true, stop: vi.fn() };

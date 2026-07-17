@@ -39,6 +39,19 @@ describe("rememberSession / getRememberedProfileId / forgetSession", () => {
     rememberSession("profile-2", 24);
     expect(getRememberedProfileId()).toBe("profile-2");
   });
+
+  it("returns null instead of throwing when localStorage.getItem itself throws (exec review finding, Section H5)", () => {
+    const original = Storage.prototype.getItem;
+    Storage.prototype.getItem = () => {
+      throw new Error("SecurityError: storage blocked");
+    };
+    try {
+      expect(() => getRememberedProfileId()).not.toThrow();
+      expect(getRememberedProfileId()).toBeNull();
+    } finally {
+      Storage.prototype.getItem = original;
+    }
+  });
 });
 
 describe("recordRecentAccount / getRecentAccounts (browser-wide MRU list)", () => {

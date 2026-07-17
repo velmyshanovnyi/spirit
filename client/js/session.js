@@ -10,7 +10,16 @@ export function rememberSession(profileId, ttlHours) {
 }
 
 export function getRememberedProfileId(now = Date.now()) {
-  const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+  let raw;
+  try {
+    raw = localStorage.getItem(SESSION_STORAGE_KEY);
+  } catch {
+    // Storage access can throw (private-mode/blocked site data) -- exec
+    // review finding (Section H5): this is called unguarded from a
+    // production-only code path (initApp's zero-click auto-start), where an
+    // uncaught throw here would take down the whole app's boot.
+    return null;
+  }
   if (!raw) return null;
   try {
     const { profileId, expiresAt } = JSON.parse(raw);

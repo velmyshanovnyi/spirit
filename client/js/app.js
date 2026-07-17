@@ -76,18 +76,25 @@ const ownProofSetKey = (profileId) => `proofSet:${profileId}`;
 const DEFAULT_ICE_TIMEOUT_MS = 15000;
 const DEFAULT_ANSWER_WAIT_TIMEOUT_MS = 5 * 60 * 1000; // matches the signaling node's default session TTL
 
-export function initApp(
-  doc,
-  {
+export function initApp(doc, options) {
+  const {
     iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS,
     answerWaitTimeoutMs = DEFAULT_ANSWER_WAIT_TIMEOUT_MS,
     locale,
     // Overridable for tests -- jsdom doesn't implement real navigation, so
     // `location.search =` is a silent no-op there; production always uses
     // the real value.
-    locationSearch = doc.defaultView.location.search
-  } = {}
-) {
+    locationSearch = doc.defaultView.location.search,
+    // Section H5 (specs/ui/chat-first-redesign.md): auto-start an ephemeral
+    // chat with zero clicks on a genuinely fresh visit (no invite link, no
+    // remembered session) -- defaults to true for real usage (index.html
+    // calls initApp(document) with NO second argument at all), defaults to
+    // false whenever an explicit options object is passed (every existing
+    // test in app.test.js passes one), so this doesn't silently trigger
+    // identity generation + network calls in tests that never opted into
+    // exercising it via an explicit { autoStartChat: true }.
+    autoStartChat = options === undefined
+  } = options || {};
   // Locale: explicit option (tests) -> stored choice -> browser language.
   setLocale(locale ?? detectLocale(typeof navigator !== "undefined" ? navigator.language : undefined));
   initTheme(doc);
@@ -1680,6 +1687,31 @@ export function initApp(
         // Land on the conversation lobby (camera/mic preview) immediately --
         // the joiner never owns the invite (Section F6).
         enterConversationLobby({ ownsInvite: false });
+      } finally {
+        quickChatButton.disabled = false;
+      }
+    })().catch((err) => setStatus(t("status.error", { msg: err.message })));
+  } else if (autoStartChat && !getRememberedProfileId()) {
+    // Section H5 (specs/ui/chat-first-redesign.md): a genuinely fresh visit
+    // -- no invite link, no remembered profile session -- gets an ephemeral
+    // chat with ZERO clicks, exactly what btn-quick-chat does manually.
+    // Stored profiles (IndexedDB) are deliberately NOT checked here (would
+    // require an async round-trip before this synchronous branch could even
+    // run) -- a user with a stored-but-not-remembered profile still reaches
+    // it via the Section H3 "Увійти" quick action; this only skips the
+    // zero-click ephemeral path for the common "remembered session" case.
+    (async () => {
+      if (state.senderKey) return; // defensive, mirrors the F4 guard above
+      const quickChatButton = el("btn-quick-chat");
+      quickChatButton.disabled = true;
+      try {
+        state.identityKeyPair = await generateIdentityKeyPair();
+        state.senderKey = await fingerprint(state.identityKeyPair.publicKey);
+        state.nickname = generateAnonymousNickname();
+        setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
+        resetOwnProofsState();
+        renderGuestQuickActions();
+        await initiateChatSession();
       } finally {
         quickChatButton.disabled = false;
       }
