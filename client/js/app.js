@@ -1184,6 +1184,10 @@ export function initApp(
     const { roomId, inviteToken } = await createInvite(serverUrl, senderKey);
     el("room-id").value = roomId;
     el("invite-token").value = inviteToken;
+    // Show the invite immediately, before a peer has joined -- otherwise the
+    // initiator (quick-chat especially) has no way to share the link and
+    // "opening the chat" silently does nothing from their point of view.
+    router.navigate("room");
 
     state.peerFingerprint = null;
     state.sessionEcdhWires = null;

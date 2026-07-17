@@ -356,6 +356,29 @@ describe("btn-quick-chat: zero-click ephemeral 'spirit mode' (Section F3)", () =
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
   });
 
+  it("shows the room screen with the invite link visible WHILE waiting for a peer, instead of leaving the user on a blank account screen (bug report 2026-07-17)", async () => {
+    const keyPair = { privateKey: {}, publicKey: fakePublicKey("identity-pub") };
+    generateIdentityKeyPair.mockResolvedValue(keyPair);
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    generateAnonymousNickname.mockReturnValue("Тихий Привид");
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+
+    startAsInitiator.mockImplementation(() => ({ __fakePc: true }));
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-quick-chat").click();
+
+    await vi.waitFor(() => expect(createInvite).toHaveBeenCalled());
+    // Before the peer has even joined (onChannelOpen never fires in this
+    // test), the invite must already be visible and shareable -- otherwise
+    // the initiator has no way to hand the link to anyone, and "opening the
+    // ephemeral chat" silently does nothing from their point of view.
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+    expect(document.getElementById("room-id").value).toBe("room1");
+    expect(document.getElementById("invite-token").value).toBe("tok1");
+  });
+
   it("ignores a second click while the auto-initiate flow is already in flight (re-entrancy guard)", async () => {
     generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
     fingerprint.mockResolvedValue("sender-fp");
