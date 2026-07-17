@@ -22,7 +22,16 @@ import {
 } from "./deviceLinking.js";
 import { listKeys, get, put } from "./db.js";
 import { createIdentityAnnounce, verifyIdentityAnnounce } from "./identityAnnounce.js";
-import { rememberContact, getContact, updateContactDeviceList, updateContactProofSet, listContacts } from "./contacts.js";
+import {
+  rememberContact,
+  getContact,
+  updateContactDeviceList,
+  updateContactProofSet,
+  updateContactPushSubscription,
+  listContacts
+} from "./contacts.js";
+import { buildPushSubscribeOptions, serializeSubscriptionForAnnounce, parsePushSubscriptionAnnounce } from "./pushSubscription.js";
+import { VAPID_PUBLIC_KEY_RAW_BASE64URL } from "./vapidKeys.js";
 import { appendMessage, listMessages, listConversations } from "./historyStore.js";
 import { acceptNewerProofSet, addProofToSet, revokeProofFromSet } from "./proofSet.js";
 import { createProofBlock, parseProofBlock, verifyProofBlock } from "./proofs.js";
@@ -72,6 +81,8 @@ const GATED_ROUTES = ["profile", "conversation", "contacts", "history"];
 const ownDeviceListKey = (profileId) => `deviceList:${profileId}`;
 // Per-profile own proof set (Section C, specs/phase2c/identity-verification.md).
 const ownProofSetKey = (profileId) => `proofSet:${profileId}`;
+// Per-profile own push subscription (Section PN4, specs/phase5/push-notifications.md).
+const ownPushSubscriptionKey = (profileId) => `pushSubscription:${profileId}`;
 
 const DEFAULT_ICE_TIMEOUT_MS = 15000;
 const DEFAULT_ANSWER_WAIT_TIMEOUT_MS = 5 * 60 * 1000; // matches the signaling node's default session TTL
@@ -323,6 +334,18 @@ export function initApp(doc, options) {
   }
   renderGuestQuickActions(); // set the correct initial visibility on load
 
+  // Section PN4 (specs/phase5/push-notifications.md): the notifications
+  // toggle only makes sense for a permanent profile (vaultKey present) --
+  // ephemeral "spirits" have nowhere to persist a subscription. Same
+  // call-site pattern as renderGuestQuickActions: called at every
+  // identity-establishing/clearing point.
+  function renderNotificationsCard() {
+    const card = el("notifications-card");
+    if (!card) return;
+    card.hidden = !(state.identityKeyPair && state.identityKeyPair.vaultKey);
+  }
+  renderNotificationsCard(); // set the correct initial visibility on load
+
   // Section E (specs/phase2c/identity-verification.md): in-memory verification
   // status per (contact fingerprint, proof url) -- re-derived from a live
   // fetch each check, so it doesn't need to survive a reload. `null`
@@ -508,6 +531,7 @@ export function initApp(doc, options) {
     state.localTracksAddedToPeer = false;
     setDynamicText(el("pub-key-display"), "");
     renderGuestQuickActions();
+    renderNotificationsCard();
     router.navigate("account");
   });
 
@@ -580,6 +604,7 @@ export function initApp(doc, options) {
     "identity-announce",
     "device-list-announce",
     "proof-set-announce",
+    "push-subscription-announce",
     "webrtc-call-offer",
     "webrtc-call-answer"
   ]);
@@ -731,6 +756,17 @@ export function initApp(doc, options) {
       return;
     }
 
+    if (control.type === "push-subscription-announce") {
+      // Same gate as device-list-announce/proof-set-announce: meaningless
+      // before identity is verified, pointless in ephemeral mode (nothing
+      // persists, and ephemeral "spirits" have nowhere to store a subscription).
+      if (!state.peerFingerprint || !state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
+      const parsed = parsePushSubscriptionAnnounce(control);
+      if (!parsed) return;
+      await updateContactPushSubscription(state.peerFingerprint, parsed);
+      return;
+    }
+
     if (control.type === "webrtc-call-offer") {
       // Same trust gate as plain chat text (line ~309 above): don't turn on
       // the camera/mic for a peer whose identity hasn't been verified yet.
@@ -783,6 +819,15 @@ export function initApp(doc, options) {
         if (ownProofSet) {
           state.channel.send(
             await encryptMessage(state.sessionKey, JSON.stringify({ type: "proof-set-announce", set: ownProofSet }))
+          );
+        }
+        const ownPushSubscription = await get("profile", ownPushSubscriptionKey(state.senderKey));
+        if (ownPushSubscription) {
+          state.channel.send(
+            await encryptMessage(
+              state.sessionKey,
+              JSON.stringify({ type: "push-subscription-announce", ...ownPushSubscription })
+            )
           );
         }
       } catch (err) {
@@ -1011,6 +1056,7 @@ export function initApp(doc, options) {
       setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
       resetOwnProofsState();
       renderGuestQuickActions();
+      renderNotificationsCard();
       router.navigate("room");
     });
   }
@@ -1052,6 +1098,69 @@ export function initApp(doc, options) {
   el("session-ttl-hours").addEventListener("change", () => {
     put("profile", "settings:sessionTtlHours", readSessionTtlHours()).catch(() => {});
   });
+
+  // Section PN4 (specs/phase5/push-notifications.md): enabling push
+  // notifications. Mostly untested runtime glue -- Notification,
+  // navigator.serviceWorker and PushManager don't exist in jsdom (same split
+  // as sw.js in PN3: pure helpers in pushSubscription.js are tested, this
+  // wiring isn't). Permanent-profile only (gated by vaultKey, same as
+  // renderNotificationsCard's own visibility).
+  /* c8 ignore start */
+  async function enableNotifications() {
+    const checkbox = el("notifications-enabled");
+    const setNotificationsStatus = (text) => {
+      el("notifications-status").textContent = text;
+    };
+    if (!state.identityKeyPair || !state.identityKeyPair.vaultKey) {
+      if (checkbox) checkbox.checked = false;
+      return;
+    }
+    if (!("Notification" in doc.defaultView) || !("serviceWorker" in doc.defaultView.navigator)) {
+      setNotificationsStatus(t("notifications.notSupported"));
+      if (checkbox) checkbox.checked = false;
+      return;
+    }
+    try {
+      const permission = await doc.defaultView.Notification.requestPermission();
+      if (permission !== "granted") {
+        setNotificationsStatus(t("notifications.permissionDenied"));
+        if (checkbox) checkbox.checked = false;
+        return;
+      }
+      const registration = await doc.defaultView.navigator.serviceWorker.ready;
+      // Avoid double-subscribing (and rotating the endpoint/keys for no
+      // reason) if this profile already has an active push subscription.
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe(
+          buildPushSubscribeOptions(VAPID_PUBLIC_KEY_RAW_BASE64URL)
+        );
+      }
+      const serialized = serializeSubscriptionForAnnounce(subscription);
+      if (!serialized) {
+        setNotificationsStatus(t("status.error", { msg: "invalid subscription" }));
+        if (checkbox) checkbox.checked = false;
+        return;
+      }
+      const { endpoint, keys } = serialized;
+      await put("profile", ownPushSubscriptionKey(state.senderKey), { endpoint, keys });
+      if (state.channel && state.sessionKey) {
+        state.channel.send(
+          await encryptMessage(state.sessionKey, JSON.stringify({ type: "push-subscription-announce", endpoint, keys }))
+        );
+      }
+      setNotificationsStatus(t("notifications.enabled"));
+    } catch (err) {
+      setNotificationsStatus(t("status.error", { msg: err.message }));
+      if (checkbox) checkbox.checked = false;
+    }
+  }
+  el("notifications-enabled")?.addEventListener("change", () => {
+    if (el("notifications-enabled").checked) {
+      enableNotifications();
+    }
+  });
+  /* c8 ignore stop */
 
   // Section E: publishing/managing own linked-identity proofs.
   const setProofsStatus = (text) => {
@@ -1255,6 +1364,7 @@ export function initApp(doc, options) {
     el("portable-password-input").value = "";
     resetOwnProofsState();
     renderGuestQuickActions();
+    renderNotificationsCard();
     setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
     setPortableLoginStatus("");
     // Exec review: same session/MRU bookkeeping as the regular unlock path,
@@ -1284,6 +1394,7 @@ export function initApp(doc, options) {
       state.nickname = await getNickname(state.senderKey);
       resetOwnProofsState();
       renderGuestQuickActions();
+      renderNotificationsCard();
       setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
       setProfileStatus("");
       // A legacy record migrates on unlock -- its id changes to the
@@ -1325,6 +1436,7 @@ export function initApp(doc, options) {
     el("profile-passphrase").value = "";
     resetOwnProofsState();
     renderGuestQuickActions();
+    renderNotificationsCard();
     const nickname = el("nickname-input").value.trim();
     if (nickname) {
       await setNickname(state.senderKey, nickname);
@@ -1477,6 +1589,7 @@ export function initApp(doc, options) {
     setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
     resetOwnProofsState();
     renderGuestQuickActions();
+    renderNotificationsCard();
     await initiateChatSession();
   });
 
@@ -1614,6 +1727,7 @@ export function initApp(doc, options) {
           state.senderKey = await fingerprint(identityKeyPair.publicKey);
           resetOwnProofsState();
           renderGuestQuickActions();
+          renderNotificationsCard();
           setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
           setDeviceLinkStatus(t("device.done"));
           router.navigate("profile");
@@ -1715,6 +1829,7 @@ export function initApp(doc, options) {
         setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
         resetOwnProofsState();
         renderGuestQuickActions();
+        renderNotificationsCard();
 
         state.peerFingerprint = null;
         state.sessionEcdhWires = null;
@@ -1759,6 +1874,7 @@ export function initApp(doc, options) {
         setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
         resetOwnProofsState();
         renderGuestQuickActions();
+        renderNotificationsCard();
         await initiateChatSession();
       } finally {
         quickChatButton.disabled = false;

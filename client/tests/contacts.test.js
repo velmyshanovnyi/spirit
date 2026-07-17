@@ -1,6 +1,13 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { IDBFactory } from "fake-indexeddb";
-import { rememberContact, getContact, updateContactDeviceList, updateContactProofSet, listContacts } from "../js/contacts.js";
+import {
+  rememberContact,
+  getContact,
+  updateContactDeviceList,
+  updateContactProofSet,
+  updateContactPushSubscription,
+  listContacts
+} from "../js/contacts.js";
 
 beforeEach(() => {
   global.indexedDB = new IDBFactory();
@@ -13,7 +20,7 @@ describe("rememberContact / getContact", () => {
     const { status, contact } = await rememberContact({ fingerprint: FP, identityPubkeyWire: "PUB_WIRE", now: 1234 });
 
     expect(status).toBe("new");
-    expect(contact).toEqual({ fingerprint: FP, identityPubkeyWire: "PUB_WIRE", firstSeen: 1234, deviceList: null, nickname: null, proofSet: null });
+    expect(contact).toEqual({ fingerprint: FP, identityPubkeyWire: "PUB_WIRE", firstSeen: 1234, deviceList: null, nickname: null, proofSet: null, pushSubscription: null });
     expect(await getContact(FP)).toEqual(contact);
   });
 
@@ -45,7 +52,8 @@ describe("updateContactDeviceList", () => {
       firstSeen: 1234,
       deviceList,
       nickname: null,
-      proofSet: null
+      proofSet: null,
+      pushSubscription: null
     });
   });
 
@@ -67,7 +75,8 @@ describe("updateContactProofSet (Section C)", () => {
       firstSeen: 1234,
       deviceList: null,
       nickname: null,
-      proofSet
+      proofSet,
+      pushSubscription: null
     });
   });
 
@@ -95,8 +104,34 @@ describe("listContacts", () => {
       firstSeen: 1000,
       deviceList: null,
       nickname: null,
-      proofSet: null
+      proofSet: null,
+      pushSubscription: null
     });
+  });
+});
+
+describe("updateContactPushSubscription (Section PN4)", () => {
+  it("stores the push subscription on the existing contact, preserving the rest of the record", async () => {
+    await rememberContact({ fingerprint: FP, identityPubkeyWire: "PUB_WIRE", now: 1234 });
+    const pushSubscription = { endpoint: "https://push.example/x", keys: { p256dh: "p", auth: "a" } };
+
+    await updateContactPushSubscription(FP, pushSubscription);
+
+    expect(await getContact(FP)).toEqual({
+      fingerprint: FP,
+      identityPubkeyWire: "PUB_WIRE",
+      firstSeen: 1234,
+      deviceList: null,
+      nickname: null,
+      proofSet: null,
+      pushSubscription
+    });
+  });
+
+  it("throws for an unknown contact instead of creating an orphan record", async () => {
+    await expect(
+      updateContactPushSubscription("f".repeat(64), { endpoint: "https://push.example/x", keys: {} })
+    ).rejects.toThrow(/unknown contact/i);
   });
 });
 

@@ -22,7 +22,15 @@ export async function rememberContact({ fingerprint, identityPubkeyWire, nicknam
     }
     return { status: "known", contact: existing };
   }
-  const contact = { fingerprint, identityPubkeyWire, firstSeen: now, deviceList: null, nickname, proofSet: null };
+  const contact = {
+    fingerprint,
+    identityPubkeyWire,
+    firstSeen: now,
+    deviceList: null,
+    nickname,
+    proofSet: null,
+    pushSubscription: null
+  };
   await put("contacts", fingerprint, contact);
   return { status: "new", contact };
 }
@@ -65,4 +73,18 @@ export async function updateContactProofSet(fingerprint, proofSet) {
     throw new Error(`Unknown contact: ${fingerprint}`);
   }
   await put("contacts", fingerprint, { ...existing, proofSet });
+}
+
+/**
+ * Replaces the contact's held push subscription (Section PN4, {endpoint,
+ * keys} as produced by pushSubscription.js's serializeSubscriptionForAnnounce
+ * / parsePushSubscriptionAnnounce). Same orphan-record guard as
+ * updateContactDeviceList/updateContactProofSet.
+ */
+export async function updateContactPushSubscription(fingerprint, pushSubscription) {
+  const existing = await get("contacts", fingerprint);
+  if (!existing) {
+    throw new Error(`Unknown contact: ${fingerprint}`);
+  }
+  await put("contacts", fingerprint, { ...existing, pushSubscription });
 }
