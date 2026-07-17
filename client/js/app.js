@@ -47,7 +47,7 @@ import { initTheme, toggleTheme } from "./theme.js";
 import { formatSpiritId } from "./spiritId.js";
 import { initRouter } from "./router.js";
 import { adminLogin, getAdminConfig } from "./adminAuth.js";
-import { rememberSession, getRememberedProfileId, recordRecentAccount, getRecentAccounts } from "./session.js";
+import { rememberSession, getRememberedProfileId, recordRecentAccount, getRecentAccounts, forgetSession } from "./session.js";
 
 // Order controls display order in the read-only admin panel.
 const ADMIN_CONFIG_FIELDS = [
@@ -283,6 +283,17 @@ export function initApp(
   }
   el("btn-invite-from-chat").addEventListener("click", copyInviteLink);
 
+  // Section H3 (specs/ui/chat-first-redesign.md): "Створити"/"Увійти" quick
+  // actions in the header, visible only while no identity exists yet --
+  // called at every identity-establishing/clearing point in this file,
+  // mirroring the existing resetOwnProofsState() call-site pattern.
+  function renderGuestQuickActions() {
+    const bar = el("guest-quick-actions");
+    if (!bar) return;
+    bar.hidden = !!state.senderKey;
+  }
+  renderGuestQuickActions(); // set the correct initial visibility on load
+
   // Section E (specs/phase2c/identity-verification.md): in-memory verification
   // status per (contact fingerprint, proof url) -- re-derived from a live
   // fetch each check, so it doesn't need to survive a reload. `null`
@@ -385,6 +396,79 @@ export function initApp(
     defaultRoute: "account",
     gatedRoutes: GATED_ROUTES,
     hasIdentity: () => !!state.senderKey
+  });
+
+  // Section H2 (specs/ui/chat-first-redesign.md): the old always-visible top
+  // nav collapsed into a "⚙️ Налаштування" dropdown, in the same spirit as
+  // Telegram's settings menu -- opens on toggle click, closes on selecting an
+  // item, closes on an outside click, toggles closed on a second press of
+  // the button itself.
+  const settingsToggle = el("btn-settings-toggle");
+  const settingsMenu = el("settings-menu");
+  if (settingsToggle && settingsMenu) {
+    const closeSettingsMenu = () => {
+      settingsMenu.hidden = true;
+      settingsToggle.setAttribute("aria-expanded", "false");
+    };
+    const openSettingsMenu = () => {
+      settingsMenu.hidden = false;
+      settingsToggle.setAttribute("aria-expanded", "true");
+    };
+    settingsToggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (settingsMenu.hidden) openSettingsMenu();
+      else closeSettingsMenu();
+    });
+    settingsMenu.addEventListener("click", (event) => {
+      // Let the nav-item's own navigation/logout handler run first, then
+      // close -- this listener only needs to react to "some item was picked."
+      if (event.target.closest(".nav-item")) closeSettingsMenu();
+    });
+    doc.addEventListener("click", (event) => {
+      if (!settingsMenu.hidden && !settingsMenu.contains(event.target) && event.target !== settingsToggle) {
+        closeSettingsMenu();
+      }
+    });
+  }
+
+  // Section H3: quick "Створити"/"Увійти" header actions for guests -- reuse
+  // the account screen's existing create/login toggle rather than duplicate
+  // it. Full modal presentation (Section H4) is a separate, larger follow-up.
+  el("btn-quick-create")?.addEventListener("click", () => {
+    router.navigate("account");
+    el("link-switch-to-create")?.click();
+  });
+  el("btn-quick-login")?.addEventListener("click", () => {
+    router.navigate("account");
+    el("link-switch-to-login")?.click();
+  });
+
+  el("btn-logout")?.addEventListener("click", () => {
+    if (state.channel) state.channel.close?.();
+    if (state.pc) state.pc.close?.();
+    if (state.localStream) {
+      for (const track of state.localStream.getTracks()) track.stop();
+    }
+    forgetSession();
+    state.identityKeyPair = null;
+    state.senderKey = null;
+    state.nickname = null;
+    state.channel = null;
+    state.pc = null;
+    state.sessionKey = null;
+    state.localStream = null;
+    state.peerFingerprint = null;
+    state.peerIdentityPublicKey = null;
+    state.sessionEcdhWires = null;
+    // exec review finding: without these, a fresh post-logout session could
+    // inherit stale flags from the ended one -- e.g. acquireLocalStream()'s
+    // one-time addLocalMediaTracks guard staying "already added" and silently
+    // skipping media on the NEW peer connection.
+    state.isInviteOwner = false;
+    state.localTracksAddedToPeer = false;
+    setDynamicText(el("pub-key-display"), "");
+    renderGuestQuickActions();
+    router.navigate("account");
   });
 
   const setAdminStatus = (text) => {
@@ -882,6 +966,7 @@ export function initApp(
       state.senderKey = await fingerprint(state.identityKeyPair.publicKey);
       setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
       resetOwnProofsState();
+      renderGuestQuickActions();
       router.navigate("room");
     });
   }
@@ -1125,6 +1210,7 @@ export function initApp(
     state.nickname = await getNickname(state.senderKey);
     el("portable-password-input").value = "";
     resetOwnProofsState();
+    renderGuestQuickActions();
     setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
     setPortableLoginStatus("");
     // Exec review: same session/MRU bookkeeping as the regular unlock path,
@@ -1153,6 +1239,7 @@ export function initApp(
       state.senderKey = profile.profileId;
       state.nickname = await getNickname(state.senderKey);
       resetOwnProofsState();
+      renderGuestQuickActions();
       setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
       setProfileStatus("");
       // A legacy record migrates on unlock -- its id changes to the
@@ -1193,6 +1280,7 @@ export function initApp(
     // Don't keep the secret sitting in a DOM input after it's been used.
     el("profile-passphrase").value = "";
     resetOwnProofsState();
+    renderGuestQuickActions();
     const nickname = el("nickname-input").value.trim();
     if (nickname) {
       await setNickname(state.senderKey, nickname);
@@ -1333,6 +1421,7 @@ export function initApp(
     state.nickname = generateAnonymousNickname();
     setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
     resetOwnProofsState();
+    renderGuestQuickActions();
     await initiateChatSession();
   });
 
@@ -1469,6 +1558,7 @@ export function initApp(
           state.identityKeyPair = identityKeyPair;
           state.senderKey = await fingerprint(identityKeyPair.publicKey);
           resetOwnProofsState();
+          renderGuestQuickActions();
           setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
           setDeviceLinkStatus(t("device.done"));
           router.navigate("profile");
@@ -1569,6 +1659,7 @@ export function initApp(
         state.nickname = generateAnonymousNickname();
         setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
         resetOwnProofsState();
+        renderGuestQuickActions();
 
         state.peerFingerprint = null;
         state.sessionEcdhWires = null;

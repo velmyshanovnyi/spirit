@@ -404,6 +404,44 @@ button:disabled {
   }
 }
 
+/* ---------- Navigation: settings dropdown (Section H2) ---------- */
+
+.settings-wrap {
+  position: relative;
+}
+
+.settings-wrap .app-nav {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 101; /* above .modal-overlay's 100 -- a menu opened from within a
+                   modal (e.g. future H4 forms) must still be reachable */
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 180px;
+  padding: 6px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+
+.settings-wrap .nav-item {
+  flex-direction: row;
+  justify-content: flex-start;
+  width: 100%;
+  background: none;
+  border: none;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+#guest-quick-actions {
+  gap: 6px;
+}
+
 /* ---------- Navigation (bottom tab bar on mobile, top bar on desktop) ---------- */
 
 .app-nav {

@@ -20,9 +20,42 @@
 <body>
   <header class="app-header">
     <div class="brand"><span class="logo">S</span> Spirit</div>
+    <div id="guest-quick-actions" class="header-controls">
+      <button id="btn-quick-create" type="button" class="btn-link" data-i18n="quick.create">Створити</button>
+      <button id="btn-quick-login" type="button" class="btn-link" data-i18n="quick.login">Увійти</button>
+    </div>
     <div class="header-controls">
       <select id="lang-select" aria-label="Language"></select>
       <button id="theme-toggle" type="button" class="btn-icon" data-i18n-title="theme.toggle" aria-label="Theme">◐</button>
+      <div class="settings-wrap">
+        <button id="btn-settings-toggle" type="button" class="btn-icon" data-i18n-title="menu.settings" aria-haspopup="true" aria-expanded="false" aria-label="Settings">⚙️</button>
+        <nav id="settings-menu" class="app-nav" aria-label="Screens" hidden>
+          <a class="nav-item" data-route="profile" href="#/profile">
+            <span class="nav-icon" aria-hidden="true">☺</span><span data-i18n="nav.profile">Профіль</span>
+          </a>
+          <a class="nav-item" data-route="room" href="#/room">
+            <span class="nav-icon" aria-hidden="true">🔑</span><span data-i18n="nav.room">Кімната</span>
+          </a>
+          <a class="nav-item" data-route="conversation" href="#/conversation">
+            <span class="nav-icon" aria-hidden="true">💬</span><span data-i18n="nav.conversation">Чат</span>
+          </a>
+          <a class="nav-item" data-route="contacts" href="#/contacts">
+            <span class="nav-icon" aria-hidden="true">☰</span><span data-i18n="nav.contacts">Контакти</span>
+          </a>
+          <a class="nav-item" data-route="history" href="#/history">
+            <span class="nav-icon" aria-hidden="true">🕘</span><span data-i18n="nav.history">Історія</span>
+          </a>
+          <a class="nav-item" data-route="server" href="#/server">
+            <span class="nav-icon" aria-hidden="true">☁</span><span data-i18n="nav.server">Сервер</span>
+          </a>
+          <a class="nav-item" data-route="account" href="#/account" hidden>
+            <span class="nav-icon" aria-hidden="true">＋</span><span data-i18n="nav.account">Акаунт</span>
+          </a>
+          <button id="btn-logout" type="button" class="nav-item">
+            <span class="nav-icon" aria-hidden="true">⏻</span><span data-i18n="menu.logout">Вийти</span>
+          </button>
+        </nav>
+      </div>
     </div>
   </header>
 
@@ -35,30 +68,6 @@
       </div>
     </div>
   </div>
-
-  <nav class="app-nav" aria-label="Screens">
-    <a class="nav-item" data-route="account" href="#/account">
-      <span class="nav-icon" aria-hidden="true">＋</span><span data-i18n="nav.account">Акаунт</span>
-    </a>
-    <a class="nav-item" data-route="profile" href="#/profile">
-      <span class="nav-icon" aria-hidden="true">☺</span><span data-i18n="nav.profile">Профіль</span>
-    </a>
-    <a class="nav-item" data-route="server" href="#/server">
-      <span class="nav-icon" aria-hidden="true">☁</span><span data-i18n="nav.server">Сервер</span>
-    </a>
-    <a class="nav-item" data-route="room" href="#/room">
-      <span class="nav-icon" aria-hidden="true">🔑</span><span data-i18n="nav.room">Кімната</span>
-    </a>
-    <a class="nav-item" data-route="conversation" href="#/conversation">
-      <span class="nav-icon" aria-hidden="true">💬</span><span data-i18n="nav.conversation">Розмова</span>
-    </a>
-    <a class="nav-item" data-route="contacts" href="#/contacts">
-      <span class="nav-icon" aria-hidden="true">☰</span><span data-i18n="nav.contacts">Контакти</span>
-    </a>
-    <a class="nav-item" data-route="history" href="#/history">
-      <span class="nav-icon" aria-hidden="true">🕘</span><span data-i18n="nav.history">Історія</span>
-    </a>
-  </nav>
 
   <main class="layout">
 

@@ -169,8 +169,14 @@ const ROUTES = ["account", "profile", "server", "room", "conversation", "contact
 const HTML = `
   <button id="theme-toggle" type="button"></button>
   <select id="lang-select"></select>
-  <nav>
+  <div id="guest-quick-actions" hidden>
+    <button id="btn-quick-create" type="button"></button>
+    <button id="btn-quick-login" type="button"></button>
+  </div>
+  <button id="btn-settings-toggle" type="button" aria-expanded="false"></button>
+  <nav id="settings-menu" hidden>
     ${ROUTES.map((r) => `<a class="nav-item" data-route="${r}" href="#/${r}">${r}</a>`).join("")}
+    <button id="btn-logout" type="button" class="nav-item"></button>
   </nav>
   <div id="welcome-modal" hidden>
     <h2 id="welcome-title" data-i18n="welcome.title"></h2>
@@ -510,6 +516,142 @@ describe("server admin panel (read-only, Section S)", () => {
     expect(document.getElementById("admin-login-form").hidden).toBeFalsy();
     expect(document.getElementById("admin-config-list").hidden).toBe(true);
     expect(getAdminConfig).not.toHaveBeenCalled();
+  });
+});
+
+describe("settings menu replacing the top nav (Section H2)", () => {
+  it("opens the settings menu on toggle click, and closes it when a menu item is clicked", () => {
+    initApp(document, { locale: "uk" });
+    const toggle = document.getElementById("btn-settings-toggle");
+    const menu = document.getElementById("settings-menu");
+
+    toggle.click();
+    expect(menu.hidden).toBe(false);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+
+    document.querySelector('.nav-item[data-route="profile"]').click();
+    expect(menu.hidden).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("closes the settings menu on an outside click, same as Telegram-style dropdowns", () => {
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-settings-toggle").click();
+    expect(document.getElementById("settings-menu").hidden).toBe(false);
+
+    document.body.click();
+    expect(document.getElementById("settings-menu").hidden).toBe(true);
+  });
+
+  it("toggles closed on a second click of the settings button itself", () => {
+    initApp(document, { locale: "uk" });
+    const toggle = document.getElementById("btn-settings-toggle");
+    toggle.click();
+    expect(document.getElementById("settings-menu").hidden).toBe(false);
+    toggle.click();
+    expect(document.getElementById("settings-menu").hidden).toBe(true);
+  });
+
+  it("Вийти resets the identity and returns to the account screen", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+
+    document.getElementById("btn-settings-toggle").click();
+    document.getElementById("btn-logout").click();
+
+    expect(visibleScreens()).toEqual(["account"]);
+    expect(document.getElementById("settings-menu").hidden).toBe(true);
+    // A subsequent "Ініціювати чат" without regenerating identity must be
+    // refused, same as a truly fresh visitor -- proof the identity is gone.
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() =>
+      expect(document.getElementById("connection-status").textContent).toMatch(/спочатку створіть акаунт/)
+    );
+  });
+
+  it("resets the one-time addLocalMediaTracks guard, so a NEW session after Вийти can add local media again (exec review finding)", async () => {
+    const stream = { getTracks: () => [] };
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn().mockResolvedValue(stream) },
+      configurable: true
+    });
+
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createRenegotiationOffer.mockResolvedValue({ type: "offer", sdp: "RENEG_OFFER" });
+    encryptMessage.mockResolvedValue("X");
+
+    let captured;
+    const pc1 = { __fakePc: "first" };
+    startAsInitiator.mockImplementationOnce((opts) => {
+      captured = opts;
+      return pc1;
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-quick-chat").click();
+    await vi.waitFor(() => expect(captured).toBeDefined());
+    captured.onChannelOpen(fakeChannel());
+    document.getElementById("btn-start-call").click();
+    await vi.waitFor(() => expect(addLocalMediaTracks).toHaveBeenCalledWith(pc1, stream));
+    expect(addLocalMediaTracks).toHaveBeenCalledTimes(1);
+
+    document.getElementById("btn-settings-toggle").click();
+    document.getElementById("btn-logout").click();
+
+    // A brand-new session's own call flow must be able to add local media
+    // again -- if state.localTracksAddedToPeer weren't reset by Вийти, this
+    // second session's btn-start-call would silently skip addLocalMediaTracks.
+    let captured2;
+    const pc2 = { __fakePc: "second" };
+    startAsInitiator.mockImplementationOnce((opts) => {
+      captured2 = opts;
+      return pc2;
+    });
+    document.getElementById("btn-quick-chat").click();
+    await vi.waitFor(() => expect(captured2).toBeDefined());
+    captured2.onChannelOpen(fakeChannel());
+    document.getElementById("btn-start-call").click();
+    await vi.waitFor(() => expect(addLocalMediaTracks).toHaveBeenCalledWith(pc2, stream));
+    expect(addLocalMediaTracks).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("guest quick actions (create/login) in the header when unauthenticated (Section H3)", () => {
+  it("shows Створити/Увійти when there is no identity yet", () => {
+    initApp(document, { locale: "uk" });
+    expect(document.getElementById("guest-quick-actions").hidden).toBe(false);
+  });
+
+  it("hides Створити/Увійти once an identity exists", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+
+    expect(document.getElementById("guest-quick-actions").hidden).toBe(true);
+  });
+
+  it("shows the quick actions again after Вийти", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("guest-quick-actions").hidden).toBe(true));
+
+    document.getElementById("btn-settings-toggle").click();
+    document.getElementById("btn-logout").click();
+
+    expect(document.getElementById("guest-quick-actions").hidden).toBe(false);
   });
 });
 

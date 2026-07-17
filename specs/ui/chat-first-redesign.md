@@ -10,15 +10,15 @@
 
 ## Секція H2: Налаштування-меню замість верхньої навігації
 
-- [ ] **Tests**: клік на кнопку "⚙️ Налаштування" (праворуч від theme-toggle) відкриває панель з пунктами Профіль/Кімната/Чат/Контакти/Історія/Сервер/Вийти; клік по пункту навігує на відповідний route і закриває панель; "Вийти" скидає ідентичність і повертає на дефолтний екран.
-- [ ] **Impl**: `client/index.html` (кнопка + dropdown-панель, existing `.nav-item` посилання переносяться туди ж — той самий `data-route`/`href`, щоб роутер не змінювався), `client/css/style.css`, `client/js/app.js` (toggle-логіка панелі, обробник "Вийти").
-- [ ] **Exec review**: —
+- [x] **Tests**: клік на кнопку "⚙️ Налаштування" (праворуч від theme-toggle) відкриває панель з пунктами Профіль/Кімната/Чат/Контакти/Історія/Сервер/Вийти; клік по пункту закриває панель; клік поза межами панелі закриває її (Telegram-стиль); повторний клік на toggle закриває; "Вийти" скидає ідентичність, закриває будь-яке активне з'єднання, зупиняє локальні медіа-треки, скидає ratchet/invite-owner прапорці (exec review iter1 знахідка) і повертає на екран "account". 6/6 нових тестів.
+- [x] **Impl**: `client/index.html` (`#btn-settings-toggle` + `#settings-menu` dropdown, наявні `.nav-item` посилання перенесені туди ж, "Акаунт" лишився в DOM для роутера, але прихований — доступ тепер через H3), `client/css/style.css` (`.settings-wrap`, `z-index:101`), `client/js/app.js` (toggle/outside-click/close-on-item-click логіка, обробник `btn-logout` через наявний `forgetSession()`), `client/js/i18n.js` (`menu.settings`/`menu.logout` у 11 локалях).
+- [x] **Exec review**: iter1 — [reviews/chat-first-redesign-H2-H3-iter1.md](../reviews/chat-first-redesign-H2-H3-iter1.md). 2 знахідки (дубльовані виклики `renderGuestQuickActions()` через мех. заміну; logout не скидав `isInviteOwner`/`localTracksAddedToPeer`/`peerIdentityPublicKey`) — обидві виправлено. iter2 — [reviews/chat-first-redesign-H2-H3-iter2.md](../reviews/chat-first-redesign-H2-H3-iter2.md), збіжність, нуль нових знахідок.
 
 ## Секція H3: Ліва панель швидких дій для неавторизованих
 
-- [ ] **Tests**: якщо немає `state.senderKey`, ліворуч від вибору мови показуються "Створити"/"Увійти" (відкривають модалки, не навігують); якщо є identity — панель прихована.
-- [ ] **Impl**: `client/index.html`, `client/js/app.js`.
-- [ ] **Exec review**: —
+- [x] **Tests**: якщо немає `state.senderKey`, ліворуч від вибору мови показуються "Створити"/"Увійти"; якщо є identity — прихована; знову з'являється після "Вийти". 3/3 нових тестів.
+- [x] **Impl**: `client/index.html` (`#guest-quick-actions`), `client/js/app.js` (`renderGuestQuickActions()`, викликається при кожному встановленні/скиданні ідентичності — 7 точок входу через `resetOwnProofsState()`-патерн). **Примітка**: "Створити"/"Увійти" наразі перевикористовують наявний тумблер `link-switch-to-create`/`link-switch-to-login` на екрані "account" (не справжні модалки) — повне модальне подання відкладено до Секції H4.
+- [x] **Exec review**: разом із H2, див. вище.
 
 ## Секція H4: Створити/Увійти як модалки поверх чату
 
