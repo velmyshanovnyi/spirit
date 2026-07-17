@@ -3144,6 +3144,81 @@ describe("instant conversation lobby: local camera/mic preview while waiting (Se
     expect(document.getElementById("btn-toggle-mic").disabled).toBe(false);
   });
 
+  it("defers the camera/mic request by localMediaPreviewDelayMs, so an immediate click elsewhere (e.g. copy-invite) isn't blocked by the permission prompt (bug report 2026-07-17)", async () => {
+    const stream = fakeStream([fakeTrack("video"), fakeTrack("audio")]);
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn().mockResolvedValue(stream) },
+      configurable: true
+    });
+
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    generateAnonymousNickname.mockReturnValue("Тихий Привид");
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    startAsInitiator.mockImplementation(() => ({ __fakePc: true }));
+
+    initApp(document, { locale: "uk", localMediaPreviewDelayMs: 1000 });
+    document.getElementById("btn-quick-chat").click();
+    await vi.waitFor(() => expect(document.getElementById("invite-bar").hidden).toBe(false));
+
+    // Not called yet, well within the delay window.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+
+    // Called once the delay elapses.
+    await vi.waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({ video: true, audio: true }), {
+      timeout: 2000
+    });
+  });
+
+  it("cancels the pending delayed preview on Вийти, so it doesn't re-acquire camera/mic after logout (exec review finding)", async () => {
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn().mockResolvedValue(fakeStream([fakeTrack("video"), fakeTrack("audio")])) },
+      configurable: true
+    });
+
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    generateAnonymousNickname.mockReturnValue("Тихий Привид");
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    startAsInitiator.mockImplementation(() => ({ __fakePc: true }));
+
+    initApp(document, { locale: "uk", localMediaPreviewDelayMs: 300 });
+    document.getElementById("btn-quick-chat").click();
+    await vi.waitFor(() => expect(document.getElementById("invite-bar").hidden).toBe(false));
+
+    // Log out WITHIN the delay window, before the timer has fired.
+    document.getElementById("btn-settings-toggle").click();
+    document.getElementById("btn-logout").click();
+
+    // Give the (cancelled) timer plenty of time to have fired if it wasn't
+    // actually cancelled -- it must NOT have re-acquired media post-logout.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+  });
+
+  it("requests camera+mic immediately when localMediaPreviewDelayMs is 0 (the default, matching every other test in this file)", async () => {
+    const stream = fakeStream([fakeTrack("video"), fakeTrack("audio")]);
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn().mockResolvedValue(stream) },
+      configurable: true
+    });
+
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    generateAnonymousNickname.mockReturnValue("Тихий Привид");
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    startAsInitiator.mockImplementation(() => ({ __fakePc: true }));
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-quick-chat").click();
+
+    await vi.waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({ video: true, audio: true }));
+  });
+
   it("shows the invite bar and starts the camera/mic preview for a manual btn-join too, before the channel opens", async () => {
     const stream = fakeStream([fakeTrack("video"), fakeTrack("audio")]);
     Object.defineProperty(navigator, "mediaDevices", {

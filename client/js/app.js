@@ -75,11 +75,22 @@ const ownProofSetKey = (profileId) => `proofSet:${profileId}`;
 
 const DEFAULT_ICE_TIMEOUT_MS = 15000;
 const DEFAULT_ANSWER_WAIT_TIMEOUT_MS = 5 * 60 * 1000; // matches the signaling node's default session TTL
-
 export function initApp(doc, options) {
   const {
     iceTimeoutMs = DEFAULT_ICE_TIMEOUT_MS,
     answerWaitTimeoutMs = DEFAULT_ANSWER_WAIT_TIMEOUT_MS,
+    // Bug report 2026-07-17: the browser's native camera/mic permission
+    // prompt (triggered by Section F6's auto-preview) blocks clicks on the
+    // REST of the page (including "Скопіювати запрошення", the very first
+    // thing a user landing in the lobby is likely to reach for) until
+    // answered. A short delay before requesting media gives that first,
+    // high-value click a real window to land before the prompt appears --
+    // doesn't eliminate the interruption (browser permission UX can't be
+    // suppressed from page JS), just avoids it winning the race against the
+    // most common first action. Defaults to 0 (instant) to match this
+    // file's existing test suite's expectations; index.html explicitly
+    // opts into the real production delay.
+    localMediaPreviewDelayMs = 0,
     locale,
     // Overridable for tests -- jsdom doesn't implement real navigation, so
     // `location.search =` is a silent no-op there; production always uses
@@ -201,6 +212,11 @@ export function initApp(doc, options) {
     // conversation lobby) must await the SAME call, not start a second
     // concurrent getUserMedia prompt that would orphan the first stream.
     localMediaPreviewPromise: null,
+    // The pending setTimeout id for the delayed auto-preview (Section F6
+    // follow-up, bug report 2026-07-17) -- must be cancelled on logout/
+    // channel-close, otherwise it fires after teardown and re-acquires
+    // camera/mic for a session that no longer exists (exec review finding).
+    localMediaPreviewTimeoutId: null,
     // Whether THIS session's own invite (room-id/invite-token) is still
     // this user's to share -- true for the initiator (btn-initiate/
     // btn-quick-chat), false for the joiner, who never owns the invite.
@@ -464,6 +480,10 @@ export function initApp(doc, options) {
   });
 
   el("btn-logout")?.addEventListener("click", () => {
+    if (state.localMediaPreviewTimeoutId) {
+      clearTimeout(state.localMediaPreviewTimeoutId);
+      state.localMediaPreviewTimeoutId = null;
+    }
     if (state.channel) state.channel.close?.();
     if (state.pc) state.pc.close?.();
     if (state.localStream) {
@@ -800,6 +820,10 @@ export function initApp(doc, options) {
         setStatus(t("status.closed"));
         for (const id of ["btn-start-call", "btn-toggle-camera", "btn-toggle-mic"]) {
           el(id).disabled = true;
+        }
+        if (state.localMediaPreviewTimeoutId) {
+          clearTimeout(state.localMediaPreviewTimeoutId);
+          state.localMediaPreviewTimeoutId = null;
         }
         if (state.localStream) {
           for (const track of state.localStream.getTracks()) track.stop();
@@ -1378,7 +1402,18 @@ export function initApp(doc, options) {
     router.navigate("conversation");
     renderEphemeralBanner();
     renderInviteBar();
-    void previewLocalMedia();
+    if (localMediaPreviewDelayMs > 0) {
+      state.localMediaPreviewTimeoutId = setTimeout(() => {
+        state.localMediaPreviewTimeoutId = null;
+        // Defensive (exec review finding): if logout/channel-close happened
+        // during the delay window but somehow didn't clear this timer, don't
+        // re-acquire media for a session that no longer has an identity.
+        if (!state.senderKey) return;
+        void previewLocalMedia();
+      }, localMediaPreviewDelayMs);
+    } else {
+      void previewLocalMedia();
+    }
   }
 
   /**

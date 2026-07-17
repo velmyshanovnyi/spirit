@@ -316,7 +316,12 @@
 
   <script type="module">
     import { initApp } from "./js/app.js";
-    initApp(document);
+    // autoStartChat: true matches the previous bare initApp(document) call's
+    // implicit default (Section H5). localMediaPreviewDelayMs: real
+    // production delay before the camera/mic permission prompt appears
+    // (Section F6 follow-up, bug report 2026-07-17) -- app.js's own default
+    // is 0 (instant), matching this file's test suite's expectations.
+    initApp(document, { autoStartChat: true, localMediaPreviewDelayMs: 1500 });
   </script>
 </body>
 </html>
