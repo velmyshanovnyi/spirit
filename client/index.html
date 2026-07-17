@@ -235,9 +235,11 @@
     <section data-screen="conversation" class="screen">
       <section class="card card-wide">
         <h2 data-i18n="conversation.heading">Розмова</h2>
+        <div id="invite-bar" hidden class="identity">
+          <button id="btn-invite-from-chat" type="button" class="btn-icon" aria-label="Запросити">🔗 <span data-i18n="btn.copyInvite">Скопіювати запрошення</span></button>
+        </div>
         <div id="ephemeral-identity-banner" hidden class="identity">
           <span data-i18n="ephemeral.youAre">Ви зараз:</span> <strong id="ephemeral-nickname-display"></strong>
-          <button id="btn-invite-from-chat" type="button" class="btn-icon" data-i18n-title="btn.copyInvite" aria-label="Запросити">🔗</button>
         </div>
         <div class="video-area">
           <video id="video-remote" class="video-tile video-tile-remote" autoplay playsinline></video>

@@ -255,9 +255,11 @@ const HTML = `
   </section>
 
   <section data-screen="conversation">
+    <div id="invite-bar" hidden>
+      <button id="btn-invite-from-chat" type="button">Скопіювати запрошення</button>
+    </div>
     <div id="ephemeral-identity-banner" hidden>
       <span id="ephemeral-nickname-display"></span>
-      <button id="btn-invite-from-chat" type="button">Запросити</button>
     </div>
     <video id="video-remote"></video>
     <video id="video-local"></video>
@@ -302,6 +304,18 @@ beforeEach(() => {
   listContacts.mockResolvedValue([]);
   generateAnonymousNickname.mockReturnValue("Тихий Привид");
   generateStrongPassword.mockReturnValue("alpha bravo charlie delta echo foxtrot");
+  // Section F6/instant-lobby: entering the conversation screen fires a
+  // fire-and-forget getUserMedia preview call. Most tests neither need nor
+  // check camera/mic behavior, so the default here NEVER resolves --
+  // harmless (nothing awaits it) and keeps this file's hundreds of
+  // unrelated tests from crashing on "navigator.mediaDevices is undefined"
+  // or racing an unwanted resolved stream into their assertions. Tests that
+  // DO care about media (the "video call" and "instant conversation lobby"
+  // describe blocks) override this locally with a real resolvable mock.
+  Object.defineProperty(navigator, "mediaDevices", {
+    value: { getUserMedia: vi.fn(() => new Promise(() => {})) },
+    configurable: true
+  });
 });
 
 function visibleScreens() {
@@ -356,7 +370,7 @@ describe("btn-quick-chat: zero-click ephemeral 'spirit mode' (Section F3)", () =
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
   });
 
-  it("shows the room screen with the invite link visible WHILE waiting for a peer, instead of leaving the user on a blank account screen (bug report 2026-07-17)", async () => {
+  it("lands straight on the conversation screen with the invite bar visible WHILE waiting for a peer, instead of leaving the user on a blank account screen (bug report 2026-07-17, refined 2026-07-17)", async () => {
     const keyPair = { privateKey: {}, publicKey: fakePublicKey("identity-pub") };
     generateIdentityKeyPair.mockResolvedValue(keyPair);
     fingerprint.mockResolvedValue("sender-fp");
@@ -371,12 +385,14 @@ describe("btn-quick-chat: zero-click ephemeral 'spirit mode' (Section F3)", () =
 
     await vi.waitFor(() => expect(createInvite).toHaveBeenCalled());
     // Before the peer has even joined (onChannelOpen never fires in this
-    // test), the invite must already be visible and shareable -- otherwise
-    // the initiator has no way to hand the link to anyone, and "opening the
-    // ephemeral chat" silently does nothing from their point of view.
-    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+    // test), the conversation screen -- not just an invite-only "room"
+    // screen -- must already be visible with a way to share the invite,
+    // otherwise the initiator has no way to hand the link to anyone, and
+    // "opening the ephemeral chat" silently does nothing from their POV.
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
     expect(document.getElementById("room-id").value).toBe("room1");
     expect(document.getElementById("invite-token").value).toBe("tok1");
+    expect(document.getElementById("invite-bar").hidden).toBe(false);
   });
 
   it("ignores a second click while the auto-initiate flow is already in flight (re-entrancy guard)", async () => {
@@ -2464,6 +2480,9 @@ describe("ephemeral identity banner on conversation screen (Section F5)", () => 
 
     await vi.waitFor(() => expect(document.getElementById("ephemeral-identity-banner").hidden).toBe(false));
     expect(document.getElementById("ephemeral-nickname-display").textContent).toBe("Тихий Привид");
+    // The invite button lives in its own always-available bar now (Section
+    // F6/instant-lobby), not nested inside the ephemeral-only nickname banner.
+    expect(document.getElementById("invite-bar").hidden).toBe(false);
   });
 
   it("hides the banner in permanent-profile mode", async () => {
@@ -2500,6 +2519,10 @@ describe("ephemeral identity banner on conversation screen (Section F5)", () => 
 
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
     expect(document.getElementById("ephemeral-identity-banner").hidden).toBe(true);
+    // The invite bar is NOT ephemeral-only (Section F6/instant-lobby): a
+    // permanent-profile user who initiates a chat still owns the pending
+    // invite and needs a way to share it.
+    expect(document.getElementById("invite-bar").hidden).toBe(false);
   });
 
   it("btn-invite-from-chat copies the invite link, same as btn-copy-invite on the Room screen", async () => {
@@ -2523,7 +2546,7 @@ describe("ephemeral identity banner on conversation screen (Section F5)", () => 
     document.getElementById("btn-quick-chat").click();
     await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
     captured.onChannelOpen(fakeChannel());
-    await vi.waitFor(() => expect(document.getElementById("ephemeral-identity-banner").hidden).toBe(false));
+    await vi.waitFor(() => expect(document.getElementById("invite-bar").hidden).toBe(false));
 
     document.getElementById("btn-invite-from-chat").click();
 
@@ -2560,6 +2583,12 @@ describe("zero-click invite-link auto-join (Section F4)", () => {
     );
     await vi.waitFor(() => expect(startAsJoiner).toHaveBeenCalled());
 
+    // The conversation screen (with its own invite-bar hidden, since the
+    // JOINER doesn't own the invite) must already be visible BEFORE the
+    // channel opens -- the same instant-lobby behavior as the initiator side.
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
+    expect(document.getElementById("invite-bar").hidden).toBe(true);
+
     captured.onChannelOpen(fakeChannel());
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
   });
@@ -2590,6 +2619,166 @@ describe("zero-click invite-link auto-join (Section F4)", () => {
 
     resolveGetOffer({ offer: JSON.stringify({ type: "offer", sdp: "OFFER_SDP" }), ecdhPubkey: "peer-ecdh-b64" });
     await vi.waitFor(() => expect(document.getElementById("btn-quick-chat").disabled).toBe(false));
+  });
+});
+
+describe("instant conversation lobby: local camera/mic preview while waiting (Section F6)", () => {
+  function fakeTrack(kind) {
+    return { kind, enabled: true, stop: vi.fn() };
+  }
+  function fakeStream(tracks) {
+    return { getTracks: () => tracks };
+  }
+
+  it("requests camera+mic and shows local preview immediately on quick-chat, without waiting for the channel to open", async () => {
+    const localTracks = [fakeTrack("video"), fakeTrack("audio")];
+    const stream = fakeStream(localTracks);
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn().mockResolvedValue(stream) },
+      configurable: true
+    });
+
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    generateAnonymousNickname.mockReturnValue("Тихий Привид");
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    startAsInitiator.mockImplementation(() => ({ __fakePc: true }));
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-quick-chat").click();
+
+    // No onChannelOpen anywhere in this test -- the peer never joins.
+    await vi.waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({ video: true, audio: true }));
+    await vi.waitFor(() => expect(document.getElementById("video-local").srcObject).toBe(stream));
+    // Camera/mic toggle must be testable while waiting, not gated on a peer.
+    expect(document.getElementById("btn-toggle-camera").disabled).toBe(false);
+    expect(document.getElementById("btn-toggle-mic").disabled).toBe(false);
+  });
+
+  it("shows the invite bar and starts the camera/mic preview for a manual btn-join too, before the channel opens", async () => {
+    const stream = fakeStream([fakeTrack("video"), fakeTrack("audio")]);
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn().mockResolvedValue(stream) },
+      configurable: true
+    });
+
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    getOffer.mockResolvedValue({ offer: JSON.stringify({ type: "offer", sdp: "OFFER_SDP" }), ecdhPubkey: "peer-ecdh-b64" });
+    startAsJoiner.mockImplementation(() => ({ __fakePc: true }));
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+    document.getElementById("room-id").value = "room1";
+    document.getElementById("invite-token").value = "tok1";
+    document.getElementById("btn-join").click();
+
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
+    expect(document.getElementById("invite-bar").hidden).toBe(true); // joiner never owns the invite
+    await vi.waitFor(() => expect(document.getElementById("video-local").srcObject).toBe(stream));
+  });
+
+  it("reuses the already-previewed stream when the call actually starts -- does not call getUserMedia twice, adds tracks to the peer connection exactly once", async () => {
+    const localTracks = [fakeTrack("video"), fakeTrack("audio")];
+    const stream = fakeStream(localTracks);
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn().mockResolvedValue(stream) },
+      configurable: true
+    });
+
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    generateAnonymousNickname.mockReturnValue("Тихий Привид");
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+    createRenegotiationOffer.mockResolvedValue({ type: "offer", sdp: "RENEG_OFFER" });
+
+    let captured;
+    const pc = { __fakePc: true };
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return pc;
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-quick-chat").click();
+    await vi.waitFor(() => expect(document.getElementById("video-local").srcObject).toBe(stream));
+
+    captured.onChannelOpen(fakeChannel());
+    document.getElementById("btn-start-call").click();
+
+    await vi.waitFor(() => expect(addLocalMediaTracks).toHaveBeenCalledWith(pc, stream));
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
+    expect(addLocalMediaTracks).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a status message instead of crashing when the preview's getUserMedia is denied, and chat still works", async () => {
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn().mockRejectedValue(new Error("Permission denied")) },
+      configurable: true
+    });
+
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    generateAnonymousNickname.mockReturnValue("Тихий Привид");
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    startAsInitiator.mockImplementation(() => ({ __fakePc: true }));
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-quick-chat").click();
+
+    await vi.waitFor(() => expect(document.getElementById("video-status").textContent).toContain("Permission denied"));
+    expect(visibleScreens()).toEqual(["conversation"]);
+    expect(document.getElementById("invite-bar").hidden).toBe(false);
+  });
+
+  it("does not start a second concurrent getUserMedia prompt if the lobby is entered again while the first is still pending (exec review finding)", async () => {
+    let resolveGetUserMedia;
+    const getUserMediaMock = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveGetUserMedia = resolve;
+        })
+    );
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: getUserMediaMock },
+      configurable: true
+    });
+
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    generateAnonymousNickname.mockReturnValue("Тихий Привид");
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    startAsInitiator.mockImplementation(() => ({ __fakePc: true }));
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-quick-chat").click();
+    await vi.waitFor(() => expect(getUserMediaMock).toHaveBeenCalledTimes(1));
+
+    // A second entry into the lobby (e.g. a fast double-click reaching
+    // initiateChatSession a second time) must NOT fire a second getUserMedia
+    // prompt while the first one is still pending -- doing so would orphan
+    // the first stream's tracks (camera left running, never stopped).
+    // withBusyButton re-enables btn-quick-chat as soon as initiateChatSession()
+    // resolves (which happens BEFORE getUserMedia settles, since
+    // startInitiatorSession's own async work isn't awaited) -- give the
+    // second click's own createInvite/generateEcdhKeyPair awaits real time
+    // to actually run before asserting no second getUserMedia call happened.
+    document.getElementById("btn-quick-chat").click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(getUserMediaMock).toHaveBeenCalledTimes(1);
+
+    const stream = fakeStream([fakeTrack("video"), fakeTrack("audio")]);
+    resolveGetUserMedia(stream);
+    await vi.waitFor(() => expect(document.getElementById("video-local").srcObject).toBe(stream));
+    expect(getUserMediaMock).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -2832,11 +3021,17 @@ describe("video call (Section V2)", () => {
 
   it("does not auto-answer a call offer from a peer whose identity hasn't been verified yet", async () => {
     const { captured } = await establishedInitiatorChat();
+    // establishedInitiatorChat() itself already triggers ONE getUserMedia
+    // call for the instant-lobby local preview (Section F6) -- the
+    // invariant under test is that the unverified call offer doesn't
+    // trigger a SECOND one (i.e. doesn't proceed to auto-answer).
+    const previewCallCount = navigator.mediaDevices.getUserMedia.mock.calls.length;
+
     const offerMsg = { type: "webrtc-call-offer", sdp: { type: "offer", sdp: "PEER_OFFER" } };
     decryptMessage.mockResolvedValueOnce(JSON.stringify(offerMsg));
     await captured.onMessage("ENCRYPTED_CALL_OFFER");
 
-    expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(previewCallCount);
     expect(createRenegotiationAnswer).not.toHaveBeenCalled();
   });
 

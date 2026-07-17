@@ -132,9 +132,23 @@ export function initApp(
     // The verified peer identity key -- device-list announces are checked
     // against it (Section 13).
     peerIdentityPublicKey: null,
-    // Own camera/mic MediaStream once a call has been started (Section V2);
-    // null before then and used by the camera/mic toggle buttons.
+    // Own camera/mic MediaStream, acquired for local preview as soon as the
+    // conversation lobby opens (Section F6) -- null before then and used by
+    // the camera/mic toggle buttons.
     localStream: null,
+    // Whether addLocalMediaTracks(state.pc, state.localStream) has already
+    // run for the current call -- acquireLocalStream() must only add tracks
+    // to the peer connection once, even though it may be called again.
+    localTracksAddedToPeer: false,
+    // The in-flight previewLocalMedia() promise, if any -- a second call
+    // while getUserMedia is still pending (e.g. a fast double-click into the
+    // conversation lobby) must await the SAME call, not start a second
+    // concurrent getUserMedia prompt that would orphan the first stream.
+    localMediaPreviewPromise: null,
+    // Whether THIS session's own invite (room-id/invite-token) is still
+    // this user's to share -- true for the initiator (btn-initiate/
+    // btn-quick-chat), false for the joiner, who never owns the invite.
+    isInviteOwner: false,
     // Own display name (Section 16), loaded from profile.js's unencrypted
     // nickname record on create/unlock; null in ephemeral quick-chat mode.
     nickname: null
@@ -209,11 +223,11 @@ export function initApp(
   }
   el("btn-copy-invite").addEventListener("click", copyInviteLink);
 
-  // Section F5 (specs/ui/ephemeral-spirit-mode.md): a temp nickname + invite
-  // button on the conversation screen itself, shown only in ephemeral mode
-  // (a nickname exists but there's no permanent-profile vault) -- a
-  // profile-mode identity with its own nickname (Section 16) has no need
-  // for this, since it isn't "one-time" in the same sense.
+  // Section F5 (specs/ui/ephemeral-spirit-mode.md): a temp nickname banner on
+  // the conversation screen itself, shown only in ephemeral mode (a nickname
+  // exists but there's no permanent-profile vault) -- a profile-mode identity
+  // with its own nickname (Section 16) has no need for this, since it isn't
+  // "one-time" in the same sense.
   function renderEphemeralBanner() {
     const banner = el("ephemeral-identity-banner");
     if (!banner) return;
@@ -222,6 +236,17 @@ export function initApp(
     if (isEphemeral) {
       el("ephemeral-nickname-display").textContent = state.nickname;
     }
+  }
+
+  // Section F6 (instant conversation lobby, 2026-07-17): the invite-copy
+  // control is its own bar, independent of the ephemeral nickname banner --
+  // it's for whichever side owns the pending invite (initiator, ephemeral OR
+  // permanent-profile alike), not gated on ephemeral mode the way the
+  // nickname display is.
+  function renderInviteBar() {
+    const bar = el("invite-bar");
+    if (!bar) return;
+    bar.hidden = !state.isInviteOwner;
   }
   el("btn-invite-from-chat").addEventListener("click", copyInviteLink);
 
@@ -406,15 +431,44 @@ export function initApp(
     el("video-status").textContent = text;
   };
 
-  // Auto-accept (Section V2, specs/ui/video-call.md): requesting our own
-  // camera+mic is how we both show local video AND have tracks to answer
-  // with -- there is no separate accept/reject step for the MVP.
-  async function acquireLocalStream() {
+  // Section F6 (instant conversation lobby, 2026-07-17): local camera/mic
+  // preview only -- no peer connection involved, so this is safe to call the
+  // moment the conversation screen opens, before any peer has joined. Errors
+  // (permission denied, no camera) are reported via video-status but never
+  // block the chat itself.
+  async function previewLocalMedia() {
     if (state.localStream) return state.localStream;
-    const stream = await doc.defaultView.navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    state.localStream = stream;
-    el("video-local").srcObject = stream;
-    addLocalMediaTracks(state.pc, stream);
+    if (state.localMediaPreviewPromise) return state.localMediaPreviewPromise;
+    state.localMediaPreviewPromise = (async () => {
+      try {
+        const stream = await doc.defaultView.navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        state.localStream = stream;
+        el("video-local").srcObject = stream;
+        el("btn-toggle-camera").disabled = false;
+        el("btn-toggle-mic").disabled = false;
+        return stream;
+      } catch (err) {
+        setVideoStatus(t("status.error", { msg: err.message }));
+        return null;
+      } finally {
+        state.localMediaPreviewPromise = null;
+      }
+    })();
+    return state.localMediaPreviewPromise;
+  }
+
+  // Auto-accept (Section V2, specs/ui/video-call.md): actually PUSHING our
+  // camera+mic to the peer, once a chat channel exists to renegotiate over.
+  // Reuses whatever previewLocalMedia() already acquired rather than
+  // prompting getUserMedia a second time, and only ever adds tracks to the
+  // peer connection once (a second btn-start-call click must not duplicate
+  // tracks on the same pc).
+  async function acquireLocalStream() {
+    const stream = await previewLocalMedia();
+    if (stream && !state.localTracksAddedToPeer) {
+      addLocalMediaTracks(state.pc, stream);
+      state.localTracksAddedToPeer = true;
+    }
     return stream;
   }
 
@@ -614,6 +668,7 @@ export function initApp(
           for (const track of state.localStream.getTracks()) track.stop();
           state.localStream = null;
         }
+        state.localTracksAddedToPeer = false;
       },
       onError: (err) => {
         disarmIceTimeout(); // the local-description IIFE failed before onLocalOfferReady/onLocalAnswerReady
@@ -1171,6 +1226,21 @@ export function initApp(
   });
 
   /**
+   * Section F6 (instant conversation lobby, 2026-07-17): land on the
+   * conversation screen (invite bar + local camera/mic preview, both usable
+   * before any peer has joined) the moment THIS side's own session starts --
+   * not only once the data channel actually opens. Shared by both the
+   * initiator (owns the invite) and the joiner (doesn't).
+   */
+  function enterConversationLobby({ ownsInvite }) {
+    state.isInviteOwner = ownsInvite;
+    router.navigate("conversation");
+    renderEphemeralBanner();
+    renderInviteBar();
+    void previewLocalMedia();
+  }
+
+  /**
    * Shared by "Ініціювати чат" (explicit, profile-mode-friendly) and the
    * zero-click "Швидкий анонімний чат" (Section F3, specs/ui/ephemeral-spirit-mode.md)
    * -- both need an already-established state.senderKey/identityKeyPair.
@@ -1184,10 +1254,11 @@ export function initApp(
     const { roomId, inviteToken } = await createInvite(serverUrl, senderKey);
     el("room-id").value = roomId;
     el("invite-token").value = inviteToken;
-    // Show the invite immediately, before a peer has joined -- otherwise the
-    // initiator (quick-chat especially) has no way to share the link and
-    // "opening the chat" silently does nothing from their point of view.
-    router.navigate("room");
+    // Land on the conversation lobby immediately, before a peer has joined --
+    // otherwise the initiator (quick-chat especially) has no way to share
+    // the link or test their camera/mic, and "opening the chat" silently
+    // does nothing from their point of view.
+    enterConversationLobby({ ownsInvite: true });
 
     state.peerFingerprint = null;
     state.sessionEcdhWires = null;
@@ -1199,14 +1270,11 @@ export function initApp(
       inviteToken,
       serverUrl,
       rtcConfig,
-      // Chat entry point (unlike device linking, which reuses the same
-      // session helpers but must NOT jump to the conversation screen):
-      // once the data channel is actually open, the user has something to
-      // look at, so move them straight to the conversation screen.
+      // Device linking reuses these same session helpers but must NOT jump
+      // to the conversation screen -- it passes its own channelOptions
+      // without afterChannelOpen, so this default is unaffected there.
       channelOptions: {
         afterChannelOpen: () => {
-          router.navigate("conversation");
-          renderEphemeralBanner();
           announce();
         }
       },
@@ -1251,13 +1319,14 @@ export function initApp(
       rtcConfig: { iceServers: [{ urls: el("stun-url").value }] },
       channelOptions: {
         afterChannelOpen: () => {
-          router.navigate("conversation");
-          renderEphemeralBanner();
           announce();
         }
       },
       onSessionReady: announce
     });
+    // Land on the conversation lobby (camera/mic preview) immediately --
+    // the joiner never owns the invite (Section F6).
+    enterConversationLobby({ ownsInvite: false });
   });
 
   const setDeviceLinkStatus = (text) => {
@@ -1464,13 +1533,14 @@ export function initApp(
         rtcConfig: { iceServers: [{ urls: el("stun-url").value }] },
         channelOptions: {
           afterChannelOpen: () => {
-            router.navigate("conversation");
-            renderEphemeralBanner();
             announce();
           }
         },
           onSessionReady: announce
         });
+        // Land on the conversation lobby (camera/mic preview) immediately --
+        // the joiner never owns the invite (Section F6).
+        enterConversationLobby({ ownsInvite: false });
       } finally {
         quickChatButton.disabled = false;
       }
