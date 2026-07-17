@@ -28,7 +28,16 @@ $config = [
 
     'RATE_LIMIT' => [
         'REQUEST_WINDOW_SECONDS' => 60,
-        'MAX_REQUESTS_PER_WINDOW' => 20,
+        // Raised from the original 20: pollForAnswer (client/js/signalingClient.js)
+        // polls check_answer every 3000ms while waiting for a peer, which
+        // alone is ~20 requests/60s -- a SINGLE waiting initiator on an IP
+        // used the entire old budget with zero headroom for create_invite/
+        // create_offer or a second concurrent session on the same IP (e.g.
+        // two people behind the same NAT, or our own 2-browser live tests).
+        // 100 gives roughly 5x that single-flow cost as headroom -- see
+        // docs/signaling-protocol.md "Вартість одного потоку в запитах" for
+        // the measured per-flow numbers this is based on.
+        'MAX_REQUESTS_PER_WINDOW' => 100,
         'ROOM_CREATION_WINDOW_SECONDS' => 3600,
         // Raised from the original 10: our own dev/testing traffic
         // (deploy smoke-checks + live 2-browser tests) routinely hit that
