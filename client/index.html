@@ -336,7 +336,13 @@
       // WindowClient.navigate() then rejects on every client, silently
       // breaking the notification-click "focus the open tab" path
       // (exec review finding, Section PN3).
-      navigator.serviceWorker.register("./sw.js").catch(() => {});
+      // sw.js uses top-level ES-module `export` statements (needed so
+      // client/tests/sw.test.js can import its pure logic directly) --
+      // without { type: "module" }, browsers parse the script as classic
+      // (non-module) JS, where `export` is a SyntaxError, and registration
+      // fails with "ServiceWorker script evaluation failed" (caught live
+      // in production on spirit.kolo.media, Section PN3 post-deploy check).
+      navigator.serviceWorker.register("./sw.js", { type: "module" }).catch(() => {});
     }
   </script>
 </body>
