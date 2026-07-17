@@ -28,9 +28,9 @@ Web Push вимагає VAPID-підпис (ES256 JWT) від "application serve
 
 ## Секція PN2: VAPID JWT-підпис
 
-- [ ] **Tests**: `client/tests/vapid.test.js` — `signVapidJwt(vapidPrivateKeyJwk, audience, subject)` повертає валідний ES256 JWT (`{typ:"JWT",alg:"ES256"}` header, `{aud, exp, sub}` payload, підпис перевіряється `crypto.subtle.verify` з відповідним публічним ключем); `exp` — не більше 24 год від видачі (обмеження специфікації VAPID).
-- [ ] **Impl**: `client/js/vapid.js`, константи вбудованого VAPID keypair (`client/js/vapidKeys.js` — публічний ключ у forматі, придатному для `applicationServerKey` в `pushManager.subscribe()`; приватний ключ для підпису JWT при відправці).
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/vapid.test.js` (5 тестів) — форма JWT/header/payload; підпис проходить перевірку відповідним публічним ключем; підпис НЕ проходить перевірку чужим ключем (доказ прив'язки); `exp` за замовчуванням ≤ now+24год; явний `ttlSeconds` враховується і теж обмежений 24год. 475/475 по проєкту.
+- [x] **Impl**: `client/js/vapid.js` (`signVapidJwt`, перевикористовує `bytesToBase64Url` з `webPushCrypto.js`), `client/js/vapidKeys.js` (згенерований одноразовим Node-скриптом ES256 keypair — публічний JWK, приватний JWK, публічний ключ у raw base64url для `applicationServerKey`).
+- [x] **Exec review**: iter1 — [reviews/push-notifications-PN2-iter1.md](../reviews/push-notifications-PN2-iter1.md). Нуль знахідок; узгодженість ключів (raw↔JWK, приватний↔публічний) перевірена реальним виконанням коду, не лише читанням.
 
 ## Секція PN3: Service Worker — реєстрація, підписка, показ сповіщення
 
