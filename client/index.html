@@ -26,6 +26,16 @@
     </div>
   </header>
 
+  <div id="welcome-modal" hidden class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
+    <div class="modal-card">
+      <h2 id="welcome-title" data-i18n="welcome.title">Ласкаво просимо до Spirit</h2>
+      <p id="welcome-body" data-i18n="welcome.body">Анонімний, наскрізно зашифрований P2P-чат.</p>
+      <div class="btn-row">
+        <button id="btn-welcome-confirm" type="button" class="btn-primary" data-i18n="welcome.confirm">Зрозуміло</button>
+      </div>
+    </div>
+  </div>
+
   <nav class="app-nav" aria-label="Screens">
     <a class="nav-item" data-route="account" href="#/account">
       <span class="nav-icon" aria-hidden="true">＋</span><span data-i18n="nav.account">Акаунт</span>

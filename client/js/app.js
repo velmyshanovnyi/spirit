@@ -113,6 +113,34 @@ export function initApp(
     });
   }
 
+  // Section H1 (specs/ui/chat-first-redesign.md): a first-time visitor sees
+  // a brief welcome + quick-start modal exactly once (localStorage flag),
+  // never again on subsequent visits.
+  const welcomeModal = doc.getElementById("welcome-modal");
+  if (welcomeModal) {
+    // localStorage can throw (private-mode/blocked site data) -- matches the
+    // guarded pattern already used everywhere else in this codebase (theme.js,
+    // i18n.js, the inline pre-paint script in index.html). Unguarded here
+    // would take down the WHOLE app's init, not just the modal.
+    let alreadySeen = false;
+    try {
+      alreadySeen = doc.defaultView.localStorage.getItem("spirit.welcomeSeen") === "1";
+    } catch {
+      // Storage unavailable -- fail open (show the modal every visit rather
+      // than crash init); harmless since it's just a one-time hint.
+    }
+    welcomeModal.hidden = alreadySeen;
+    doc.getElementById("btn-welcome-confirm")?.addEventListener("click", () => {
+      welcomeModal.hidden = true;
+      try {
+        doc.defaultView.localStorage.setItem("spirit.welcomeSeen", "1");
+      } catch {
+        // Storage unavailable -- nothing to persist; the modal will simply
+        // reappear next visit, which is an acceptable degraded UX.
+      }
+    });
+  }
+
   const state = {
     identityKeyPair: null,
     senderKey: null,

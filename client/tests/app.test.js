@@ -172,6 +172,11 @@ const HTML = `
   <nav>
     ${ROUTES.map((r) => `<a class="nav-item" data-route="${r}" href="#/${r}">${r}</a>`).join("")}
   </nav>
+  <div id="welcome-modal" hidden>
+    <h2 id="welcome-title" data-i18n="welcome.title"></h2>
+    <p id="welcome-body" data-i18n="welcome.body"></p>
+    <button id="btn-welcome-confirm" type="button"></button>
+  </div>
 
   <section data-screen="account">
     <h2 id="account-heading" data-i18n="section.account"></h2>
@@ -505,6 +510,52 @@ describe("server admin panel (read-only, Section S)", () => {
     expect(document.getElementById("admin-login-form").hidden).toBeFalsy();
     expect(document.getElementById("admin-config-list").hidden).toBe(true);
     expect(getAdminConfig).not.toHaveBeenCalled();
+  });
+});
+
+describe("welcome modal on first visit (Section H1)", () => {
+  it("shows the welcome modal on a fresh visit (no localStorage flag yet)", () => {
+    initApp(document, { locale: "uk" });
+    expect(document.getElementById("welcome-modal").hidden).toBe(false);
+    expect(document.getElementById("welcome-title").textContent).toBe("Ласкаво просимо до Spirit");
+  });
+
+  it("hides the modal and sets the seen-flag when the confirm button is clicked", () => {
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-welcome-confirm").click();
+
+    expect(document.getElementById("welcome-modal").hidden).toBe(true);
+    expect(localStorage.getItem("spirit.welcomeSeen")).toBe("1");
+  });
+
+  it("does not show the modal again once the seen-flag is already set", () => {
+    localStorage.setItem("spirit.welcomeSeen", "1");
+    initApp(document, { locale: "uk" });
+    expect(document.getElementById("welcome-modal").hidden).toBe(true);
+  });
+
+  it("still initializes the whole app (fails open, shows the modal) if localStorage throws (exec review finding)", () => {
+    const original = window.localStorage.getItem;
+    vi.spyOn(window.localStorage, "getItem").mockImplementation(() => {
+      throw new Error("SecurityError: storage blocked");
+    });
+
+    expect(() => initApp(document, { locale: "uk" })).not.toThrow();
+    expect(document.getElementById("welcome-modal").hidden).toBe(false);
+    // Other init steps (unrelated to the modal) must still have run.
+    expect(document.getElementById("lang-select").value).toBe("uk");
+
+    window.localStorage.getItem = original;
+  });
+
+  it("does not throw when confirming while localStorage.setItem throws (exec review finding)", () => {
+    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+      throw new Error("SecurityError: storage blocked");
+    });
+
+    initApp(document, { locale: "uk" });
+    expect(() => document.getElementById("btn-welcome-confirm").click()).not.toThrow();
+    expect(document.getElementById("welcome-modal").hidden).toBe(true);
   });
 });
 
