@@ -718,6 +718,17 @@ describe("welcome modal on first visit (Section H1)", () => {
     expect(document.getElementById("welcome-modal").hidden).toBe(true);
   });
 
+  it("does not show the modal for a genuinely fresh visitor arriving via an invite link (bug report 2026-07-17)", () => {
+    // Before this fix: a truly fresh browser/incognito session (no
+    // spirit.welcomeSeen flag at all) following an invite link got the
+    // welcome modal rendered ON TOP of the just-auto-joined chat (both are
+    // fixed-position overlays) -- from the visitor's point of view, the
+    // chat "didn't open" even though the P2P connection succeeded
+    // underneath, because the modal's backdrop covered it.
+    initApp(document, { locale: "uk", locationSearch: "?room=room-from-link&token=token-from-link" });
+    expect(document.getElementById("welcome-modal").hidden).toBe(true);
+  });
+
   it("still initializes the whole app (fails open, shows the modal) if localStorage throws (exec review finding)", () => {
     const original = window.localStorage.getItem;
     vi.spyOn(window.localStorage, "getItem").mockImplementation(() => {

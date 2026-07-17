@@ -95,6 +95,7 @@ export function initApp(doc, options) {
     // exercising it via an explicit { autoStartChat: true }.
     autoStartChat = options === undefined
   } = options || {};
+  const el = (id) => doc.getElementById(id);
   // Locale: explicit option (tests) -> stored choice -> browser language.
   setLocale(locale ?? detectLocale(typeof navigator !== "undefined" ? navigator.language : undefined));
   initTheme(doc);
@@ -120,9 +121,29 @@ export function initApp(doc, options) {
     });
   }
 
+  // Cross-origin rendezvous (Section N6): two independent signaling nodes
+  // (e.g. spirit.kolo.media, spirit.kibr.com.ua) don't share a database or
+  // CORS allowlist by design (docs/signaling-protocol.md) -- a room created
+  // on one node doesn't exist on the other. An invite LINK sidesteps this
+  // entirely by pointing the receiver at the INITIATOR's own origin (not
+  // wherever they happen to be), so both ends always land on the same node.
+  const joinParams = new URLSearchParams(locationSearch);
+  const invitedRoomId = joinParams.get("room");
+  const invitedToken = joinParams.get("token");
+  const cameFromInviteLink = !!(invitedRoomId && invitedToken);
+  if (cameFromInviteLink) {
+    el("room-id").value = invitedRoomId;
+    el("invite-token").value = invitedToken;
+  }
+
   // Section H1 (specs/ui/chat-first-redesign.md): a first-time visitor sees
   // a brief welcome + quick-start modal exactly once (localStorage flag),
-  // never again on subsequent visits.
+  // never again on subsequent visits. Bug report 2026-07-17: an invite-link
+  // visitor is joining someone ELSE's chat, not exploring the homepage cold
+  // -- showing this modal renders ON TOP of the just-auto-joined chat
+  // (both are fixed-position overlays) and made it look like the chat never
+  // opened at all, so it's suppressed entirely for that case regardless of
+  // the localStorage flag.
   const welcomeModal = doc.getElementById("welcome-modal");
   if (welcomeModal) {
     // localStorage can throw (private-mode/blocked site data) -- matches the
@@ -136,7 +157,7 @@ export function initApp(doc, options) {
       // Storage unavailable -- fail open (show the modal every visit rather
       // than crash init); harmless since it's just a one-time hint.
     }
-    welcomeModal.hidden = alreadySeen;
+    welcomeModal.hidden = alreadySeen || cameFromInviteLink;
     doc.getElementById("btn-welcome-confirm")?.addEventListener("click", () => {
       welcomeModal.hidden = true;
       try {
@@ -189,7 +210,6 @@ export function initApp(doc, options) {
     nickname: null
   };
 
-  const el = (id) => doc.getElementById(id);
   // Runtime values must survive language switches: the first dynamic write
   // strips the element's data-i18n so applyTranslations stops touching it.
   const setDynamicText = (element, text) => {
@@ -218,20 +238,6 @@ export function initApp(doc, options) {
     el("chat-log").textContent += `[${formatClockTime(timestamp)}] ${arrow} ${text}\n`;
   };
 
-  // Cross-origin rendezvous (Section N6): two independent signaling nodes
-  // (e.g. spirit.kolo.media, spirit.kibr.com.ua) don't share a database or
-  // CORS allowlist by design (docs/signaling-protocol.md) -- a room created
-  // on one node doesn't exist on the other. An invite LINK sidesteps this
-  // entirely by pointing the receiver at the INITIATOR's own origin (not
-  // wherever they happen to be), so both ends always land on the same node.
-  const joinParams = new URLSearchParams(locationSearch);
-  const invitedRoomId = joinParams.get("room");
-  const invitedToken = joinParams.get("token");
-  const cameFromInviteLink = !!(invitedRoomId && invitedToken);
-  if (cameFromInviteLink) {
-    el("room-id").value = invitedRoomId;
-    el("invite-token").value = invitedToken;
-  }
   // Once identity is established, an invite-link visitor should land where
   // they can immediately join (room), not the usual profile-admin screen.
   const postIdentityRoute = () => (cameFromInviteLink ? "room" : "profile");
