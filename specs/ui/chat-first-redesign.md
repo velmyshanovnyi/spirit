@@ -30,13 +30,13 @@
 - [x] **Impl**: `client/js/app.js` (сигнатура `initApp` змінена на `(doc, options)` з умовним дефолтом `autoStartChat`; новий `else if (autoStartChat && !getRememberedProfileId())` блок одразу після F4-гілки, перевикористовує спільний `initiateChatSession()`), `client/js/session.js` (`getRememberedProfileId()` тепер захищений try/catch навколо `localStorage.getItem` — exec review iter1 знахідка, захищає ВСІХ викликачів, не лише H5).
 - [x] **Exec review**: iter1 — [reviews/chat-first-redesign-H5-iter1.md](../reviews/chat-first-redesign-H5-iter1.md). 1 знахідка (незахищений `localStorage.getItem` у продакшн-лише коді-шляху міг завалити весь `initApp`) — виправлено на рівні спільної утиліти `session.js`. iter2 — [reviews/chat-first-redesign-H5-iter2.md](../reviews/chat-first-redesign-H5-iter2.md), збіжність, нуль нових знахідок.
 
-## Секція H4: Створити/Увійти як повноцінні модалки (НЕ ПОЧАТО)
+## Секція H4: Створити/Увійти як модалки поверх чату ✅ ЗАВЕРШЕНО
 
-Наразі (Секція H3) кнопки "Створити"/"Увійти" лише навігують на екран "account" і перемикають наявний тумблер — не справжні модалки поверх чату, як просив користувач. Повне перенесення форм `account-create-mode`/`account-login-block` (Секції H1-H4 `specs/phase3/deterministic-accounts.md`) у `.modal-overlay` (той самий компонент, що й H1's welcome-модалка) — окрема секція, великий blast radius на наявні profile/account тести (сотні асертів очікують ці елементи на екрані "account", не в модалці).
+**Обраний low-risk підхід** (замість фізичного перенесення форм `account-create-mode`/`account-login-block` у новий модальний компонент, що мало б величезний blast radius на сотні наявних profile/account тестів): наявний екран "account" і надалі маршрутизується ТОЧНО так само через router.js (той самий `data-screen`/`hidden`-механізм, жодних змін архітектури), але отримав CSS-клас `.modal-screen`, що рендерить його як fixed-overlay з backdrop і центрованою карткою (візуально — модалка), замість звичайного in-flow екрана. Додано кнопку закриття "×" (`#btn-account-close`), що викликає `router.navigate("conversation")`.
 
-- [ ] **Tests**: TBD
-- [ ] **Impl**: TBD
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/app.test.js` — новий describe "Створити/Увійти open the account screen as a modal over the chat (Section H4)" (4 тести): `btn-quick-create`/`btn-quick-login` навігують на "account" і перемикають create/login-режим (як і раніше); `btn-account-close` закриває назад на "conversation", якщо identity вже є; `btn-account-close` — безпечний no-op (лишається на "account" через власний gating роутера), якщо identity ще нема. 175/175 у `app.test.js`, 459/459 по проєкту.
+- [x] **Impl**: `client/index.html` (`class="screen modal-screen"` на account-секції, нова кнопка `#btn-account-close`), `client/css/style.css` (`.modal-screen`/`.modal-close`, `z-index:99` — навмисно НИЖЧЕ welcome-модалки H1 (100) і settings-меню H2 (101), exec review iter1 знахідка; `max-width:420px !important` — exec review iter1 знахідка про конфлікт зі старим правилом `520px`), `client/js/app.js` (обробник `btn-account-close`), `client/js/i18n.js` (`btn.close` у 11 локалях).
+- [x] **Exec review**: iter1 — [reviews/chat-first-redesign-H4-iter1.md](../reviews/chat-first-redesign-H4-iter1.md). 2 знахідки (z-index-колізія ховала welcome-модалку від КОЖНОГО нового відвідувача; ширша за задумом картка на десктопі через програш специфічності) — обидві виправлено. iter2 — [reviews/chat-first-redesign-H4-iter2.md](../reviews/chat-first-redesign-H4-iter2.md), збіжність, нуль нових знахідок.
 
 ## Секція H6: Invite-посилання одразу відкриває чат з новим ефемерним іменем ✅ ЗАВЕРШЕНО (без нового коду)
 
@@ -46,4 +46,4 @@
 
 H1 → H2 → H3 → H6 (перевірка) → H5 → H4, за спаданням співвідношення цінність/ризик.
 
-**Стан на 2026-07-17**: H1, H2, H3, H6 — ✅ завершено (тести, exec-review, коміт, деплой на kolomedi+kibr, жива перевірка). H5, H4 — не почато, обидва явно позначені як великі за blast radius на наявний тест-сьют; конкретні рекомендації для наступного волонтера записані в самих секціях вище. Секції без явного рішення користувача щодо деталей — розумні дефолти в дусі Telegram Web (мінімалістичні модалки, іконки-кнопки), без додаткових уточнюючих питань.
+**Стан на 2026-07-17**: усі секції (H1-H6) ✅ завершено — тести, exec-review (кожна секція мінімум 1 ітерація, кілька — 2 з реальними знахідками), коміт, деплой на kolomedi+kibr, жива перевірка. H5 і H4 (спочатку позначені як найризикованіші) виявились здійсненними безпечно завдяки low-risk архітектурним рішенням (умовний дефолт `autoStartChat` для H5; CSS-презентаційний шар без зміни роутингу для H4), а не системній міграції наявного тест-сьюту. Секції без явного рішення користувача щодо деталей — розумні дефолти в дусі Telegram Web (мінімалістичні модалки, іконки-кнопки), без додаткових уточнюючих питань.

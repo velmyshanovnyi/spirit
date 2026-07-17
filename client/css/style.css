@@ -511,6 +511,47 @@ button:disabled {
   display: contents;
 }
 
+/* Section H4: the account screen (Створити/Увійти) renders as a modal over
+   whatever's behind it (the chat) instead of a normal in-flow screen --
+   [hidden]'s !important still wins over this when the router hides it. */
+.modal-screen {
+  display: flex;
+  position: fixed;
+  inset: 0;
+  /* Below the H1 welcome modal (100): a fresh visitor with no identity yet
+     lands on THIS screen by default (defaultRoute="account") while the
+     welcome modal is also showing (exec review finding) -- the welcome
+     modal must win so its confirm button stays reachable and its
+     localStorage seen-flag can actually get set. Below the H2 settings-menu
+     (101) too, so it stays reachable if opened from within this modal. */
+  z-index: 99;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 16px;
+}
+
+.modal-screen > .card {
+  position: relative;
+  /* !important: the pre-existing `.screen > .card:only-of-type:not(.card-wide)`
+     rule (max-width: 520px, higher specificity) otherwise wins on desktop
+     viewports and widens this modal beyond its intended size (exec review
+     finding) -- that rule targets the old display:contents grid-flow
+     layout, not this fixed-overlay one, so overriding it here is correct. */
+  max-width: 420px !important;
+  width: 100%;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+
+.modal-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 20px;
+  line-height: 1;
+}
+
 /* ---------- Video call (Section V, specs/ui/video-call.md) ---------- */
 
 .video-area {

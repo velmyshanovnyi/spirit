@@ -185,6 +185,7 @@ const HTML = `
   </div>
 
   <section data-screen="account">
+    <button id="btn-account-close" type="button"></button>
     <h2 id="account-heading" data-i18n="section.account"></h2>
     <div id="account-login-block" hidden>
       <select id="profile-select"></select>
@@ -653,6 +654,47 @@ describe("guest quick actions (create/login) in the header when unauthenticated 
 
     expect(document.getElementById("guest-quick-actions").hidden).toBe(false);
   });
+});
+
+describe("Створити/Увійти open the account screen as a modal over the chat (Section H4)", () => {
+  it("btn-quick-create navigates to account and switches to create mode", () => {
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-quick-create").click();
+    expect(visibleScreens()).toEqual(["account"]);
+    expect(document.getElementById("account-create-mode").hidden).toBe(false);
+    expect(document.getElementById("account-login-block").hidden).toBe(true);
+  });
+
+  it("btn-quick-login navigates to account and switches to login mode", () => {
+    listProfiles.mockResolvedValue([{ id: "p1" }]);
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-quick-login").click();
+    expect(visibleScreens()).toEqual(["account"]);
+    expect(document.getElementById("account-login-block").hidden).toBe(false);
+    expect(document.getElementById("account-create-mode").hidden).toBe(true);
+  });
+
+  it("btn-account-close dismisses the modal back to the chat once an identity exists", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+
+    document.getElementById("btn-quick-login").click();
+    expect(visibleScreens()).toEqual(["account"]);
+
+    document.getElementById("btn-account-close").click();
+    expect(visibleScreens()).toEqual(["conversation"]);
+  });
+
+  it("btn-account-close is a safe no-op back to account when there's no identity yet (router's own gating redirects it)", () => {
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-account-close").click();
+    expect(visibleScreens()).toEqual(["account"]);
+  });
+
 });
 
 describe("welcome modal on first visit (Section H1)", () => {

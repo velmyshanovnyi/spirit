@@ -440,7 +440,8 @@ export function initApp(doc, options) {
 
   // Section H3: quick "Створити"/"Увійти" header actions for guests -- reuse
   // the account screen's existing create/login toggle rather than duplicate
-  // it. Full modal presentation (Section H4) is a separate, larger follow-up.
+  // it. The account screen itself renders as a modal over the chat (Section
+  // H4, client/css/style.css .modal-screen), not a full page navigation.
   el("btn-quick-create")?.addEventListener("click", () => {
     router.navigate("account");
     el("link-switch-to-create")?.click();
@@ -448,6 +449,12 @@ export function initApp(doc, options) {
   el("btn-quick-login")?.addEventListener("click", () => {
     router.navigate("account");
     el("link-switch-to-login")?.click();
+  });
+  // Section H4: dismiss the account modal back to the chat. Safe to call
+  // unconditionally -- if there's no identity yet, the router's own gating
+  // redirects "conversation" straight back to "account" anyway.
+  el("btn-account-close")?.addEventListener("click", () => {
+    router.navigate("conversation");
   });
 
   el("btn-logout")?.addEventListener("click", () => {

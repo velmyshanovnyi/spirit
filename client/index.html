@@ -69,8 +69,12 @@
   <main class="layout">
 
     <!-- ================= Створення акаунта / вхід ================= -->
-    <section data-screen="account" class="screen">
+    <!-- Section H4: rendered as a modal over the chat (not a full page nav)
+         -- "screen" for the router's existing hidden-toggling mechanics,
+         "modal-screen" for the H1-shared overlay/backdrop presentation. -->
+    <section data-screen="account" class="screen modal-screen">
       <section class="card">
+        <button id="btn-account-close" type="button" class="btn-icon modal-close" data-i18n-title="btn.close" aria-label="Close">×</button>
         <h2 data-i18n="section.account">Акаунт</h2>
 
         <div id="account-login-block" hidden class="subgroup">
