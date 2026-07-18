@@ -1,0 +1,108 @@
+// Section SR1 (specs/phase5/sybil-resistance.md): stateless hashcash-like
+// proof-of-work crypto core for create_invite anti-Sybil protection. Pure
+// functions only -- no network I/O, no wiring into signalingClient.js's
+// live create_invite flow (that's Section SR2). Mirrors server/library/Pow.php
+// exactly: both sides must agree bit-for-bit on the leading-zero-bit count
+// over the SAME SHA-256 digest bytes for the SAME challenge+nonce inputs.
+
+/**
+ * Builds the PoW challenge string exactly as the server reconstructs it:
+ * "${timeWindow}:${senderKey}". Byte-identical to PHP's
+ * "{$timeWindow}:{$senderKey}" string concatenation (both are plain ASCII/
+ * UTF-8 text, no implicit type coercion surprises since timeWindow is always
+ * passed in as a number here and cast to a decimal string the same way
+ * PHP's string interpolation would).
+ *
+ * @param {number} timeWindow floor(unixTime / POW_WINDOW_SECONDS)
+ * @param {string} senderKey the identity key this PoW is bound to
+ * @returns {string}
+ */
+export function buildPowChallenge(timeWindow, senderKey) {
+  return `${timeWindow}:${senderKey}`;
+}
+
+/**
+ * Counts leading zero BITS (not bytes) in a byte buffer, scanning
+ * most-significant-bit-first within each byte -- standard big-endian bit
+ * order for both crypto.subtle.digest's ArrayBuffer output and PHP's
+ * hash(..., true) raw binary string. Returns the total bit-length if every
+ * bit is zero (all-zero digest, astronomically unlikely but handled
+ * correctly rather than relying on it never occurring).
+ *
+ * @param {Uint8Array} bytes
+ * @returns {number}
+ */
+function countLeadingZeroBits(bytes) {
+  let count = 0;
+  for (const byte of bytes) {
+    if (byte === 0) {
+      count += 8;
+      continue;
+    }
+    for (let bit = 7; bit >= 0; bit--) {
+      if ((byte >> bit) & 1) {
+        return count;
+      }
+      count++;
+    }
+  }
+  return count;
+}
+
+async function sha256(text) {
+  const data = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return new Uint8Array(digest);
+}
+
+/**
+ * Verifies that SHA-256(challenge + ":" + nonce) has at least
+ * difficultyBits leading zero bits. Mirrors Spirit\Pow::verify() in
+ * server/library/Pow.php exactly (same concatenation, same digest, same
+ * bit-counting logic) -- used both as the client's own self-check before
+ * submitting a solved PoW, and directly by tests.
+ *
+ * @param {string} challenge
+ * @param {string} nonce
+ * @param {number} difficultyBits
+ * @returns {Promise<boolean>}
+ */
+export async function verifyPow(challenge, nonce, difficultyBits) {
+  const digestBytes = await sha256(`${challenge}:${nonce}`);
+  return countLeadingZeroBits(digestBytes) >= difficultyBits;
+}
+
+// Safety cap on solvePow's brute-force loop so a pathologically high
+// difficulty (or a bug that makes verifyPow never pass) can't hang a test
+// run or a real client forever. At the spec's recommended PRODUCTION
+// difficulty of 20 bits, the EXPECTED attempt count is ~2^20 (~1M); this
+// default gives ~16x that expectation (2^24 ≈ 16.7M attempts) as headroom
+// against unlucky runs, while still bounding worst-case wall-clock time.
+// Callers solving at a non-default (e.g. test-only low) difficulty should
+// pass an explicit maxAttempts appropriate to that difficulty instead of
+// relying on this default.
+const DEFAULT_MAX_ATTEMPTS = 2 ** 24;
+
+/**
+ * Brute-forces nonces (stringified increasing integers, starting at 0)
+ * until verifyPow(challenge, nonce, difficultyBits) succeeds, returning the
+ * winning nonce as a string ready to send in create_invite's
+ * pow_nonce field.
+ *
+ * @param {string} challenge
+ * @param {number} difficultyBits
+ * @param {{maxAttempts?: number}} [options]
+ * @returns {Promise<string>}
+ * @throws {Error} if no solution is found within maxAttempts
+ */
+export async function solvePow(challenge, difficultyBits, { maxAttempts = DEFAULT_MAX_ATTEMPTS } = {}) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const nonce = String(attempt);
+    if (await verifyPow(challenge, nonce, difficultyBits)) {
+      return nonce;
+    }
+  }
+  throw new Error(
+    `solvePow: no nonce found satisfying difficultyBits=${difficultyBits} within maxAttempts=${maxAttempts}`
+  );
+}
