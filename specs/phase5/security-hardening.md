@@ -34,9 +34,9 @@
 
 Рішення узгоджені з користувачем 2026-07-18 (AskUserQuestion) — Web Push API прийнятний компроміс, підписка живе виключно P2P між контактами (сервер її не бачить/не зберігає), лише для збережених верифікованих контактів. Повний дизайн, VAPID-модель і розбивка на секції PN1-PN5 — окремий файл [specs/phase5/push-notifications.md](push-notifications.md), щоб не роздувати цю спеку. Ключовий архітектурний наслідок: zero-database (D1) лишається непорушним — push доставляє НЕ повідомлення, а лише "дзвінок у двері" (invite-посилання одразу відкриває наявний zero-click auto-join, Секція F4), оскільки справжня доставка пропущених повідомлень без серверного сховища технічно неможлива.
 
-- [ ] **Tests**: див. [push-notifications.md](push-notifications.md) Секції PN1-PN5.
-- [ ] **Impl**: див. [push-notifications.md](push-notifications.md) Секції PN1-PN5.
-- [ ] **Exec review**: —
+- [x] **Tests**: див. [push-notifications.md](push-notifications.md) Секції PN1-PN5 (усі 5 завершені, 521/521 по проєкту).
+- [x] **Impl**: див. [push-notifications.md](push-notifications.md) Секції PN1-PN5.
+- [x] **Exec review**: усі 5 секцій зійшлись (PN1/PN2/PN4/PN5 — iter1, PN3 — iter2), знахідки задокументовані й виправлені в [reviews/](../reviews/).
 
 ## Секція P4 (нижчий пріоритет): дрібніші пункти з того самого обговорення
 
