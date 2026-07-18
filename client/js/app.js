@@ -5,7 +5,8 @@ import {
   exportEcdhPublicKeyForWire,
   importEcdhPublicKeyFromWire,
   exportPrivateKeyScalar,
-  exportPrivateKeyRaw
+  exportPrivateKeyRaw,
+  importPrivateKeyRaw
 } from "./identity.js";
 import { createPermanentProfile, exportRawIdentity, listProfiles, loadPermanentProfile, setNickname, getNickname, adoptScalarIdentity } from "./profile.js";
 import { deriveAccountMaterial, generateAccountName } from "./deterministicIdentity.js";
@@ -34,6 +35,9 @@ import { buildPushSubscribeOptions, serializeSubscriptionForAnnounce, parsePushS
 import { VAPID_PUBLIC_KEY_RAW_BASE64URL } from "./vapidKeys.js";
 import { sendPushNotification } from "./pushSend.js";
 import { appendMessage, listMessages, listConversations } from "./historyStore.js";
+import { splitSecret } from "./shamir.js";
+import { buildRecoveryShareAnnounce, parseRecoveryShareAnnounce, encodeShareAsText } from "./recoveryShare.js";
+import { saveTrustedShare, listTrustedShares } from "./trustedShares.js";
 import { acceptNewerProofSet, addProofToSet, revokeProofFromSet } from "./proofSet.js";
 import { createProofBlock, parseProofBlock, verifyProofBlock } from "./proofs.js";
 import { fetchProofPageText } from "./fetchProof.js";
@@ -355,7 +359,156 @@ export function initApp(doc, options) {
     if (!card) return;
     card.hidden = !(state.identityKeyPair && state.identityKeyPair.vaultKey);
   }
-  renderNotificationsCard(); // set the correct initial visibility on load
+  renderNotificationsCard();
+    renderRecoveryCard(); // set the correct initial visibility on load
+
+  // Section S2 (specs/phase5/social-recovery.md): same visibility gate as
+  // renderNotificationsCard -- social recovery only makes sense for a
+  // permanent profile (there is an identity worth protecting, and a vault
+  // to re-derive the raw scalar from via the passphrase). Renders the list
+  // of verified contacts as checkboxes (min 2 selectable), a threshold
+  // <select> defaulting to "majority" (Math.ceil((N+1)/2)), and the list of
+  // shares this device currently holds on behalf of OTHER people.
+  async function renderRecoveryCard() {
+    const card = el("recovery-card");
+    if (!card) return;
+    const isPermanentProfile = !!(state.identityKeyPair && state.identityKeyPair.vaultKey);
+    card.hidden = !isPermanentProfile;
+    if (!isPermanentProfile) return;
+
+    const list = el("recovery-contacts-list");
+    if (list) {
+      const contacts = await listContacts();
+      list.innerHTML = "";
+      for (const contact of contacts) {
+        const row = doc.createElement("label");
+        row.className = "field checkbox-field";
+        const checkbox = doc.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.dataset.recoveryContactFingerprint = contact.fingerprint;
+        const span = doc.createElement("span");
+        span.textContent = contact.nickname ? `${contact.nickname} (${formatSpiritId(contact.fingerprint)})` : formatSpiritId(contact.fingerprint);
+        row.appendChild(checkbox);
+        row.appendChild(span);
+        list.appendChild(row);
+      }
+    }
+    renderRecoveryThresholdOptions();
+
+    const heldList = el("recovery-held-list");
+    if (heldList) {
+      const held = await listTrustedShares();
+      heldList.innerHTML = "";
+      for (const share of held) {
+        const row = doc.createElement("div");
+        row.className = "list-row";
+        row.textContent = t("recovery.heldFor", { fp: formatSpiritId(share.ownerFingerprint) });
+        heldList.appendChild(row);
+      }
+    }
+  }
+
+  /**
+   * Rebuilds the threshold <select>'s options for the CURRENTLY checked
+   * contact count N ([2, N]), keeping the "majority" default
+   * (Math.ceil((N+1)/2), Section S2 decision) selected unless the user
+   * already picked a different value that's still valid for the new N.
+   */
+  function renderRecoveryThresholdOptions() {
+    const select = el("recovery-threshold");
+    if (!select) return;
+    const n = doc.querySelectorAll("[data-recovery-contact-fingerprint]:checked").length;
+    const previous = select.value ? Number(select.value) : null;
+    select.innerHTML = "";
+    if (n < 2) return;
+    const defaultThreshold = Math.ceil((n + 1) / 2);
+    for (let k = 2; k <= n; k++) {
+      const option = doc.createElement("option");
+      option.value = String(k);
+      option.textContent = `${k} / ${n}`;
+      select.appendChild(option);
+    }
+    select.value = String(previous && previous >= 2 && previous <= n ? previous : defaultThreshold);
+  }
+  el("recovery-contacts-list")?.addEventListener("change", renderRecoveryThresholdOptions);
+
+  const setRecoveryStatus = (text) => {
+    const status = el("recovery-status");
+    if (status) status.textContent = text;
+  };
+
+  // el("btn-setup-recovery") may be absent (older/minimal test fixtures that
+  // don't include the recovery card markup) -- guard like the other
+  // optional-element listeners in this file (e.g. notifications-enabled)
+  // rather than assuming withBusyButton's non-null button.
+  if (el("btn-setup-recovery")) withBusyButton(el("btn-setup-recovery"), async () => {
+    const selected = [...doc.querySelectorAll("[data-recovery-contact-fingerprint]:checked")].map(
+      (checkbox) => checkbox.dataset.recoveryContactFingerprint
+    );
+    if (selected.length < 2) {
+      setRecoveryStatus(t("recovery.needTwoContacts"));
+      return;
+    }
+    const threshold = Number(el("recovery-threshold").value);
+    if (!Number.isInteger(threshold) || threshold < 2 || threshold > selected.length) {
+      setRecoveryStatus(t("recovery.badThreshold"));
+      return;
+    }
+    const passphrase = el("recovery-setup-passphrase").value;
+    if (!passphrase) {
+      setRecoveryStatus(t("unlock.needPassphrase"));
+      return;
+    }
+    if (!state.senderKey) {
+      setRecoveryStatus(t("status.createAccountFirst"));
+      return;
+    }
+
+    // Re-deriving the raw identity from the vault (same pattern as
+    // btn-link-device) is REQUIRED here: a logged-in permanent profile's
+    // state.identityKeyPair.privateKey is deliberately non-extractable
+    // (profile.js's reconstructKeyPairFromRaw), so the 32-byte scalar
+    // cannot be read off it directly -- exportRawIdentity re-decrypts the
+    // vault under the just-entered passphrase and hands back extractable
+    // raw key bytes, from which the scalar can be exported. This works
+    // identically for a portable account or a plain permanent profile.
+    const identityRaw = await exportRawIdentity(state.senderKey, passphrase);
+    el("recovery-setup-passphrase").value = "";
+    const extractableKey = await importPrivateKeyRaw(identityRaw, { name: "ECDSA", namedCurve: "P-256" }, true);
+    const scalar = await exportPrivateKeyScalar(extractableKey);
+
+    const shares = splitSecret(scalar, { threshold, shares: selected.length });
+    const textExportParts = [];
+    for (let i = 0; i < selected.length; i++) {
+      const contactFingerprint = selected[i];
+      const share = shares[i];
+      textExportParts.push(`${formatSpiritId(contactFingerprint)}: ${encodeShareAsText(share)}`);
+      if (contactFingerprint === state.peerFingerprint && state.channel && state.sessionKey) {
+        // Currently connected to this contact right now -- send immediately,
+        // no need to queue. Also drop any STALE entry left over from an
+        // earlier setup run (exec review iter1 finding) -- otherwise it
+        // would later overwrite this fresh share with one from a
+        // superseded, incompatible split.
+        state.channel.send(
+          await encryptMessage(state.sessionKey, JSON.stringify(buildRecoveryShareAnnounce(share)))
+        );
+        await dequeueRecoveryShareForContact(contactFingerprint);
+      } else {
+        // Not connected to this contact right now -- persist for delivery
+        // the next time their identity-announce is verified (drained in
+        // handleChatMessage's identity-announce branch).
+        await queueRecoveryShareForContact(contactFingerprint, share);
+      }
+    }
+
+    const exportEl = el("recovery-text-export");
+    if (exportEl) {
+      exportEl.hidden = false;
+      exportEl.textContent = textExportParts.join("\n");
+    }
+    setRecoveryStatus(t("recovery.setupDone", { n: selected.length, k: threshold }));
+    await renderRecoveryCard();
+  });
 
   // Section E (specs/phase2c/identity-verification.md): in-memory verification
   // status per (contact fingerprint, proof url) -- re-derived from a live
@@ -566,6 +719,7 @@ export function initApp(doc, options) {
     setDynamicText(el("pub-key-display"), "");
     renderGuestQuickActions();
     renderNotificationsCard();
+    renderRecoveryCard();
     router.navigate("account");
   });
 
@@ -639,6 +793,7 @@ export function initApp(doc, options) {
     "device-list-announce",
     "proof-set-announce",
     "push-subscription-announce",
+    "recovery-share-announce",
     "webrtc-call-offer",
     "webrtc-call-answer"
   ]);
@@ -646,6 +801,70 @@ export function initApp(doc, options) {
   const setVideoStatus = (text) => {
     el("video-status").textContent = text;
   };
+
+  // Section S2 (specs/phase5/social-recovery.md), KEY DESIGN DECISION:
+  // "announce a recovery share to N specific trusted contacts" has no close
+  // precedent in this codebase -- every existing *-announce (device-list,
+  // proof-set, push-subscription) only ever reaches whoever you happen to be
+  // chatting with RIGHT NOW (makeIdentityAnnouncer below), because there is
+  // no persistent broadcast (zero-database invariant). Recovery setup picks
+  // N contacts who are very likely NOT all connected at setup time.
+  //
+  // Simplest correct design chosen here: send immediately to any selected
+  // contact who IS the live peer at setup time; for the rest, persist a
+  // durable "outbound pending announce" queue (one entry per contact,
+  // keyed by this profile's own senderKey so multiple local profiles don't
+  // collide) and drain it opportunistically -- the same moment ANY peer's
+  // identity-announce is verified (handleChatMessage's "identity-announce"
+  // branch), check whether that peer is owed a queued share and send it
+  // then. This mirrors how the other announces piggyback on connection,
+  // just keyed per-recipient instead of "send to whoever is there".
+  // Tradeoff: a selected contact who never reconnects while queued never
+  // receives their share -- acceptable for a first cut (documented in the
+  // spec) since re-running setup re-splits and re-queues anyway.
+  function recoveryShareOutboxKey(senderKey) {
+    return `recoveryShareOutbox:${senderKey}`;
+  }
+
+  async function queueRecoveryShareForContact(contactFingerprint, share) {
+    const key = recoveryShareOutboxKey(state.senderKey);
+    const existing = (await get("profile", key)) || [];
+    const filtered = existing.filter((entry) => entry.contactFingerprint !== contactFingerprint);
+    filtered.push({ contactFingerprint, announce: buildRecoveryShareAnnounce(share) });
+    await put("profile", key, filtered);
+  }
+
+  /**
+   * Removes any queued-but-not-yet-sent outbox entry for `contactFingerprint`,
+   * without sending it. Exec review iter1 finding: the immediate-send branch
+   * of btn-setup-recovery must call this for whichever contact it just sent
+   * to directly -- otherwise a STALE entry from an earlier setup run (e.g.
+   * that contact was offline last time, got queued, and is the live peer
+   * this time) survives in the outbox and is delivered on their NEXT
+   * reconnect, silently overwriting the fresh share just sent with a share
+   * from an incompatible, superseded split (trustedShares.js's overwrite-on-
+   * save then keeps the stale one, since it arrives later).
+   */
+  async function dequeueRecoveryShareForContact(contactFingerprint) {
+    const key = recoveryShareOutboxKey(state.senderKey);
+    const existing = (await get("profile", key)) || [];
+    const filtered = existing.filter((entry) => entry.contactFingerprint !== contactFingerprint);
+    if (filtered.length !== existing.length) {
+      await put("profile", key, filtered);
+    }
+  }
+
+  async function drainRecoveryShareOutboxForPeer(peerFingerprint) {
+    if (!state.identityKeyPair || !state.identityKeyPair.vaultKey || !state.channel || !state.sessionKey) return;
+    const key = recoveryShareOutboxKey(state.senderKey);
+    const existing = (await get("profile", key)) || [];
+    const index = existing.findIndex((entry) => entry.contactFingerprint === peerFingerprint);
+    if (index === -1) return;
+    const { announce } = existing[index];
+    state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify(announce)));
+    const remaining = existing.filter((_, i) => i !== index);
+    await put("profile", key, remaining);
+  }
 
   // Section F6 (instant conversation lobby, 2026-07-17): local camera/mic
   // preview only -- no peer connection involved, so this is safe to call the
@@ -778,6 +997,9 @@ export function initApp(doc, options) {
           appendChat(entry.text, entry.direction, entry.timestamp);
         }
       }
+      // Section S2: this peer may be owed a still-pending recovery-share
+      // announce from an earlier setup where they weren't connected yet.
+      await drainRecoveryShareOutboxForPeer(verified.fingerprint);
       return;
     }
 
@@ -815,6 +1037,18 @@ export function initApp(doc, options) {
       const parsed = parsePushSubscriptionAnnounce(control);
       if (!parsed) return;
       await updateContactPushSubscription(state.peerFingerprint, parsed);
+      return;
+    }
+
+    if (control.type === "recovery-share-announce") {
+      // Section S2 (specs/phase5/social-recovery.md): same trust gate as
+      // device-list-announce/push-subscription-announce -- meaningless
+      // before the peer's identity is verified (nothing to attribute the
+      // share to), and pointless in ephemeral mode (nothing persists).
+      if (!state.peerFingerprint || !state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
+      const parsed = parseRecoveryShareAnnounce(control);
+      if (!parsed) return;
+      await saveTrustedShare({ ownerFingerprint: state.peerFingerprint, ...parsed, receivedAt: Date.now() });
       return;
     }
 
@@ -1108,6 +1342,7 @@ export function initApp(doc, options) {
       resetOwnProofsState();
       renderGuestQuickActions();
       renderNotificationsCard();
+    renderRecoveryCard();
       router.navigate("room");
     });
   }
@@ -1416,6 +1651,7 @@ export function initApp(doc, options) {
     resetOwnProofsState();
     renderGuestQuickActions();
     renderNotificationsCard();
+    renderRecoveryCard();
     setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
     setPortableLoginStatus("");
     // Exec review: same session/MRU bookkeeping as the regular unlock path,
@@ -1446,6 +1682,7 @@ export function initApp(doc, options) {
       resetOwnProofsState();
       renderGuestQuickActions();
       renderNotificationsCard();
+    renderRecoveryCard();
       setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
       setProfileStatus("");
       // A legacy record migrates on unlock -- its id changes to the
@@ -1488,6 +1725,7 @@ export function initApp(doc, options) {
     resetOwnProofsState();
     renderGuestQuickActions();
     renderNotificationsCard();
+    renderRecoveryCard();
     const nickname = el("nickname-input").value.trim();
     if (nickname) {
       await setNickname(state.senderKey, nickname);
@@ -1650,6 +1888,7 @@ export function initApp(doc, options) {
     resetOwnProofsState();
     renderGuestQuickActions();
     renderNotificationsCard();
+    renderRecoveryCard();
     await initiateChatSession();
   });
 
@@ -1789,6 +2028,7 @@ export function initApp(doc, options) {
           resetOwnProofsState();
           renderGuestQuickActions();
           renderNotificationsCard();
+    renderRecoveryCard();
           setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
           setDeviceLinkStatus(t("device.done"));
           router.navigate("profile");
@@ -1891,6 +2131,7 @@ export function initApp(doc, options) {
         resetOwnProofsState();
         renderGuestQuickActions();
         renderNotificationsCard();
+    renderRecoveryCard();
 
         state.peerFingerprint = null;
         hideSafetyNumberHint();
@@ -1937,6 +2178,7 @@ export function initApp(doc, options) {
         resetOwnProofsState();
         renderGuestQuickActions();
         renderNotificationsCard();
+    renderRecoveryCard();
         await initiateChatSession();
       } finally {
         quickChatButton.disabled = false;

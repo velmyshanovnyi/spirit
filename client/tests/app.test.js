@@ -51,6 +51,12 @@ vi.mock("../js/contacts.js", () => ({
   updateContactPushSubscription: vi.fn(),
   listContacts: vi.fn().mockResolvedValue([])
 }));
+vi.mock("../js/trustedShares.js", () => ({
+  saveTrustedShare: vi.fn(),
+  getTrustedShare: vi.fn(),
+  listTrustedShares: vi.fn().mockResolvedValue([]),
+  deleteTrustedShare: vi.fn()
+}));
 vi.mock("../js/proofSet.js", () => ({
   acceptNewerProofSet: vi.fn(),
   signProofSet: vi.fn(),
@@ -159,6 +165,8 @@ import {
   updateContactPushSubscription,
   listContacts
 } from "../js/contacts.js";
+import { saveTrustedShare } from "../js/trustedShares.js";
+import { buildRecoveryShareAnnounce } from "../js/recoveryShare.js";
 import { acceptNewerProofSet, signProofSet, addProofToSet, revokeProofFromSet } from "../js/proofSet.js";
 import { createProofBlock, parseProofBlock, verifyProofBlock } from "../js/proofs.js";
 import { generateAnonymousNickname } from "../js/anonymousNickname.js";
@@ -2990,6 +2998,104 @@ describe("device-list transport (Section 13)", () => {
     await captured.onMessage("ENCRYPTED_SUB");
 
     expect(updateContactPushSubscription).not.toHaveBeenCalled();
+  });
+
+  it("saves an incoming recovery-share announce (profile mode, verified peer)", async () => {
+    createPermanentProfile.mockResolvedValue({
+      privateKey: { __tag: "profile-priv" },
+      publicKey: fakePublicKey("profile-pub"),
+      vaultKey: { __tag: "vault-key" }
+    });
+    fingerprint.mockResolvedValue("profile-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+    dbGet.mockResolvedValue(undefined);
+    verifyIdentityAnnounce.mockResolvedValue({
+      identityPublicKey: fakePublicKey("peer-identity"),
+      identityPubkeyWire: "PEER",
+      fingerprint: "peer-fp"
+    });
+    rememberContact.mockResolvedValue({ status: "new", contact: { pushSubscription: null } });
+    getContact.mockResolvedValue({ fingerprint: "peer-fp", pushSubscription: null });
+
+    const channel = fakeChannel();
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "pass";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001profile-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(channel);
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+
+    const share = { x: 3, y: new Uint8Array([1, 2, 3]), threshold: 2, totalShares: 3 };
+    const announce = buildRecoveryShareAnnounce(share);
+    decryptMessage.mockResolvedValueOnce(JSON.stringify(announce));
+    await captured.onMessage("ENCRYPTED_SHARE");
+
+    await vi.waitFor(() =>
+      expect(saveTrustedShare).toHaveBeenCalledWith(
+        expect.objectContaining({ ownerFingerprint: "peer-fp", x: 3, threshold: 2, totalShares: 3 })
+      )
+    );
+  });
+
+  it("ignores a malformed recovery-share announce (profile mode, verified peer)", async () => {
+    const { captured } = await establishedChat();
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+
+    decryptMessage.mockResolvedValueOnce(
+      JSON.stringify({ type: "recovery-share-announce", x: 0, y: "abc", threshold: 5, totalShares: 3 })
+    );
+    await captured.onMessage("ENCRYPTED_SHARE");
+
+    expect(saveTrustedShare).not.toHaveBeenCalled();
+  });
+
+  it("ignores a recovery-share announce arriving before the identity announce", async () => {
+    const { captured } = await establishedChat();
+    const announce = buildRecoveryShareAnnounce({ x: 1, y: new Uint8Array([9]), threshold: 2, totalShares: 3 });
+    decryptMessage.mockResolvedValueOnce(JSON.stringify(announce));
+
+    await captured.onMessage("ENCRYPTED_SHARE");
+
+    expect(saveTrustedShare).not.toHaveBeenCalled();
+  });
+
+  it("ignores a recovery-share announce in ephemeral mode (no vaultKey) even after peer verification", async () => {
+    const { captured } = await establishedChat();
+    verifyIdentityAnnounce.mockResolvedValue({
+      identityPublicKey: fakePublicKey("peer-identity"),
+      identityPubkeyWire: "PEER",
+      fingerprint: "peer-fp"
+    });
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+
+    const announce = buildRecoveryShareAnnounce({ x: 1, y: new Uint8Array([9]), threshold: 2, totalShares: 3 });
+    decryptMessage.mockResolvedValueOnce(JSON.stringify(announce));
+    await captured.onMessage("ENCRYPTED_SHARE");
+
+    expect(saveTrustedShare).not.toHaveBeenCalled();
   });
 
   it("primary link flow appends the new device certificate to the own stored device list", async () => {

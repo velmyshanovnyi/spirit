@@ -196,6 +196,30 @@
         <div id="notifications-status" class="status"></div>
       </section>
 
+      <section id="recovery-card" class="card" hidden>
+        <h2 data-i18n="recovery.heading">Соціальне відновлення</h2>
+        <p class="hint" data-i18n="recovery.hint">
+          Оберіть не менше 2 верифікованих контактів, які отримають частки вашого ключа. Будь-які
+          k із N часток разом відновлюють доступ; менше k -- жодної інформації.
+        </p>
+        <div id="recovery-contacts-list" class="list-area"></div>
+        <label class="field"><span data-i18n="label.recoveryThreshold">Поріг (потрібно часток):</span>
+          <select id="recovery-threshold"></select>
+        </label>
+        <label class="field"><span data-i18n="label.recoveryPassphrase">Passphrase профілю (для доступу до ключа):</span>
+          <input id="recovery-setup-passphrase" type="password" autocomplete="current-password">
+        </label>
+        <div class="btn-row"><button id="btn-setup-recovery" type="button" data-i18n="btn.setupRecovery">Налаштувати відновлення</button></div>
+        <div id="recovery-status" class="status"></div>
+        <div id="recovery-text-export" class="secret-output" hidden></div>
+        <p class="hint" data-i18n="recovery.qrDeferred">
+          QR-код наразі не підтримується (жодна QR-бібліотека ще не вендорена в цьому проєкті) --
+          використайте текстовий рядок вище й передайте його довіреній особі будь-яким іншим каналом.
+        </p>
+        <h3 data-i18n="recovery.heldShares">Частки, які я зберігаю для інших</h3>
+        <div id="recovery-held-list" class="list-area"></div>
+      </section>
+
       <section class="card">
         <h2 data-i18n="proofs.heading">Підтвердження акаунтів</h2>
         <div class="btn-row"><button id="btn-generate-proof" type="button" data-i18n="btn.generateProof">Створити доказ</button></div>

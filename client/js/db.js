@@ -1,6 +1,10 @@
 const DB_NAME = "spirit";
-const DB_VERSION = 1;
-const STORE_NAMES = ["profile", "contacts", "messages"];
+// Bumped to 2 for Section S2 (specs/phase5/social-recovery.md): adds the
+// trustedShares store. onupgradeneeded is idempotent (guards each store with
+// objectStoreNames.contains), so this is safe both for a brand-new database
+// and for an existing v1 database being upgraded in place.
+const DB_VERSION = 2;
+const STORE_NAMES = ["profile", "contacts", "messages", "trustedShares"];
 
 export function openDatabase() {
   return new Promise((resolve, reject) => {
