@@ -91,7 +91,15 @@ vi.mock("../js/webrtc.js", () => ({
   addLocalMediaTracks: vi.fn(),
   createRenegotiationOffer: vi.fn(),
   createRenegotiationAnswer: vi.fn(),
-  applyRenegotiationAnswer: vi.fn()
+  applyRenegotiationAnswer: vi.fn(),
+  // Real (non-mocked) implementation -- Section P1(a) coverage below asserts
+  // on its actual output as it flows into startAsInitiator/startAsJoiner
+  // calls, mirroring buildRtcConfig's own unit tests in rtcConfig.test.js.
+  buildRtcConfig: vi.fn((stunUrl, { forceTurnRelay = false } = {}) => {
+    const config = { iceServers: [{ urls: stunUrl }] };
+    if (forceTurnRelay) config.iceTransportPolicy = "relay";
+    return config;
+  })
 }));
 vi.mock("../js/signalingClient.js", () => ({
   createInvite: vi.fn(),
@@ -259,6 +267,7 @@ const HTML = `
   <section data-screen="server">
     <input id="server-url" type="text" value="http://node.example/index.php">
     <input id="stun-url" type="text" value="stun:stun.example:19302">
+    <input id="force-turn-relay" type="checkbox">
     <div id="admin-login-form">
       <input id="admin-password" type="password">
       <button id="btn-admin-login" type="button">Увійти</button>
@@ -443,6 +452,86 @@ describe("btn-quick-chat: zero-click ephemeral 'spirit mode' (Section F3)", () =
 
     resolveCreateInvite({ roomId: "room1", inviteToken: "tok1" });
     await vi.waitFor(() => expect(quickChatButton.disabled).toBe(false));
+  });
+});
+
+describe("force-turn-relay toggle (Section P1(a), specs/phase5/security-hardening.md)", () => {
+  it("leaves rtcConfig without iceTransportPolicy on the initiator path when the checkbox is unchecked (default)", async () => {
+    const keyPair = { privateKey: {}, publicKey: fakePublicKey("identity-pub") };
+    generateIdentityKeyPair.mockResolvedValue(keyPair);
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({ answer: null, ecdhPubkey: null });
+
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("force-turn-relay").checked = false;
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+    document.getElementById("btn-initiate").click();
+
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    expect(captured.rtcConfig).toEqual({ iceServers: [{ urls: "stun:stun.example:19302" }] });
+    expect("iceTransportPolicy" in captured.rtcConfig).toBe(false);
+  });
+
+  it("adds iceTransportPolicy: 'relay' to rtcConfig on the initiator path when the checkbox is checked", async () => {
+    const keyPair = { privateKey: {}, publicKey: fakePublicKey("identity-pub") };
+    generateIdentityKeyPair.mockResolvedValue(keyPair);
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({ answer: null, ecdhPubkey: null });
+
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("force-turn-relay").checked = true;
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+    document.getElementById("btn-initiate").click();
+
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    expect(captured.rtcConfig).toEqual({
+      iceServers: [{ urls: "stun:stun.example:19302" }],
+      iceTransportPolicy: "relay"
+    });
+  });
+
+  it("adds iceTransportPolicy: 'relay' to rtcConfig on the joiner path too, so both sides of a forced-relay connection are consistent", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    getOffer.mockResolvedValue({ offer: JSON.stringify({ type: "offer", sdp: "OFFER_SDP" }), ecdhPubkey: "peer-ecdh-b64" });
+
+    startAsJoiner.mockImplementation(() => ({ __fakePc: true }));
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("force-turn-relay").checked = true;
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+    document.getElementById("room-id").value = "room1";
+    document.getElementById("invite-token").value = "tok1";
+    document.getElementById("btn-join").click();
+
+    await vi.waitFor(() => expect(startAsJoiner).toHaveBeenCalled());
+    const [opts] = startAsJoiner.mock.calls[0];
+    expect(opts.rtcConfig).toEqual({
+      iceServers: [{ urls: "stun:stun.example:19302" }],
+      iceTransportPolicy: "relay"
+    });
   });
 });
 

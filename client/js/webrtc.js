@@ -1,5 +1,16 @@
 const DATA_CHANNEL_LABEL = "spirit-chat-stream";
 
+// Section P1(a), specs/phase5/security-hardening.md: pure/testable builder for
+// the RTCConfiguration used at every peer-connection-construction call site.
+// When forceTurnRelay is off (default), the returned object omits
+// iceTransportPolicy entirely -- NOT "all" -- so existing behavior for every
+// user who never touches the new toggle is byte-for-byte unchanged.
+export function buildRtcConfig(stunUrl, { forceTurnRelay = false } = {}) {
+  const config = { iceServers: [{ urls: stunUrl }] };
+  if (forceTurnRelay) config.iceTransportPolicy = "relay";
+  return config;
+}
+
 function wireChannel(channel, { onChannelOpen, onMessage, onChannelClose }) {
   channel.onopen = () => onChannelOpen?.(channel);
   channel.onmessage = (event) => onMessage?.(event.data);

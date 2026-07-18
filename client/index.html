@@ -222,6 +222,16 @@
         <label class="field"><span data-i18n="label.stun">STUN:</span>
           <input id="stun-url" type="text" value="stun:stun.l.google.com:19302">
         </label>
+        <label class="field checkbox-field">
+          <input id="force-turn-relay" type="checkbox">
+          <span data-i18n="server.forceTurnRelay">Форсувати TURN-релей</span>
+        </label>
+        <p class="hint" data-i18n="server.forceTurnRelayHint">
+          Приховує вашу реальну IP-адресу від співрозмовника ціною затримки. Потребує
+          справжнього TURN-сервера (з логіном/паролем) у полі STUN вище — звичайний
+          публічний STUN (як Google) не вміє ретранслювати трафік і з'єднання просто не
+          встановиться.
+        </p>
       </section>
 
       <section class="card">

@@ -46,7 +46,8 @@ import {
   addLocalMediaTracks,
   createRenegotiationOffer,
   createRenegotiationAnswer,
-  applyRenegotiationAnswer
+  applyRenegotiationAnswer,
+  buildRtcConfig
 } from "./webrtc.js";
 import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer } from "./signalingClient.js";
 import { deriveSessionKey, encryptMessage, decryptMessage } from "./e2ee.js";
@@ -1558,7 +1559,7 @@ export function initApp(doc, options) {
    */
   async function initiateChatSession({ pushToContact = null } = {}) {
     const serverUrl = el("server-url").value;
-    const rtcConfig = { iceServers: [{ urls: el("stun-url").value }] };
+    const rtcConfig = buildRtcConfig(el("stun-url").value, { forceTurnRelay: el("force-turn-relay").checked });
     const senderKey = state.senderKey;
 
     const ecdhKeyPair = await generateEcdhKeyPair();
@@ -1637,7 +1638,7 @@ export function initApp(doc, options) {
       roomId: el("room-id").value,
       inviteToken: el("invite-token").value,
       serverUrl: el("server-url").value,
-      rtcConfig: { iceServers: [{ urls: el("stun-url").value }] },
+      rtcConfig: buildRtcConfig(el("stun-url").value, { forceTurnRelay: el("force-turn-relay").checked }),
       channelOptions: {
         afterChannelOpen: () => {
           announce();
@@ -1672,7 +1673,7 @@ export function initApp(doc, options) {
     el("link-passphrase").value = "";
 
     const serverUrl = el("server-url").value;
-    const rtcConfig = { iceServers: [{ urls: el("stun-url").value }] };
+    const rtcConfig = buildRtcConfig(el("stun-url").value, { forceTurnRelay: el("force-turn-relay").checked });
     const senderKey = randomSenderKey();
 
     const ecdhKeyPair = await generateEcdhKeyPair();
@@ -1737,7 +1738,7 @@ export function initApp(doc, options) {
       roomId: el("room-id").value,
       inviteToken: el("invite-token").value,
       serverUrl: el("server-url").value,
-      rtcConfig: { iceServers: [{ urls: el("stun-url").value }] },
+      rtcConfig: buildRtcConfig(el("stun-url").value, { forceTurnRelay: el("force-turn-relay").checked }),
       onSessionReady: maybeSendLinkRequest,
       channelOptions: {
         afterChannelOpen: maybeSendLinkRequest,
@@ -1870,7 +1871,7 @@ export function initApp(doc, options) {
         roomId: invitedRoomId,
         inviteToken: invitedToken,
         serverUrl: el("server-url").value,
-        rtcConfig: { iceServers: [{ urls: el("stun-url").value }] },
+        rtcConfig: buildRtcConfig(el("stun-url").value, { forceTurnRelay: el("force-turn-relay").checked }),
         channelOptions: {
           afterChannelOpen: () => {
             announce();
