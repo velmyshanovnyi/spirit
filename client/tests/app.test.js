@@ -100,6 +100,9 @@ vi.mock("../js/signalingClient.js", () => ({
   submitAnswer: vi.fn(),
   pollForAnswer: vi.fn()
 }));
+vi.mock("../js/pushSend.js", () => ({
+  sendPushNotification: vi.fn()
+}));
 vi.mock("../js/e2ee.js", () => ({
   deriveSessionKey: vi.fn(),
   encryptMessage: vi.fn(),
@@ -167,6 +170,7 @@ import {
   applyRenegotiationAnswer
 } from "../js/webrtc.js";
 import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer } from "../js/signalingClient.js";
+import { sendPushNotification } from "../js/pushSend.js";
 import { encryptMessage, decryptMessage, deriveSessionKey } from "../js/e2ee.js";
 import { deriveRootKey, deriveInitialChainKeys, ratchetStep } from "../js/ratchet.js";
 import { promptGoogleSignIn, verifyGoogleIdToken } from "../js/googleOAuth.js";
@@ -4054,6 +4058,91 @@ describe("contacts and history screens (Sections N3/N4)", () => {
 
     expect(document.getElementById("contacts-empty").hidden).toBe(false);
     expect(document.querySelectorAll("#contacts-list .list-row").length).toBe(0);
+  });
+
+  it("contacts screen shows a message button per contact row", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    listContacts.mockResolvedValue([
+      { fingerprint: "a".repeat(64), identityPubkeyWire: "W1", firstSeen: 1, deviceList: null }
+    ]);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+
+    await reachScreen("contacts");
+    await vi.waitFor(() => expect(listContacts).toHaveBeenCalled());
+
+    const row = document.querySelector("#contacts-list .list-row");
+    const button = row.querySelector("[data-i18n='contacts.message']");
+    expect(button).not.toBeNull();
+  });
+
+  it("clicking a contact's message button creates an invite and enters the conversation screen, without pushing when there's no stored subscription", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    const targetFingerprint = "a".repeat(64);
+    listContacts.mockResolvedValue([
+      { fingerprint: targetFingerprint, identityPubkeyWire: "W1", firstSeen: 1, deviceList: null, pushSubscription: null }
+    ]);
+    getContact.mockResolvedValue({
+      fingerprint: targetFingerprint,
+      identityPubkeyWire: "W1",
+      firstSeen: 1,
+      deviceList: null,
+      pushSubscription: null
+    });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+
+    await reachScreen("contacts");
+    await vi.waitFor(() => expect(listContacts).toHaveBeenCalled());
+
+    const row = document.querySelector("#contacts-list .list-row");
+    row.querySelector("[data-i18n='contacts.message']").click();
+
+    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledWith("http://node.example/index.php", "sender-fp"));
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
+    expect(sendPushNotification).not.toHaveBeenCalled();
+  });
+
+  it("clicking a contact's message button fire-and-forgets a push notification when a subscription is stored", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    const targetFingerprint = "a".repeat(64);
+    const pushSubscription = { endpoint: "https://fcm.googleapis.com/fcm/send/abc", keys: { p256dh: "p", auth: "a" } };
+    listContacts.mockResolvedValue([
+      { fingerprint: targetFingerprint, identityPubkeyWire: "W1", firstSeen: 1, deviceList: null, pushSubscription }
+    ]);
+    getContact.mockResolvedValue({
+      fingerprint: targetFingerprint,
+      identityPubkeyWire: "W1",
+      firstSeen: 1,
+      deviceList: null,
+      pushSubscription
+    });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    sendPushNotification.mockResolvedValue(true);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+
+    await reachScreen("contacts");
+    await vi.waitFor(() => expect(listContacts).toHaveBeenCalled());
+
+    const row = document.querySelector("#contacts-list .list-row");
+    row.querySelector("[data-i18n='contacts.message']").click();
+
+    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledWith("http://node.example/index.php", "sender-fp"));
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
+    await vi.waitFor(() =>
+      expect(sendPushNotification).toHaveBeenCalledWith(pushSubscription, { room: "room1", token: "tok1" })
+    );
   });
 
   it("history screen lists conversations for the active PROFILE-mode identity", async () => {

@@ -32,6 +32,7 @@ import {
 } from "./contacts.js";
 import { buildPushSubscribeOptions, serializeSubscriptionForAnnounce, parsePushSubscriptionAnnounce } from "./pushSubscription.js";
 import { VAPID_PUBLIC_KEY_RAW_BASE64URL } from "./vapidKeys.js";
+import { sendPushNotification } from "./pushSend.js";
 import { appendMessage, listMessages, listConversations } from "./historyStore.js";
 import { acceptNewerProofSet, addProofToSet, revokeProofFromSet } from "./proofSet.js";
 import { createProofBlock, parseProofBlock, verifyProofBlock } from "./proofs.js";
@@ -379,9 +380,31 @@ export function initApp(doc, options) {
         }
         row.appendChild(badge);
       }
+      const messageButton = doc.createElement("button");
+      messageButton.type = "button";
+      messageButton.dataset.i18n = "contacts.message";
+      messageButton.textContent = t("contacts.message");
+      row.appendChild(messageButton);
       list.appendChild(row);
     }
   }
+
+  // Section PN5 (specs/phase5/push-notifications.md): a single delegated
+  // listener on the list container, rather than one per row (rows are
+  // rebuilt on every renderContactsScreen() call). Every contact shown here
+  // is, by construction, a saved contact with no live P2P channel right now
+  // (if one existed, the app would already be on the conversation screen,
+  // not the contacts list) -- so there is no separate "is this contact
+  // online" check needed before starting a fresh invite-based session.
+  el("contacts-list")?.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-i18n='contacts.message']");
+    if (!button) return;
+    const row = button.closest("[data-contact-fingerprint]");
+    const targetFingerprint = row?.dataset.contactFingerprint;
+    if (!targetFingerprint) return;
+    const contact = await getContact(targetFingerprint);
+    await initiateChatSession({ pushToContact: contact ?? null });
+  });
 
   /**
    * Re-checks every contact's held proofs against their live publication --
@@ -1533,7 +1556,7 @@ export function initApp(doc, options) {
    * zero-click "Швидкий анонімний чат" (Section F3, specs/ui/ephemeral-spirit-mode.md)
    * -- both need an already-established state.senderKey/identityKeyPair.
    */
-  async function initiateChatSession() {
+  async function initiateChatSession({ pushToContact = null } = {}) {
     const serverUrl = el("server-url").value;
     const rtcConfig = { iceServers: [{ urls: el("stun-url").value }] };
     const senderKey = state.senderKey;
@@ -1542,6 +1565,14 @@ export function initApp(doc, options) {
     const { roomId, inviteToken } = await createInvite(serverUrl, senderKey);
     el("room-id").value = roomId;
     el("invite-token").value = inviteToken;
+    // Section PN5: notifying a specific offline contact out-of-band via Web
+    // Push, on top of the invite link this already produces. Fire-and-forget
+    // -- sendPushNotification never throws (fails soft internally), and this
+    // must never block or gate landing in the lobby: the invite link is
+    // always shown/copyable regardless of whether the push itself succeeds.
+    if (pushToContact?.pushSubscription) {
+      void sendPushNotification(pushToContact.pushSubscription, { room: roomId, token: inviteToken });
+    }
     // Land on the conversation lobby immediately, before a peer has joined --
     // otherwise the initiator (quick-chat especially) has no way to share
     // the link or test their camera/mic, and "opening the chat" silently
