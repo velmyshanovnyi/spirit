@@ -37,7 +37,8 @@ import { sendPushNotification } from "./pushSend.js";
 import { appendMessage, listMessages, listConversations } from "./historyStore.js";
 import { splitSecret } from "./shamir.js";
 import { buildRecoveryShareAnnounce, parseRecoveryShareAnnounce, encodeShareAsText } from "./recoveryShare.js";
-import { saveTrustedShare, listTrustedShares } from "./trustedShares.js";
+import { saveTrustedShare, listTrustedShares, getTrustedShare } from "./trustedShares.js";
+import { recoverFromShares } from "./socialRecovery.js";
 import { acceptNewerProofSet, addProofToSet, revokeProofFromSet } from "./proofSet.js";
 import { createProofBlock, parseProofBlock, verifyProofBlock } from "./proofs.js";
 import { fetchProofPageText } from "./fetchProof.js";
@@ -399,14 +400,47 @@ export function initApp(doc, options) {
     if (heldList) {
       const held = await listTrustedShares();
       heldList.innerHTML = "";
+      if (held.length === 0) {
+        const empty = doc.createElement("p");
+        empty.className = "hint";
+        empty.textContent = t("recovery.noHeldShares");
+        heldList.appendChild(empty);
+      }
       for (const share of held) {
         const row = doc.createElement("div");
         row.className = "list-row";
-        row.textContent = t("recovery.heldFor", { fp: formatSpiritId(share.ownerFingerprint) });
+        const label = doc.createElement("span");
+        label.textContent = t("recovery.heldFor", { fp: formatSpiritId(share.ownerFingerprint) });
+        row.appendChild(label);
+        // Section S3: trustee-side "view/export a held share" -- read-only
+        // reveal of ALREADY-STORED data via the same encodeShareAsText used
+        // by the owner-side setup export (Section S2). No extra
+        // re-authentication gate here (exec-review judgment call, Section
+        // S3): a single share below `threshold` is information-theoretically
+        // useless on its own (Shamir's guarantee, shamir.js), so showing it
+        // to whoever is already using this unlocked device/session reveals
+        // nothing exploitable alone -- unlike revealing a full mnemonic or
+        // keyfile passphrase, which by itself reconstructs the entire key.
+        const showButton = doc.createElement("button");
+        showButton.type = "button";
+        showButton.textContent = t("recovery.showAsText");
+        showButton.dataset.showHeldShareFor = share.ownerFingerprint;
+        row.appendChild(showButton);
         heldList.appendChild(row);
       }
     }
   }
+
+  el("recovery-held-list")?.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-show-held-share-for]");
+    if (!button) return;
+    const ownerFingerprint = button.dataset.showHeldShareFor;
+    const share = await getTrustedShare(ownerFingerprint);
+    const textEl = el("recovery-held-share-text");
+    if (!textEl || !share) return;
+    textEl.hidden = false;
+    textEl.textContent = encodeShareAsText(share);
+  });
 
   /**
    * Rebuilds the threshold <select>'s options for the CURRENTLY checked
@@ -1656,6 +1690,89 @@ export function initApp(doc, options) {
     setPortableLoginStatus("");
     // Exec review: same session/MRU bookkeeping as the regular unlock path,
     // so this account is offered via profile-select on a later visit too.
+    rememberSession(state.senderKey, readSessionTtlHours());
+    recordRecentAccount(state.senderKey);
+    await refreshProfileSelector();
+    router.navigate(postIdentityRoute());
+  });
+
+  // Section S3 (specs/phase5/social-recovery.md): owner-side recovery --
+  // combine >= threshold pasted share-text strings back into the identity
+  // scalar, then land in a logged-in state via the EXACT SAME post-scalar
+  // adoption path as portable-login above (adoptScalarIdentity -> senderKey
+  // -> nickname -> re-render cards -> remember session -> navigate). No new
+  // security posture invented here, just a different way to arrive at the
+  // same scalar.
+  const setRecoveryRestoreStatus = (text) => {
+    const status = el("recovery-restore-status");
+    if (status) status.textContent = text;
+  };
+  el("link-toggle-recovery-restore")?.addEventListener("click", () => {
+    el("recovery-restore-form").hidden = !el("recovery-restore-form").hidden;
+  });
+  if (el("btn-recover-from-shares")) withBusyButton(el("btn-recover-from-shares"), async () => {
+    const shareTexts = el("recovery-restore-shares").value.split("\n");
+    const passphrase = el("recovery-restore-passphrase").value;
+
+    const result = recoverFromShares(shareTexts);
+    if (!result.ok) {
+      if (result.reason === "empty") setRecoveryRestoreStatus(t("recovery.restoreEmpty"));
+      else if (result.reason === "malformed") setRecoveryRestoreStatus(t("recovery.restoreMalformed", { detail: result.detail }));
+      else if (result.reason === "inconsistent") setRecoveryRestoreStatus(t("recovery.restoreInconsistent"));
+      else if (result.reason === "insufficient") {
+        const [have, need] = result.detail.match(/\d+/g) || [];
+        setRecoveryRestoreStatus(t("recovery.restoreInsufficient", { have, need }));
+      } else setRecoveryRestoreStatus(result.detail || result.reason);
+      return;
+    }
+    if (!passphrase) {
+      setRecoveryRestoreStatus(t("recovery.restoreNeedPassphrase"));
+      return;
+    }
+
+    let identityKeyPair;
+    try {
+      identityKeyPair = await adoptScalarIdentity(result.scalar, passphrase);
+    } catch {
+      // Per Shamir's guarantee (shamir.js's combineShares doc comment),
+      // combining an inconsistent/insufficient set of shares can't be
+      // detected mathematically -- the only signal available is whether the
+      // resulting bytes fail to import as a valid P-256 scalar (the known
+      // ~2^-32 edge case, deterministicIdentity.js) or, more commonly here,
+      // that the caller pasted shares from the wrong set that still happen
+      // to be self-consistent. Either way: a clear, actionable message, not
+      // a cryptic stack trace, per the spec's explicit UX requirement.
+      // Exec review nice-to-have: don't wipe the pasted shares on a
+      // RETRYABLE failure -- the UX copy explicitly invites the user to
+      // "try again", and the individual share texts are below-threshold-
+      // useless on their own (no security reason to force a full re-paste
+      // mid-recovery-crisis). Only the passphrase is cleared here.
+      el("recovery-restore-passphrase").value = "";
+      setRecoveryRestoreStatus(t("recovery.restoreImportFailed"));
+      return;
+    }
+    // Don't leave the reconstructed key material or passphrase sitting in
+    // DOM inputs any longer than needed (same care as every other
+    // raw-key-handling path in this file, e.g. btn-backup-mnemonic) -- only
+    // on the success path, once the shares are no longer needed.
+    el("recovery-restore-shares").value = "";
+    el("recovery-restore-passphrase").value = "";
+
+    state.identityKeyPair = identityKeyPair;
+    state.senderKey = state.identityKeyPair.profileId;
+    state.nickname = await getNickname(state.senderKey);
+    resetOwnProofsState();
+    renderGuestQuickActions();
+    renderNotificationsCard();
+    renderRecoveryCard();
+    setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
+    // Exec-review-flagged residual limitation (spec, Section S3): combining
+    // shares can never cryptographically prove "this is definitely the
+    // right key" -- the resulting fingerprint is surfaced prominently here
+    // so the user can visually confirm it against what they expected
+    // (a fingerprint they wrote down, or contacts recognizing it), the same
+    // class of residual risk mnemonic restore already has.
+    setRecoveryRestoreStatus(t("recovery.restoreSuccess", { fp: formatSpiritId(state.senderKey) }));
     rememberSession(state.senderKey, readSessionTtlHours());
     recordRecentAccount(state.senderKey);
     await refreshProfileSelector();

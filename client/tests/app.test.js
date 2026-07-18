@@ -165,8 +165,9 @@ import {
   updateContactPushSubscription,
   listContacts
 } from "../js/contacts.js";
-import { saveTrustedShare } from "../js/trustedShares.js";
-import { buildRecoveryShareAnnounce } from "../js/recoveryShare.js";
+import { saveTrustedShare, listTrustedShares, getTrustedShare } from "../js/trustedShares.js";
+import { buildRecoveryShareAnnounce, encodeShareAsText } from "../js/recoveryShare.js";
+import { splitSecret } from "../js/shamir.js";
 import { acceptNewerProofSet, signProofSet, addProofToSet, revokeProofFromSet } from "../js/proofSet.js";
 import { createProofBlock, parseProofBlock, verifyProofBlock } from "../js/proofs.js";
 import { generateAnonymousNickname } from "../js/anonymousNickname.js";
@@ -228,6 +229,13 @@ const HTML = `
       <button id="btn-login-portable" type="button">Увійти за логіном</button>
       <div id="portable-login-status"></div>
     </div>
+    <button id="link-toggle-recovery-restore" type="button">Відновити через довірених контактів</button>
+    <div id="recovery-restore-form" hidden>
+      <textarea id="recovery-restore-shares"></textarea>
+      <input id="recovery-restore-passphrase" type="password">
+      <button id="btn-recover-from-shares" type="button">Відновити</button>
+      <div id="recovery-restore-status"></div>
+    </div>
     <div id="account-create-mode">
       <button id="btn-create-profile" type="button">Створити профіль</button>
       <div id="profile-setup" hidden>
@@ -270,6 +278,16 @@ const HTML = `
     <button id="btn-add-proof" type="button">Додати</button>
     <div id="proofs-status"></div>
     <div id="own-proofs-list"></div>
+    <div id="recovery-card" hidden>
+      <div id="recovery-contacts-list"></div>
+      <select id="recovery-threshold"></select>
+      <input id="recovery-setup-passphrase" type="password">
+      <button id="btn-setup-recovery" type="button">Налаштувати відновлення</button>
+      <div id="recovery-status"></div>
+      <div id="recovery-text-export" hidden></div>
+      <div id="recovery-held-list"></div>
+      <div id="recovery-held-share-text" hidden></div>
+    </div>
   </section>
 
   <section data-screen="server">
@@ -1372,6 +1390,145 @@ describe("portable account creation (Section H3, exec-reviewed Argon2id core)", 
     await vi.waitFor(() =>
       expect(document.getElementById("portable-login-display").textContent).toContain("abcdefghijTAIL0000TAIL0000")
     );
+  });
+});
+
+describe("social recovery S3: trustee-side held-shares view (specs/phase5/social-recovery.md)", () => {
+  it("renders listTrustedShares()'s contents, and 'show as text' reveals the exact encodeShareAsText output", async () => {
+    const heldShare = {
+      ownerFingerprint: "owner-fp",
+      x: 2,
+      y: new Uint8Array([10, 20, 30]),
+      threshold: 2,
+      totalShares: 3,
+      receivedAt: 1000
+    };
+    listTrustedShares.mockResolvedValue([heldShare]);
+    getTrustedShare.mockResolvedValue(heldShare);
+    const keyPair = { privateKey: { __tag: "profile-priv" }, publicKey: fakePublicKey("profile-pub"), vaultKey: { __tag: "vault-key" } };
+    createPermanentProfile.mockResolvedValue(keyPair);
+    fingerprint.mockResolvedValue("profile-fp");
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "my local passphrase";
+    document.getElementById("btn-profile-confirm").click();
+
+    await vi.waitFor(() => expect(listTrustedShares).toHaveBeenCalled());
+    const row = document.querySelector("[data-show-held-share-for='owner-fp']");
+    expect(row).not.toBeNull();
+
+    row.click();
+
+    await vi.waitFor(() => expect(getTrustedShare).toHaveBeenCalledWith("owner-fp"));
+    expect(document.getElementById("recovery-held-share-text").hidden).toBe(false);
+    expect(document.getElementById("recovery-held-share-text").textContent).toBe(encodeShareAsText(heldShare));
+  });
+});
+
+describe("social recovery S3: owner-side recovery flow (specs/phase5/social-recovery.md)", () => {
+  const SECRET = new Uint8Array(32).fill(5);
+
+  function textShares({ threshold = 2, shares = 3 } = {}, secret = SECRET) {
+    return splitSecret(secret, { threshold, shares }).map((s) => encodeShareAsText({ ...s, threshold, totalShares: shares }));
+  }
+
+  it("toggles the restore form visibility", () => {
+    initApp(document, { locale: "uk" });
+    expect(document.getElementById("recovery-restore-form").hidden).toBe(true);
+    document.getElementById("link-toggle-recovery-restore").click();
+    expect(document.getElementById("recovery-restore-form").hidden).toBe(false);
+  });
+
+  it("combines >= threshold consistent shares, adopts the identity via the same scalar-adoption path as portable login, and lands logged in", async () => {
+    const texts = textShares({ threshold: 2, shares: 3 });
+    adoptScalarIdentity.mockResolvedValue({
+      privateKey: { __tag: "recovered-priv" },
+      publicKey: fakePublicKey("recovered-pub"),
+      vaultKey: { __tag: "vault-key" },
+      profileId: "recovered-fp"
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("link-toggle-recovery-restore").click();
+    document.getElementById("recovery-restore-shares").value = `${texts[0]}\n${texts[1]}`;
+    document.getElementById("recovery-restore-passphrase").value = "new local passphrase";
+    document.getElementById("btn-recover-from-shares").click();
+
+    await vi.waitFor(() => expect(adoptScalarIdentity).toHaveBeenCalledWith(SECRET, "new local passphrase"));
+    await vi.waitFor(() =>
+      expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001recovered-fp")
+    );
+    // Residual-risk mitigation (spec, Section S3): the recovered fingerprint
+    // is surfaced so the user can visually confirm it's the identity they
+    // expected.
+    expect(document.getElementById("recovery-restore-status").textContent).toContain("spirit0001recovered-fp");
+    // Don't leave reconstructed key material or the passphrase sitting in
+    // DOM inputs after use.
+    expect(document.getElementById("recovery-restore-shares").value).toBe("");
+    expect(document.getElementById("recovery-restore-passphrase").value).toBe("");
+  });
+
+  it("rejects insufficient shares with a clear message, WITHOUT calling adoptScalarIdentity", async () => {
+    const texts = textShares({ threshold: 3, shares: 5 });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("link-toggle-recovery-restore").click();
+    document.getElementById("recovery-restore-shares").value = texts.slice(0, 2).join("\n");
+    document.getElementById("recovery-restore-passphrase").value = "pass";
+    document.getElementById("btn-recover-from-shares").click();
+
+    await vi.waitFor(() =>
+      expect(document.getElementById("recovery-restore-status").textContent).not.toBe("")
+    );
+    expect(adoptScalarIdentity).not.toHaveBeenCalled();
+  });
+
+  it("rejects shares from two different split cycles (mismatched threshold/totalShares) BEFORE calling adoptScalarIdentity", async () => {
+    const setA = textShares({ threshold: 2, shares: 3 });
+    const setB = textShares({ threshold: 3, shares: 4 }, new Uint8Array(32).fill(9));
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("link-toggle-recovery-restore").click();
+    document.getElementById("recovery-restore-shares").value = `${setA[0]}\n${setB[0]}`;
+    document.getElementById("recovery-restore-passphrase").value = "pass";
+    document.getElementById("btn-recover-from-shares").click();
+
+    await vi.waitFor(() =>
+      expect(document.getElementById("recovery-restore-status").textContent).not.toBe("")
+    );
+    expect(adoptScalarIdentity).not.toHaveBeenCalled();
+  });
+
+  it("rejects a malformed share-text string with a clear per-item message", async () => {
+    const texts = textShares({ threshold: 2, shares: 3 });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("link-toggle-recovery-restore").click();
+    document.getElementById("recovery-restore-shares").value = `${texts[0]}\nnot-a-share-at-all`;
+    document.getElementById("recovery-restore-passphrase").value = "pass";
+    document.getElementById("btn-recover-from-shares").click();
+
+    await vi.waitFor(() =>
+      expect(document.getElementById("recovery-restore-status").textContent).toContain("not-a-share-at-all")
+    );
+    expect(adoptScalarIdentity).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a clear message when the combined scalar fails to import as a valid key, instead of throwing", async () => {
+    const texts = textShares({ threshold: 2, shares: 3 });
+    adoptScalarIdentity.mockRejectedValue(new Error("invalid scalar"));
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("link-toggle-recovery-restore").click();
+    document.getElementById("recovery-restore-shares").value = `${texts[0]}\n${texts[1]}`;
+    document.getElementById("recovery-restore-passphrase").value = "pass";
+    document.getElementById("btn-recover-from-shares").click();
+
+    await vi.waitFor(() =>
+      expect(document.getElementById("recovery-restore-status").textContent).not.toBe("")
+    );
+    expect(document.getElementById("recovery-restore-status").textContent).not.toContain("invalid scalar");
   });
 });
 

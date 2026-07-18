@@ -101,6 +101,22 @@
           <div id="portable-login-status" class="status"></div>
         </div>
 
+        <p class="hint-text"><button id="link-toggle-recovery-restore" type="button" class="btn-link" data-i18n="recovery.restoreToggle">Відновити через довірених контактів</button></p>
+        <div id="recovery-restore-form" hidden class="subgroup">
+          <h3 data-i18n="recovery.restoreHeading">Відновити через довірених контактів</h3>
+          <p class="hint" data-i18n="recovery.restoreHint">
+            Вставте текст частки, отриманий від кожного довіреного контакту, по одному в рядок, і скомбінуйте їх, щоб відновити акаунт.
+          </p>
+          <label class="field"><span data-i18n="label.recoveryShareTexts">Текст часток (по одній в рядок):</span>
+            <textarea id="recovery-restore-shares" rows="4"></textarea>
+          </label>
+          <label class="field"><span data-i18n="label.recoveryRestorePassphrase">Новий локальний passphrase (для повторного шифрування копії на цьому пристрої):</span>
+            <input id="recovery-restore-passphrase" type="password" autocomplete="new-password">
+          </label>
+          <div class="btn-row"><button id="btn-recover-from-shares" type="button" class="btn-primary" data-i18n="btn.recoverFromShares">Відновити</button></div>
+          <div id="recovery-restore-status" class="status"></div>
+        </div>
+
         <div id="account-create-mode">
           <div class="btn-row">
             <button id="btn-create-profile" type="button" class="btn-primary" data-i18n="btn.createProfile">Створити профіль</button>
@@ -218,6 +234,7 @@
         </p>
         <h3 data-i18n="recovery.heldShares">Частки, які я зберігаю для інших</h3>
         <div id="recovery-held-list" class="list-area"></div>
+        <div id="recovery-held-share-text" class="secret-output" hidden></div>
       </section>
 
       <section class="card">
