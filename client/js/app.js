@@ -253,6 +253,15 @@ export function initApp(doc, options) {
     const roomStatus = el("room-status");
     if (roomStatus) setDynamicText(roomStatus, text);
   };
+  // Section P4 (security-hardening.md, exec review finding): every site that
+  // resets state.peerFingerprint to null (logout, starting a fresh session,
+  // joining a new one) must also hide a hint left over from a PREVIOUS
+  // peer -- otherwise it stays visible, misleadingly labeled as being about
+  // whichever peer connects next.
+  const hideSafetyNumberHint = () => {
+    const hintEl = el("safety-number-hint");
+    if (hintEl) hintEl.hidden = true;
+  };
   const setGoogleStatus = (text) => {
     el("google-verify-status").textContent = text;
   };
@@ -545,6 +554,7 @@ export function initApp(doc, options) {
     state.sessionKey = null;
     state.localStream = null;
     state.peerFingerprint = null;
+    hideSafetyNumberHint();
     state.peerIdentityPublicKey = null;
     state.sessionEcdhWires = null;
     // exec review finding: without these, a fresh post-logout session could
@@ -725,6 +735,13 @@ export function initApp(doc, options) {
       state.peerFingerprint = verified.fingerprint;
       state.peerIdentityPublicKey = verified.identityPublicKey;
       let continuity = "";
+      // Section P4 (security-hardening.md): a peer verified for the first
+      // time -- either a brand-new profile-mode contact, or ANY peer in
+      // ephemeral mode (nothing persists there, so every meeting is
+      // effectively first) -- gets a persistent on-screen hint to verify
+      // the fingerprint out-of-band (safety number). A KNOWN contact
+      // doesn't: TOFU continuity is already the trust signal there.
+      let isFirstMeeting = true;
       // Persist the contact only in permanent-profile mode (the vault key's
       // presence is what distinguishes it) -- ephemeral sessions store nothing.
       if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
@@ -734,6 +751,16 @@ export function initApp(doc, options) {
           nickname: verified.nickname || null
         });
         continuity = status === "known" ? t("status.knownContact") : t("status.newContact");
+        isFirstMeeting = status !== "known";
+      }
+      const hintEl = el("safety-number-hint");
+      if (hintEl) {
+        if (isFirstMeeting) {
+          setDynamicText(hintEl, t("safety.hint", { fp: formatSpiritId(verified.fingerprint) }));
+          hintEl.hidden = false;
+        } else {
+          hintEl.hidden = true;
+        }
       }
       // A nickname is peer-CHOSEN, not proof of identity -- a different
       // fingerprint could announce the same nickname (impersonation-by-name,
@@ -1581,6 +1608,7 @@ export function initApp(doc, options) {
     enterConversationLobby({ ownsInvite: true });
 
     state.peerFingerprint = null;
+    hideSafetyNumberHint();
     state.sessionEcdhWires = null;
     const announce = makeIdentityAnnouncer();
     startInitiatorSession({
@@ -1631,6 +1659,7 @@ export function initApp(doc, options) {
       return;
     }
     state.peerFingerprint = null;
+    hideSafetyNumberHint();
     state.sessionEcdhWires = null;
     const announce = makeIdentityAnnouncer();
     await startJoinerSession({
@@ -1864,6 +1893,7 @@ export function initApp(doc, options) {
         renderNotificationsCard();
 
         state.peerFingerprint = null;
+        hideSafetyNumberHint();
         state.sessionEcdhWires = null;
         const announce = makeIdentityAnnouncer();
         await startJoinerSession({

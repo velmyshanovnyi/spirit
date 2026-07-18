@@ -295,6 +295,7 @@ const HTML = `
     <div id="ephemeral-identity-banner" hidden>
       <span id="ephemeral-nickname-display"></span>
     </div>
+    <div id="safety-number-hint" hidden class="banner-warn"></div>
     <video id="video-remote"></video>
     <video id="video-local"></video>
     <button id="btn-start-call" type="button"></button>
@@ -2387,6 +2388,173 @@ describe("identity announce in chat flows (Section 12)", () => {
     expect(rememberContact).toHaveBeenCalledWith(
       expect.objectContaining({ fingerprint: "peer-fp", identityPubkeyWire: "PEER" })
     );
+  });
+
+  it("Section P4: shows a persistent safety-number hint with the peer's fingerprint on first meeting a NEW contact (profile mode)", async () => {
+    createPermanentProfile.mockResolvedValue({
+      privateKey: { __tag: "profile-priv" },
+      publicKey: fakePublicKey("profile-pub"),
+      vaultKey: { __tag: "vault-key" }
+    });
+    fingerprint.mockResolvedValue("profile-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+    verifyIdentityAnnounce.mockResolvedValue({ identityPublicKey: {}, identityPubkeyWire: "PEER", fingerprint: "peer-fp-new" });
+    rememberContact.mockResolvedValue({ status: "new", contact: {} });
+
+    const channel = fakeChannel();
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "pass";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001profile-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(channel);
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+
+    const hint = document.getElementById("safety-number-hint");
+    await vi.waitFor(() => expect(hint.hidden).toBe(false));
+    expect(hint.textContent).toContain("spirit0001peer-fp-new");
+  });
+
+  it("Section P4: does NOT show the safety-number hint for a peer already known from a prior meeting (profile mode)", async () => {
+    createPermanentProfile.mockResolvedValue({
+      privateKey: { __tag: "profile-priv" },
+      publicKey: fakePublicKey("profile-pub"),
+      vaultKey: { __tag: "vault-key" }
+    });
+    fingerprint.mockResolvedValue("profile-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+    verifyIdentityAnnounce.mockResolvedValue({ identityPublicKey: {}, identityPubkeyWire: "PEER", fingerprint: "peer-fp-known" });
+    rememberContact.mockResolvedValue({ status: "known", contact: {} });
+
+    const channel = fakeChannel();
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "pass";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001profile-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(channel);
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+
+    await vi.waitFor(() => expect(document.getElementById("connection-status").textContent).toContain("peer-fp-known"));
+    expect(document.getElementById("safety-number-hint").hidden).toBe(true);
+  });
+
+  it("Section P4 (exec review finding): clears a previously-shown safety-number hint when the SAME peer reconnects and is now known", async () => {
+    createPermanentProfile.mockResolvedValue({
+      privateKey: { __tag: "profile-priv" },
+      publicKey: fakePublicKey("profile-pub"),
+      vaultKey: { __tag: "vault-key" }
+    });
+    fingerprint.mockResolvedValue("profile-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+    verifyIdentityAnnounce.mockResolvedValue({ identityPublicKey: {}, identityPubkeyWire: "PEER", fingerprint: "peer-fp-repeat" });
+
+    const channel = fakeChannel();
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "pass";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001profile-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(channel);
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    // First meeting: hint appears.
+    rememberContact.mockResolvedValueOnce({ status: "new", contact: {} });
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S1" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE_1");
+    const hint = document.getElementById("safety-number-hint");
+    await vi.waitFor(() => expect(hint.hidden).toBe(false));
+
+    // Same peer re-announces later in the same session, now known: hint must clear.
+    rememberContact.mockResolvedValueOnce({ status: "known", contact: {} });
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S2" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE_2");
+    await vi.waitFor(() => expect(hint.hidden).toBe(true));
+  });
+
+  it("Section P4 (exec review finding): a stale hint from a previous peer does not survive logout", async () => {
+    verifyIdentityAnnounce.mockResolvedValue({ identityPublicKey: {}, identityPubkeyWire: "PEER", fingerprint: "peer-fp-stale" });
+
+    await establishedInitiatorChat();
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    const capturedRef = startAsInitiator.mock.calls.at(-1)[0];
+    await capturedRef.onMessage("ENCRYPTED_ANNOUNCE");
+
+    const hint = document.getElementById("safety-number-hint");
+    await vi.waitFor(() => expect(hint.hidden).toBe(false));
+
+    document.getElementById("btn-logout").click();
+    expect(hint.hidden).toBe(true);
+  });
+
+  it("Section P4: shows the safety-number hint in ephemeral mode too (no persistence means every meeting is effectively first)", async () => {
+    verifyIdentityAnnounce.mockResolvedValue({ identityPublicKey: {}, identityPubkeyWire: "PEER", fingerprint: "peer-fp-ephemeral" });
+
+    const { captured } = await establishedInitiatorChat();
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+
+    const hint = document.getElementById("safety-number-hint");
+    await vi.waitFor(() => expect(hint.hidden).toBe(false));
+    expect(hint.textContent).toContain("spirit0001peer-fp-ephemeral");
+    expect(rememberContact).not.toHaveBeenCalled();
   });
 });
 
