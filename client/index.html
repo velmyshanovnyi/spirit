@@ -328,6 +328,12 @@
           <span data-i18n="ephemeral.youAre">Ви зараз:</span> <strong id="ephemeral-nickname-display"></strong>
         </div>
         <div id="safety-number-hint" hidden class="banner-warn"></div>
+        <div id="file-offer-banner" hidden class="banner-warn">
+          <span id="file-offer-text"></span>
+          <button id="btn-file-accept" type="button" data-i18n="fileTransfer.accept">Прийняти</button>
+          <button id="btn-file-reject" type="button" data-i18n="fileTransfer.reject">Відхилити</button>
+        </div>
+        <div id="file-transfers" class="list-area"></div>
         <div class="video-area">
           <video id="video-remote" class="video-tile video-tile-remote" autoplay playsinline></video>
           <video id="video-local" class="video-tile video-tile-local" autoplay playsinline muted></video>
@@ -349,6 +355,8 @@
         <div class="chat-input-row">
           <input id="message-input" type="text" data-i18n-placeholder="chat.placeholder">
           <button id="btn-send" type="button" class="btn-primary" data-i18n="btn.send">Надіслати</button>
+          <label for="file-input" class="btn-icon" data-i18n="fileTransfer.pick">📎 Надіслати файл</label>
+          <input id="file-input" type="file" hidden>
         </div>
       </section>
     </section>

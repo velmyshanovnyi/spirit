@@ -43,6 +43,7 @@ import { acceptNewerProofSet, addProofToSet, revokeProofFromSet } from "./proofS
 import { createProofBlock, parseProofBlock, verifyProofBlock } from "./proofs.js";
 import { fetchProofPageText } from "./fetchProof.js";
 import { generateAnonymousNickname } from "./anonymousNickname.js";
+import { splitFileIntoChunks, chunkToBase64, base64ToChunk, computeFileHash, createFileAssembler } from "./fileTransfer.js";
 
 import {
   startAsInitiator,
@@ -241,7 +242,20 @@ export function initApp(doc, options) {
     isInviteOwner: false,
     // Own display name (Section 16), loaded from profile.js's unencrypted
     // nickname record on create/unlock; null in ephemeral quick-chat mode.
-    nickname: null
+    nickname: null,
+    // Section FT2 (specs/phase4/file-transfer.md): outbound file-offers this
+    // side originated, keyed by fileId, holding the already-chunked buffer
+    // ready to stream the instant a matching file-accept arrives. An entry
+    // is removed once fully sent, rejected, or the peer session resets.
+    outgoingFileTransfers: {},
+    // Inbound transfers this side has ACCEPTED (has a live assembler for),
+    // keyed by fileId. A file-offer alone does NOT create an entry here --
+    // only after the user clicks Accept -- see pendingFileOffers below.
+    incomingFileTransfers: {},
+    // Inbound file-offers awaiting the user's accept/reject decision, keyed
+    // by fileId -- distinct from incomingFileTransfers so an unaccepted
+    // offer never has an assembler (and therefore can never accept chunks).
+    pendingFileOffers: {}
   };
 
   // Runtime values must survive language switches: the first dynamic write
@@ -266,6 +280,18 @@ export function initApp(doc, options) {
   const hideSafetyNumberHint = () => {
     const hintEl = el("safety-number-hint");
     if (hintEl) hintEl.hidden = true;
+    // Section FT2 (file-transfer.md): every site that resets peerFingerprint
+    // (logout, starting a fresh session, joining a new one) also invalidates
+    // any in-flight file transfers with the PREVIOUS peer -- an outgoing
+    // transfer must not keep streaming chunks into a channel that now
+    // belongs to a different (or no) peer, and stale incoming offers/
+    // assemblers from the old peer must not linger to be silently resumed
+    // by a same-fileId collision from a new peer.
+    state.outgoingFileTransfers = {};
+    state.incomingFileTransfers = {};
+    state.pendingFileOffers = {};
+    const offerBanner = el("file-offer-banner");
+    if (offerBanner) offerBanner.hidden = true;
   };
   const setGoogleStatus = (text) => {
     el("google-verify-status").textContent = text;
@@ -842,8 +868,118 @@ export function initApp(doc, options) {
     "push-subscription-announce",
     "recovery-share-announce",
     "webrtc-call-offer",
-    "webrtc-call-answer"
+    "webrtc-call-answer",
+    "file-offer",
+    "file-accept",
+    "file-reject",
+    "file-chunk"
   ]);
+
+  // Section FT2 (specs/phase4/file-transfer.md), architectural decisions:
+  // 16KB raw-byte chunks (base64'd into JSON control messages, consistent
+  // with the existing "everything is JSON text" control pattern); a 1MB
+  // bufferedAmount backpressure threshold, to avoid overflowing the WebRTC
+  // SCTP send buffer on large files; and a 100MB soft UI warning (no hard
+  // limit -- the whole file is held in RAM for the duration of a transfer,
+  // by deliberate zero-database design).
+  const FILE_CHUNK_SIZE = 16 * 1024;
+  const BUFFERED_AMOUNT_HIGH_THRESHOLD = 1024 * 1024;
+  const FILE_SIZE_WARNING_BYTES = 100 * 1024 * 1024;
+
+  function randomFileId() {
+    return [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  function formatFileSize(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  // Renders/updates a one-line status row for a given transfer inside the
+  // file-transfers list, creating it on first use. Returns the row element
+  // so callers (e.g. the download-ready path) can append richer content
+  // (a download link) beyond plain text.
+  function renderFileTransferStatus(fileId, text) {
+    const container = el("file-transfers");
+    if (!container) return null;
+    let row = doc.getElementById(`file-transfer-${fileId}`);
+    if (!row) {
+      row = doc.createElement("div");
+      row.id = `file-transfer-${fileId}`;
+      row.className = "file-transfer-row";
+      container.appendChild(row);
+    }
+    row.textContent = text;
+    return row;
+  }
+
+  function renderFileOfferBanner(offer) {
+    const banner = el("file-offer-banner");
+    if (!banner) return;
+    setDynamicText(el("file-offer-text"), t("fileTransfer.offer", { name: offer.name, size: formatFileSize(offer.size) }));
+    banner.hidden = false;
+    banner.dataset.fileId = offer.fileId;
+  }
+
+  // Called once the last chunk of an accepted transfer has been verified
+  // against its announced SHA-256 -- exposes the reassembled bytes as a
+  // downloadable link. NEVER called on a hash mismatch (see the file-chunk
+  // branch in handleChatMessage): a corrupted/incomplete file must never
+  // reach this function, so there is no code path here that could offer an
+  // unverified Blob as if it were a completed, trustworthy download.
+  function renderFileTransferDownload(fileId, name, mimeType, buffer) {
+    const row = renderFileTransferStatus(fileId, t("fileTransfer.complete", { name }));
+    if (!row) return;
+    const blob = new Blob([buffer], { type: mimeType || "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    const link = doc.createElement("a");
+    link.href = url;
+    link.download = name;
+    link.textContent = t("fileTransfer.downloadLink");
+    row.appendChild(link);
+  }
+
+  // Backpressure (spec Section, "Архітектурні рішення" #3): before sending
+  // each chunk, checked against channel.bufferedAmount; if over threshold,
+  // waits for the channel's bufferedamountlow event rather than firing all
+  // chunks synchronously, which could overflow the WebRTC send buffer and
+  // tear down the connection on large files.
+  function waitForBufferedAmountLow(channel) {
+    return new Promise((resolve) => {
+      channel.onbufferedamountlow = () => {
+        channel.onbufferedamountlow = null;
+        resolve();
+      };
+    });
+  }
+
+  // Streams the chunks of an already-accepted outgoing transfer. Only ever
+  // invoked from the "file-accept" branch of handleChatMessage below -- NOT
+  // from the file-picker handler -- so no chunk is ever sent before the
+  // peer has explicitly accepted the offer.
+  async function sendFileChunks(fileId) {
+    const transfer = state.outgoingFileTransfers[fileId];
+    if (!transfer || !state.channel || !state.sessionKey) return;
+    const channel = state.channel;
+    channel.bufferedAmountLowThreshold = BUFFERED_AMOUNT_HIGH_THRESHOLD;
+    for (let index = transfer.sentCount; index < transfer.chunks.length; index++) {
+      // The transfer can vanish mid-flight (peer session reset) -- stop
+      // rather than keep pushing chunks nobody will ever assemble.
+      if (!state.outgoingFileTransfers[fileId] || state.channel !== channel) return;
+      if (channel.bufferedAmount > BUFFERED_AMOUNT_HIGH_THRESHOLD) {
+        await waitForBufferedAmountLow(channel);
+      }
+      const data = chunkToBase64(transfer.chunks[index]);
+      channel.send(await encryptMessage(state.sessionKey, JSON.stringify({ type: "file-chunk", fileId, index, data })));
+      transfer.sentCount = index + 1;
+      renderFileTransferStatus(
+        fileId,
+        t("fileTransfer.progressSending", { name: transfer.name, sent: transfer.sentCount, total: transfer.chunks.length })
+      );
+    }
+    delete state.outgoingFileTransfers[fileId];
+  }
 
   const setVideoStatus = (text) => {
     el("video-status").textContent = text;
@@ -1118,6 +1254,72 @@ export function initApp(doc, options) {
 
     if (control.type === "webrtc-call-answer") {
       await applyRenegotiationAnswer(state.pc, control.sdp);
+      return;
+    }
+
+    // Section FT2 (specs/phase4/file-transfer.md): same trust gate as plain
+    // chat text -- an unverified peer must not be able to push file offers
+    // or consume this side's attention/bandwidth before proving identity.
+    if (control.type === "file-offer") {
+      if (!state.peerFingerprint) return;
+      state.pendingFileOffers[control.fileId] = control;
+      renderFileOfferBanner(control);
+      return;
+    }
+
+    if (control.type === "file-accept") {
+      if (!state.peerFingerprint) return;
+      // Ignore accepts for a fileId this side never offered (or already
+      // finished/rejected) -- defensive against stale/duplicate/spoofed
+      // control messages, mirrors how the other branches above silently
+      // drop unexpected input rather than throwing.
+      if (!state.outgoingFileTransfers[control.fileId]) return;
+      void sendFileChunks(control.fileId);
+      return;
+    }
+
+    if (control.type === "file-reject") {
+      if (!state.peerFingerprint) return;
+      const transfer = state.outgoingFileTransfers[control.fileId];
+      if (!transfer) return;
+      delete state.outgoingFileTransfers[control.fileId];
+      renderFileTransferStatus(control.fileId, t("fileTransfer.rejected", { name: transfer.name }));
+      return;
+    }
+
+    if (control.type === "file-chunk") {
+      if (!state.peerFingerprint) return;
+      // Only accepted for a fileId THIS side genuinely has an active
+      // assembler for -- a peer sending a file-chunk for a fileId that was
+      // never offered/accepted (or reusing another transfer's fileId to
+      // inject chunks into an in-progress assembly) is silently dropped.
+      const transfer = state.incomingFileTransfers[control.fileId];
+      if (!transfer) return;
+      let bytes;
+      try {
+        bytes = base64ToChunk(control.data);
+        transfer.assembler.addChunk(control.index, bytes);
+      } catch {
+        return; // malformed base64 or out-of-range index -- drop, not throw
+      }
+      const received = transfer.totalChunks - transfer.assembler.missingIndices().length;
+      renderFileTransferStatus(
+        control.fileId,
+        t("fileTransfer.progressReceiving", { name: transfer.name, received, total: transfer.totalChunks })
+      );
+      if (transfer.assembler.isComplete()) {
+        const buffer = transfer.assembler.assemble();
+        const hash = await computeFileHash(buffer);
+        if (hash === transfer.sha256) {
+          renderFileTransferDownload(control.fileId, transfer.name, transfer.mimeType, buffer);
+        } else {
+          // Explicit failure per spec: a hash mismatch must NEVER offer a
+          // download link for the corrupted/incomplete result.
+          renderFileTransferStatus(control.fileId, t("fileTransfer.hashMismatch", { name: transfer.name }));
+        }
+        delete state.incomingFileTransfers[control.fileId];
+      }
+      return;
     }
   }
 
@@ -2231,6 +2433,87 @@ export function initApp(doc, options) {
   }
 
   el("btn-send").addEventListener("click", sendChatMessage);
+
+  // Section FT2 (specs/phase4/file-transfer.md): selecting a file only ever
+  // computes its hash/chunks and sends a file-offer -- chunks are NEVER
+  // sent here. Actual chunk streaming happens exclusively in
+  // sendFileChunks(), which is only reachable from the "file-accept" branch
+  // of handleChatMessage above, once the peer has explicitly accepted.
+  const fileInput = el("file-input");
+  if (fileInput) {
+    fileInput.addEventListener("change", async () => {
+      const file = fileInput.files && fileInput.files[0];
+      fileInput.value = "";
+      if (!file || !state.channel || !state.sessionKey || !state.peerFingerprint) return;
+      const buffer = await file.arrayBuffer();
+      const sha256 = await computeFileHash(buffer);
+      const chunks = splitFileIntoChunks(buffer, FILE_CHUNK_SIZE);
+      const fileId = randomFileId();
+      state.outgoingFileTransfers[fileId] = {
+        chunks,
+        name: file.name,
+        mimeType: file.type,
+        size: file.size,
+        sentCount: 0
+      };
+      state.channel.send(
+        await encryptMessage(
+          state.sessionKey,
+          JSON.stringify({
+            type: "file-offer",
+            fileId,
+            name: file.name,
+            size: file.size,
+            mimeType: file.type,
+            sha256,
+            totalChunks: chunks.length
+          })
+        )
+      );
+      const statusText =
+        file.size > FILE_SIZE_WARNING_BYTES
+          ? t("fileTransfer.sizeWarning", { name: file.name })
+          : t("fileTransfer.progressSending", { name: file.name, sent: 0, total: chunks.length });
+      renderFileTransferStatus(fileId, statusText);
+    });
+  }
+
+  const btnFileAccept = el("btn-file-accept");
+  if (btnFileAccept) {
+    btnFileAccept.addEventListener("click", async () => {
+      const banner = el("file-offer-banner");
+      const fileId = banner && banner.dataset.fileId;
+      const offer = fileId && state.pendingFileOffers[fileId];
+      if (!offer || !state.channel || !state.sessionKey) return;
+      delete state.pendingFileOffers[fileId];
+      banner.hidden = true;
+      state.incomingFileTransfers[fileId] = {
+        assembler: createFileAssembler(offer.totalChunks),
+        name: offer.name,
+        mimeType: offer.mimeType,
+        sha256: offer.sha256,
+        totalChunks: offer.totalChunks
+      };
+      renderFileTransferStatus(
+        fileId,
+        t("fileTransfer.progressReceiving", { name: offer.name, received: 0, total: offer.totalChunks })
+      );
+      state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify({ type: "file-accept", fileId })));
+    });
+  }
+
+  const btnFileReject = el("btn-file-reject");
+  if (btnFileReject) {
+    btnFileReject.addEventListener("click", async () => {
+      const banner = el("file-offer-banner");
+      const fileId = banner && banner.dataset.fileId;
+      const offer = fileId && state.pendingFileOffers[fileId];
+      if (!offer || !state.channel || !state.sessionKey) return;
+      delete state.pendingFileOffers[fileId];
+      banner.hidden = true;
+      state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify({ type: "file-reject", fileId })));
+    });
+  }
   // Bug report 2026-07-17: Enter alone must send, same as clicking "Надіслати"
   // -- Shift+Enter is left alone in case a future multi-line input wants it
   // for a newline (the input is a single-line <input> today, so it's a no-op,

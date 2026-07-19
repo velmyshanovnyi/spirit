@@ -184,7 +184,18 @@ export const MESSAGES = {
     "admin.field.max_room_creations_per_window": "Max room creations per window",
     "admin.field.enable_proof_proxy": "fetch_proof proxy enabled",
     "admin.field.fetch_proof_timeout_seconds": "fetch_proof timeout (seconds)",
-    "admin.field.fetch_proof_max_bytes": "fetch_proof max response size (bytes)"
+    "admin.field.fetch_proof_max_bytes": "fetch_proof max response size (bytes)",
+    "fileTransfer.pick": "Send file",
+    "fileTransfer.sizeWarning": "Warning: \"{name}\" is larger than 100MB and will be held in memory during transfer.",
+    "fileTransfer.offer": "{name} ({size}) -- incoming file",
+    "fileTransfer.accept": "Accept",
+    "fileTransfer.reject": "Reject",
+    "fileTransfer.rejected": "File transfer rejected: {name}",
+    "fileTransfer.progressSending": "Sending {name}: {sent}/{total} chunks",
+    "fileTransfer.progressReceiving": "Receiving {name}: {received}/{total} chunks",
+    "fileTransfer.complete": "{name} received and verified -- ",
+    "fileTransfer.downloadLink": "Download",
+    "fileTransfer.hashMismatch": "{name}: transfer failed integrity check, file discarded"
   },
   uk: {
     "lang.label": "Мова",
@@ -361,7 +372,18 @@ export const MESSAGES = {
     "admin.field.max_room_creations_per_window": "Макс. створень кімнат за вікно",
     "admin.field.enable_proof_proxy": "Проксі fetch_proof увімкнено",
     "admin.field.fetch_proof_timeout_seconds": "Тайм-аут fetch_proof (секунди)",
-    "admin.field.fetch_proof_max_bytes": "Макс. розмір відповіді fetch_proof (байти)"
+    "admin.field.fetch_proof_max_bytes": "Макс. розмір відповіді fetch_proof (байти)",
+    "fileTransfer.pick": "Надіслати файл",
+    "fileTransfer.sizeWarning": "Увага: файл «{name}» більший за 100МБ і буде триматися в пам'яті вкладки під час передачі.",
+    "fileTransfer.offer": "{name} ({size}) -- вхідний файл",
+    "fileTransfer.accept": "Прийняти",
+    "fileTransfer.reject": "Відхилити",
+    "fileTransfer.rejected": "Передачу файлу відхилено: {name}",
+    "fileTransfer.progressSending": "Надсилання {name}: {sent}/{total} частин",
+    "fileTransfer.progressReceiving": "Отримання {name}: {received}/{total} частин",
+    "fileTransfer.complete": "{name} отримано й перевірено -- ",
+    "fileTransfer.downloadLink": "Завантажити",
+    "fileTransfer.hashMismatch": "{name}: передача не пройшла перевірку цілісності, файл відкинуто"
   },
   de: {
     "lang.label": "Sprache",
@@ -538,7 +560,18 @@ export const MESSAGES = {
     "admin.field.max_room_creations_per_window": "Max. Raumerstellungen pro Fenster",
     "admin.field.enable_proof_proxy": "fetch_proof-Proxy aktiviert",
     "admin.field.fetch_proof_timeout_seconds": "fetch_proof-Timeout (Sekunden)",
-    "admin.field.fetch_proof_max_bytes": "fetch_proof max. Antwortgroesse (Bytes)"
+    "admin.field.fetch_proof_max_bytes": "fetch_proof max. Antwortgroesse (Bytes)",
+    "fileTransfer.pick": "Datei senden",
+    "fileTransfer.sizeWarning": "Warnung: \"{name}\" ist groesser als 100MB und wird waehrend der Uebertragung im Speicher gehalten.",
+    "fileTransfer.offer": "{name} ({size}) -- eingehende Datei",
+    "fileTransfer.accept": "Annehmen",
+    "fileTransfer.reject": "Ablehnen",
+    "fileTransfer.rejected": "Dateiuebertragung abgelehnt: {name}",
+    "fileTransfer.progressSending": "Sende {name}: {sent}/{total} Teile",
+    "fileTransfer.progressReceiving": "Empfange {name}: {received}/{total} Teile",
+    "fileTransfer.complete": "{name} empfangen und geprueft -- ",
+    "fileTransfer.downloadLink": "Herunterladen",
+    "fileTransfer.hashMismatch": "{name}: Uebertragung hat die Integritaetspruefung nicht bestanden, Datei verworfen"
   },
   es: {
     "lang.label": "Idioma",
@@ -715,7 +748,18 @@ export const MESSAGES = {
     "admin.field.max_room_creations_per_window": "Max. creaciones de salas por ventana",
     "admin.field.enable_proof_proxy": "Proxy fetch_proof habilitado",
     "admin.field.fetch_proof_timeout_seconds": "Tiempo de espera de fetch_proof (segundos)",
-    "admin.field.fetch_proof_max_bytes": "Tamano max. de respuesta de fetch_proof (bytes)"
+    "admin.field.fetch_proof_max_bytes": "Tamano max. de respuesta de fetch_proof (bytes)",
+    "fileTransfer.pick": "Enviar archivo",
+    "fileTransfer.sizeWarning": "Aviso: \"{name}\" supera los 100MB y se mantendra en memoria durante la transferencia.",
+    "fileTransfer.offer": "{name} ({size}) -- archivo entrante",
+    "fileTransfer.accept": "Aceptar",
+    "fileTransfer.reject": "Rechazar",
+    "fileTransfer.rejected": "Transferencia de archivo rechazada: {name}",
+    "fileTransfer.progressSending": "Enviando {name}: {sent}/{total} partes",
+    "fileTransfer.progressReceiving": "Recibiendo {name}: {received}/{total} partes",
+    "fileTransfer.complete": "{name} recibido y verificado -- ",
+    "fileTransfer.downloadLink": "Descargar",
+    "fileTransfer.hashMismatch": "{name}: la transferencia fallo la verificacion de integridad, archivo descartado"
   },
   fr: {
     "lang.label": "Langue",
@@ -892,7 +936,18 @@ export const MESSAGES = {
     "admin.field.max_room_creations_per_window": "Max. creations de salles par fenetre",
     "admin.field.enable_proof_proxy": "Proxy fetch_proof active",
     "admin.field.fetch_proof_timeout_seconds": "Delai fetch_proof (secondes)",
-    "admin.field.fetch_proof_max_bytes": "Taille max. de reponse fetch_proof (octets)"
+    "admin.field.fetch_proof_max_bytes": "Taille max. de reponse fetch_proof (octets)",
+    "fileTransfer.pick": "Envoyer un fichier",
+    "fileTransfer.sizeWarning": "Attention : \"{name}\" depasse 100 Mo et restera en memoire pendant le transfert.",
+    "fileTransfer.offer": "{name} ({size}) -- fichier entrant",
+    "fileTransfer.accept": "Accepter",
+    "fileTransfer.reject": "Refuser",
+    "fileTransfer.rejected": "Transfert de fichier refuse : {name}",
+    "fileTransfer.progressSending": "Envoi de {name} : {sent}/{total} blocs",
+    "fileTransfer.progressReceiving": "Reception de {name} : {received}/{total} blocs",
+    "fileTransfer.complete": "{name} recu et verifie -- ",
+    "fileTransfer.downloadLink": "Telecharger",
+    "fileTransfer.hashMismatch": "{name} : le transfert a echoue la verification d'integrite, fichier rejete"
   },
   it: {
     "lang.label": "Lingua",
@@ -1069,7 +1124,18 @@ export const MESSAGES = {
     "admin.field.max_room_creations_per_window": "Max creazioni stanze per finestra",
     "admin.field.enable_proof_proxy": "Proxy fetch_proof abilitato",
     "admin.field.fetch_proof_timeout_seconds": "Timeout fetch_proof (secondi)",
-    "admin.field.fetch_proof_max_bytes": "Dimensione max risposta fetch_proof (byte)"
+    "admin.field.fetch_proof_max_bytes": "Dimensione max risposta fetch_proof (byte)",
+    "fileTransfer.pick": "Invia file",
+    "fileTransfer.sizeWarning": "Attenzione: \"{name}\" supera i 100MB e restera in memoria durante il trasferimento.",
+    "fileTransfer.offer": "{name} ({size}) -- file in arrivo",
+    "fileTransfer.accept": "Accetta",
+    "fileTransfer.reject": "Rifiuta",
+    "fileTransfer.rejected": "Trasferimento file rifiutato: {name}",
+    "fileTransfer.progressSending": "Invio di {name}: {sent}/{total} parti",
+    "fileTransfer.progressReceiving": "Ricezione di {name}: {received}/{total} parti",
+    "fileTransfer.complete": "{name} ricevuto e verificato -- ",
+    "fileTransfer.downloadLink": "Scarica",
+    "fileTransfer.hashMismatch": "{name}: il trasferimento non ha superato il controllo di integrita, file scartato"
   },
   ru: {
     "lang.label": "Язык",
@@ -1246,7 +1312,18 @@ export const MESSAGES = {
     "admin.field.max_room_creations_per_window": "Макс. создания комнат за окно",
     "admin.field.enable_proof_proxy": "Прокси fetch_proof включён",
     "admin.field.fetch_proof_timeout_seconds": "Тайм-аут fetch_proof (секунды)",
-    "admin.field.fetch_proof_max_bytes": "Макс. размер ответа fetch_proof (байты)"
+    "admin.field.fetch_proof_max_bytes": "Макс. размер ответа fetch_proof (байты)",
+    "fileTransfer.pick": "Отправить файл",
+    "fileTransfer.sizeWarning": "Внимание: файл «{name}» больше 100МБ и будет храниться в памяти вкладки во время передачи.",
+    "fileTransfer.offer": "{name} ({size}) -- входящий файл",
+    "fileTransfer.accept": "Принять",
+    "fileTransfer.reject": "Отклонить",
+    "fileTransfer.rejected": "Передача файла отклонена: {name}",
+    "fileTransfer.progressSending": "Отправка {name}: {sent}/{total} частей",
+    "fileTransfer.progressReceiving": "Получение {name}: {received}/{total} частей",
+    "fileTransfer.complete": "{name} получен и проверен -- ",
+    "fileTransfer.downloadLink": "Скачать",
+    "fileTransfer.hashMismatch": "{name}: передача не прошла проверку целостности, файл отброшен"
   },
   lt: {
     "lang.label": "Kalba",
@@ -1423,7 +1500,18 @@ export const MESSAGES = {
     "admin.field.max_room_creations_per_window": "Maks. kambariu kurimu per langa",
     "admin.field.enable_proof_proxy": "fetch_proof proxy ijungtas",
     "admin.field.fetch_proof_timeout_seconds": "fetch_proof laiko limitas (sekundes)",
-    "admin.field.fetch_proof_max_bytes": "fetch_proof maks. atsakymo dydis (baitai)"
+    "admin.field.fetch_proof_max_bytes": "fetch_proof maks. atsakymo dydis (baitai)",
+    "fileTransfer.pick": "Siusti faila",
+    "fileTransfer.sizeWarning": "Demesio: \"{name}\" virsija 100MB ir bus laikomas atmintyje perdavimo metu.",
+    "fileTransfer.offer": "{name} ({size}) -- gaunamas failas",
+    "fileTransfer.accept": "Priimti",
+    "fileTransfer.reject": "Atmesti",
+    "fileTransfer.rejected": "Failo perdavimas atmestas: {name}",
+    "fileTransfer.progressSending": "Siunciama {name}: {sent}/{total} daliu",
+    "fileTransfer.progressReceiving": "Gaunama {name}: {received}/{total} daliu",
+    "fileTransfer.complete": "{name} gautas ir patikrintas -- ",
+    "fileTransfer.downloadLink": "Atsisiusti",
+    "fileTransfer.hashMismatch": "{name}: perdavimas neprejo vientisumo patikros, failas atmestas"
   },
   lv: {
     "lang.label": "Valoda",
@@ -1600,7 +1688,18 @@ export const MESSAGES = {
     "admin.field.max_room_creations_per_window": "Maks. telpu izveides logaa",
     "admin.field.enable_proof_proxy": "fetch_proof starpniekserveris iesledzts",
     "admin.field.fetch_proof_timeout_seconds": "fetch_proof noildze (sekundes)",
-    "admin.field.fetch_proof_max_bytes": "fetch_proof maks. atbildes izmers (baiti)"
+    "admin.field.fetch_proof_max_bytes": "fetch_proof maks. atbildes izmers (baiti)",
+    "fileTransfer.pick": "Sutit failu",
+    "fileTransfer.sizeWarning": "Uzmanibu: \"{name}\" parsniedz 100MB un tiks glabats atmina parsutisanas laika.",
+    "fileTransfer.offer": "{name} ({size}) -- ienakosais fails",
+    "fileTransfer.accept": "Pienemt",
+    "fileTransfer.reject": "Noraidit",
+    "fileTransfer.rejected": "Faila parsutisana noraidita: {name}",
+    "fileTransfer.progressSending": "Sutot {name}: {sent}/{total} dalas",
+    "fileTransfer.progressReceiving": "Sanemot {name}: {received}/{total} dalas",
+    "fileTransfer.complete": "{name} sanemts un parbaudits -- ",
+    "fileTransfer.downloadLink": "Lejupieladet",
+    "fileTransfer.hashMismatch": "{name}: parsutisana neizturaja integritates parbaudi, fails atmests"
   },
   et: {
     "lang.label": "Keel",
@@ -1777,7 +1876,18 @@ export const MESSAGES = {
     "admin.field.max_room_creations_per_window": "Maks. ruumide loomist akna kohta",
     "admin.field.enable_proof_proxy": "fetch_proof proksi lubatud",
     "admin.field.fetch_proof_timeout_seconds": "fetch_proof ajalimit (sekundit)",
-    "admin.field.fetch_proof_max_bytes": "fetch_proof maks. vastuse suurus (baiti)"
+    "admin.field.fetch_proof_max_bytes": "fetch_proof maks. vastuse suurus (baiti)",
+    "fileTransfer.pick": "Saada fail",
+    "fileTransfer.sizeWarning": "Hoiatus: \"{name}\" on suurem kui 100MB ja hoitakse ulekande ajal malus.",
+    "fileTransfer.offer": "{name} ({size}) -- sisenev fail",
+    "fileTransfer.accept": "Nustu",
+    "fileTransfer.reject": "Luekka tagasi",
+    "fileTransfer.rejected": "Failiedastus tagasi lukatud: {name}",
+    "fileTransfer.progressSending": "Saatmine {name}: {sent}/{total} tukki",
+    "fileTransfer.progressReceiving": "Vastuvott {name}: {received}/{total} tukki",
+    "fileTransfer.complete": "{name} vastu voetud ja kontrollitud -- ",
+    "fileTransfer.downloadLink": "Laadi alla",
+    "fileTransfer.hashMismatch": "{name}: ulekanne ei labinud terviklikkuse kontrolli, fail visati ara"
   },
   no: {
     "lang.label": "Språk",
@@ -1954,7 +2064,18 @@ export const MESSAGES = {
     "admin.field.max_room_creations_per_window": "Maks. romopprettelser per vindu",
     "admin.field.enable_proof_proxy": "fetch_proof-proxy aktivert",
     "admin.field.fetch_proof_timeout_seconds": "fetch_proof tidsavbrudd (sekunder)",
-    "admin.field.fetch_proof_max_bytes": "fetch_proof maks. svarstorrelse (bytes)"
+    "admin.field.fetch_proof_max_bytes": "fetch_proof maks. svarstorrelse (bytes)",
+    "fileTransfer.pick": "Send fil",
+    "fileTransfer.sizeWarning": "Advarsel: \"{name}\" er over 100MB og holdes i minnet under overforingen.",
+    "fileTransfer.offer": "{name} ({size}) -- innkommende fil",
+    "fileTransfer.accept": "Godta",
+    "fileTransfer.reject": "Avvis",
+    "fileTransfer.rejected": "Filoverforing avvist: {name}",
+    "fileTransfer.progressSending": "Sender {name}: {sent}/{total} deler",
+    "fileTransfer.progressReceiving": "Mottar {name}: {received}/{total} deler",
+    "fileTransfer.complete": "{name} mottatt og verifisert -- ",
+    "fileTransfer.downloadLink": "Last ned",
+    "fileTransfer.hashMismatch": "{name}: overforingen bestod ikke integritetssjekken, filen forkastet"
   }
 };
 

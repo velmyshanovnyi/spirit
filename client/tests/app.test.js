@@ -322,6 +322,12 @@ const HTML = `
       <span id="ephemeral-nickname-display"></span>
     </div>
     <div id="safety-number-hint" hidden class="banner-warn"></div>
+    <div id="file-offer-banner" hidden class="banner-warn">
+      <span id="file-offer-text"></span>
+      <button id="btn-file-accept" type="button">Прийняти</button>
+      <button id="btn-file-reject" type="button">Відхилити</button>
+    </div>
+    <div id="file-transfers"></div>
     <video id="video-remote"></video>
     <video id="video-local"></video>
     <button id="btn-start-call" type="button"></button>
@@ -331,6 +337,7 @@ const HTML = `
     <div id="chat-log"></div>
     <input id="message-input" type="text">
     <button id="btn-send" type="button">Надіслати</button>
+    <input id="file-input" type="file">
   </section>
 
   <section data-screen="contacts">
@@ -5084,5 +5091,352 @@ describe("ICE gathering timeout", () => {
     await vi.advanceTimersByTimeAsync(5000);
 
     expect(document.getElementById("connection-status").textContent).not.toMatch(/не вдалося/);
+  });
+});
+
+describe("file transfer (Section FT2, specs/phase4/file-transfer.md)", () => {
+  // Establishes a chat with a VERIFIED peer (ephemeral mode -- no vaultKey
+  // required, since file transfer's gate is "any verified peer", matching
+  // plain chat text, not the persistence-tied device-list/push-subscription
+  // gate). Returns the captured webrtc callbacks and the fake channel, with
+  // encryptMessage tagging its plaintext so assertions can read it back off
+  // channel.send.mock.calls.
+  async function fileTransferChat() {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: { __tag: "id-priv" }, publicKey: fakePublicKey("id-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockImplementation(async (_key, text) => `ENC(${text})`);
+
+    const channel = fakeChannel();
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(channel);
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    // Verify the peer -- file transfer is gated on state.peerFingerprint,
+    // same as plain chat text.
+    verifyIdentityAnnounce.mockResolvedValue({
+      identityPublicKey: fakePublicKey("peer-identity"),
+      identityPubkeyWire: "PEER",
+      fingerprint: "peer-fp-123"
+    });
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+    await vi.waitFor(() => expect(document.getElementById("connection-status").textContent).toContain("peer-fp-123"));
+
+    return { captured, channel };
+  }
+
+  function setFileInput(file) {
+    const input = document.getElementById("file-input");
+    Object.defineProperty(input, "files", { value: [file], configurable: true });
+    input.dispatchEvent(new Event("change"));
+  }
+
+  function makeFile(bytes, name = "photo.png", type = "image/png") {
+    return new File([bytes], name, { type });
+  }
+
+  it("selecting a file sends a file-offer, never raw chunks, until accepted", async () => {
+    const { channel } = await fileTransferChat();
+    const bytes = new Uint8Array([1, 2, 3, 4, 5]);
+
+    setFileInput(makeFile(bytes));
+    await vi.waitFor(() =>
+      expect(channel.send.mock.calls.some(([p]) => p.includes('"type":"file-offer"'))).toBe(true)
+    );
+
+    const offerCall = channel.send.mock.calls.find(([p]) => p.includes('"type":"file-offer"'));
+    const offer = JSON.parse(offerCall[0].slice("ENC(".length, -1));
+    expect(offer.name).toBe("photo.png");
+    expect(offer.mimeType).toBe("image/png");
+    expect(offer.size).toBe(5);
+    expect(offer.totalChunks).toBe(1);
+    expect(typeof offer.sha256).toBe("string");
+    expect(offer.sha256.length).toBe(64);
+
+    // No file-chunk yet -- the peer has not accepted.
+    expect(channel.send.mock.calls.some(([p]) => p.includes('"type":"file-chunk"'))).toBe(false);
+  });
+
+  it("shows an accept/reject banner with the offered file's name and size on incoming file-offer", async () => {
+    const { captured } = await fileTransferChat();
+
+    decryptMessage.mockResolvedValueOnce(
+      JSON.stringify({
+        type: "file-offer",
+        fileId: "abc123",
+        name: "report.pdf",
+        size: 2048,
+        mimeType: "application/pdf",
+        sha256: "deadbeef",
+        totalChunks: 1
+      })
+    );
+    await captured.onMessage("ENCRYPTED_OFFER");
+
+    const banner = document.getElementById("file-offer-banner");
+    await vi.waitFor(() => expect(banner.hidden).toBe(false));
+    expect(document.getElementById("file-offer-text").textContent).toContain("report.pdf");
+    expect(document.getElementById("file-offer-text").textContent).toContain("2.0 KB");
+  });
+
+  it("ignores a file-offer from an unverified peer (no banner shown)", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("id-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+
+    const channel = fakeChannel();
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(channel);
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    // No identity-announce exchanged -- state.peerFingerprint stays null.
+    decryptMessage.mockResolvedValueOnce(
+      JSON.stringify({
+        type: "file-offer",
+        fileId: "abc123",
+        name: "malicious.exe",
+        size: 10,
+        mimeType: "application/octet-stream",
+        sha256: "x",
+        totalChunks: 1
+      })
+    );
+    await captured.onMessage("ENCRYPTED_OFFER");
+
+    expect(document.getElementById("file-offer-banner").hidden).toBe(true);
+  });
+
+  it("clicking Accept sends file-accept, and only then does the sender begin streaming file-chunk", async () => {
+    const { captured, channel } = await fileTransferChat();
+
+    decryptMessage.mockResolvedValueOnce(
+      JSON.stringify({
+        type: "file-offer",
+        fileId: "abc123",
+        name: "report.pdf",
+        size: 5,
+        mimeType: "application/pdf",
+        sha256: "deadbeef",
+        totalChunks: 1
+      })
+    );
+    await captured.onMessage("ENCRYPTED_OFFER");
+    await vi.waitFor(() => expect(document.getElementById("file-offer-banner").hidden).toBe(false));
+
+    document.getElementById("btn-file-accept").click();
+    await vi.waitFor(() =>
+      expect(channel.send).toHaveBeenCalledWith(`ENC(${JSON.stringify({ type: "file-accept", fileId: "abc123" })})`)
+    );
+    expect(document.getElementById("file-offer-banner").hidden).toBe(true);
+  });
+
+  it("(sender side) only begins streaming file-chunk after file-accept is received, never before", async () => {
+    // Simulates the SENDER side of the same exchange as the test above, to
+    // verify chunks are only ever sent after file-accept is received.
+    const senderChat = await fileTransferChat();
+    const bytes = new Uint8Array([9, 9, 9, 9, 9]);
+    setFileInput(makeFile(bytes));
+    await vi.waitFor(() =>
+      expect(senderChat.channel.send.mock.calls.some(([p]) => p.includes('"type":"file-offer"'))).toBe(true)
+    );
+    const offerCall = senderChat.channel.send.mock.calls.find(([p]) => p.includes('"type":"file-offer"'));
+    const offer = JSON.parse(offerCall[0].slice("ENC(".length, -1));
+    expect(senderChat.channel.send.mock.calls.some(([p]) => p.includes('"type":"file-chunk"'))).toBe(false);
+
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "file-accept", fileId: offer.fileId }));
+    await senderChat.captured.onMessage("ENCRYPTED_ACCEPT");
+
+    await vi.waitFor(() =>
+      expect(senderChat.channel.send.mock.calls.some(([p]) => p.includes('"type":"file-chunk"'))).toBe(true)
+    );
+  });
+
+  it("clicking Reject sends file-reject, and chunks are never sent for that fileId", async () => {
+    const senderChat = await fileTransferChat();
+    const bytes = new Uint8Array([1, 2, 3]);
+    setFileInput(makeFile(bytes));
+    await vi.waitFor(() =>
+      expect(senderChat.channel.send.mock.calls.some(([p]) => p.includes('"type":"file-offer"'))).toBe(true)
+    );
+    const offerCall = senderChat.channel.send.mock.calls.find(([p]) => p.includes('"type":"file-offer"'));
+    const offer = JSON.parse(offerCall[0].slice("ENC(".length, -1));
+
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "file-reject", fileId: offer.fileId }));
+    await senderChat.captured.onMessage("ENCRYPTED_REJECT");
+
+    // Give any errant async chunk-sending a chance to run before asserting.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(senderChat.channel.send.mock.calls.some(([p]) => p.includes('"type":"file-chunk"'))).toBe(false);
+  });
+
+  it("receives chunks, verifies the SHA-256 hash, and exposes a working download link on a match", async () => {
+    const { captured } = await fileTransferChat();
+    const payload = new TextEncoder().encode("hello world");
+    const trueHash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", payload))]
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+    const base64 = btoa(String.fromCharCode(...payload));
+
+    decryptMessage.mockResolvedValueOnce(
+      JSON.stringify({
+        type: "file-offer",
+        fileId: "hash-ok",
+        name: "note.txt",
+        size: payload.length,
+        mimeType: "text/plain",
+        sha256: trueHash,
+        totalChunks: 1
+      })
+    );
+    await captured.onMessage("ENCRYPTED_OFFER");
+    document.getElementById("btn-file-accept").click();
+    await vi.waitFor(() => expect(document.getElementById("file-offer-banner").hidden).toBe(true));
+
+    decryptMessage.mockResolvedValueOnce(
+      JSON.stringify({ type: "file-chunk", fileId: "hash-ok", index: 0, data: base64 })
+    );
+    await captured.onMessage("ENCRYPTED_CHUNK");
+
+    await vi.waitFor(() => {
+      const row = document.getElementById("file-transfer-hash-ok");
+      expect(row).toBeTruthy();
+      const link = row.querySelector("a[download]");
+      expect(link).toBeTruthy();
+      expect(link.download).toBe("note.txt");
+    });
+  });
+
+  it("shows an explicit error and does NOT produce a download link on a hash mismatch", async () => {
+    const { captured } = await fileTransferChat();
+    const payload = new TextEncoder().encode("corrupted");
+    const base64 = btoa(String.fromCharCode(...payload));
+
+    decryptMessage.mockResolvedValueOnce(
+      JSON.stringify({
+        type: "file-offer",
+        fileId: "hash-bad",
+        name: "note.txt",
+        size: payload.length,
+        mimeType: "text/plain",
+        sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+        totalChunks: 1
+      })
+    );
+    await captured.onMessage("ENCRYPTED_OFFER");
+    document.getElementById("btn-file-accept").click();
+    await vi.waitFor(() => expect(document.getElementById("file-offer-banner").hidden).toBe(true));
+
+    decryptMessage.mockResolvedValueOnce(
+      JSON.stringify({ type: "file-chunk", fileId: "hash-bad", index: 0, data: base64 })
+    );
+    await captured.onMessage("ENCRYPTED_CHUNK");
+
+    await vi.waitFor(() => {
+      const row = document.getElementById("file-transfer-hash-bad");
+      expect(row).toBeTruthy();
+      expect(row.querySelector("a[download]")).toBeNull();
+    });
+  });
+
+  it("ignores file-chunk for an unknown/unaccepted fileId (defensive drop, no crash)", async () => {
+    const { captured } = await fileTransferChat();
+    decryptMessage.mockResolvedValueOnce(
+      JSON.stringify({ type: "file-chunk", fileId: "never-offered", index: 0, data: "AAAA" })
+    );
+    await expect(captured.onMessage("ENCRYPTED_CHUNK")).resolves.not.toThrow();
+    expect(document.getElementById("file-transfer-never-offered")).toBeNull();
+  });
+
+  it("respects backpressure: pauses chunk sending while bufferedAmount is high, resumes on bufferedamountlow", async () => {
+    const senderChat = await fileTransferChat();
+    const channel = senderChat.channel;
+    // Two chunks' worth of data so there is a second chunk to (not) send
+    // while paused.
+    const bytes = new Uint8Array(20 * 1024).fill(7);
+    channel.bufferedAmount = 2 * 1024 * 1024; // above the 1MB threshold
+
+    setFileInput(makeFile(bytes, "big.bin", "application/octet-stream"));
+    await vi.waitFor(() =>
+      expect(channel.send.mock.calls.some(([p]) => p.includes('"type":"file-offer"'))).toBe(true)
+    );
+    const offerCall = channel.send.mock.calls.find(([p]) => p.includes('"type":"file-offer"'));
+    const offer = JSON.parse(offerCall[0].slice("ENC(".length, -1));
+
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "file-accept", fileId: offer.fileId }));
+    await senderChat.captured.onMessage("ENCRYPTED_ACCEPT");
+
+    // Give sendFileChunks a turn to run -- it must NOT have sent any chunk
+    // yet, because bufferedAmount is still above threshold and no
+    // bufferedamountlow event has fired.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(channel.send.mock.calls.some(([p]) => p.includes('"type":"file-chunk"'))).toBe(false);
+    expect(typeof channel.onbufferedamountlow).toBe("function");
+
+    // Now simulate the buffer draining: real bufferedAmount drops, then the
+    // channel fires bufferedamountlow.
+    channel.bufferedAmount = 0;
+    channel.onbufferedamountlow();
+
+    await vi.waitFor(() =>
+      expect(channel.send.mock.calls.some(([p]) => p.includes('"type":"file-chunk"'))).toBe(true)
+    );
+  });
+
+  it("updates a progress indicator as chunks are sent and received", async () => {
+    const senderChat = await fileTransferChat();
+    const bytes = new Uint8Array(20 * 1024).fill(3); // 2 chunks at 16KB
+    setFileInput(makeFile(bytes, "twochunks.bin", "application/octet-stream"));
+    await vi.waitFor(() =>
+      expect(senderChat.channel.send.mock.calls.some(([p]) => p.includes('"type":"file-offer"'))).toBe(true)
+    );
+    const offerCall = senderChat.channel.send.mock.calls.find(([p]) => p.includes('"type":"file-offer"'));
+    const offer = JSON.parse(offerCall[0].slice("ENC(".length, -1));
+    expect(offer.totalChunks).toBe(2);
+
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "file-accept", fileId: offer.fileId }));
+    await senderChat.captured.onMessage("ENCRYPTED_ACCEPT");
+
+    await vi.waitFor(() => {
+      const row = document.getElementById(`file-transfer-${offer.fileId}`);
+      expect(row).toBeTruthy();
+      expect(row.textContent).toMatch(/2\/2/);
+    });
   });
 });
