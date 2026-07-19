@@ -564,6 +564,19 @@ export function initApp(doc, options) {
       row.className = "list-row";
       row.dataset.contactFingerprint = contact.fingerprint;
       row.textContent = formatSpiritId(contact.fingerprint);
+      // Фаза 4 (docs/roadmap.md, TOFU-прогалина зафіксована 2026-07-18):
+      // identity-announce вже автентифікує ECDH-сесію (Секція 12), але сам
+      // identity-ключ при ПЕРШІЙ зустрічі приймається без позаканального
+      // доказу (TOFU). Наявні proof-механізми (2c/2d) досі опційні й
+      // непомітні -- контакт без жодного proof тепер явно позначається
+      // "не підтверджено" в списку, а не мовчки виглядає так само, як
+      // контакт із перевіреним proof.
+      if (!contact.proofSet?.proofs?.length) {
+        const unverifiedBadge = doc.createElement("span");
+        unverifiedBadge.className = "unverified-badge";
+        unverifiedBadge.textContent = ` ${t("contacts.unverified")}`;
+        row.appendChild(unverifiedBadge);
+      }
       for (const proof of contact.proofSet?.proofs ?? []) {
         const badge = doc.createElement("span");
         badge.className = "proof-badge";

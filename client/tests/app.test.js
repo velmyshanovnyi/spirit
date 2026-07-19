@@ -4607,6 +4607,51 @@ describe("contacts and history screens (Sections N3/N4)", () => {
     expect(document.querySelectorAll("#contacts-list .list-row").length).toBe(0);
   });
 
+  it("Фаза 4 (TOFU-прогалина): shows an 'unverified' badge for a contact with no proofs at all", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    listContacts.mockResolvedValue([
+      { fingerprint: "a".repeat(64), identityPubkeyWire: "W1", firstSeen: 1, deviceList: null, proofSet: null }
+    ]);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+
+    await reachScreen("contacts");
+    await vi.waitFor(() => expect(listContacts).toHaveBeenCalled());
+
+    const row = document.querySelector("#contacts-list .list-row");
+    const badge = row.querySelector(".unverified-badge");
+    expect(badge).not.toBeNull();
+    expect(badge.textContent).toMatch(/не підтверджен/i);
+  });
+
+  it("Фаза 4 (TOFU-прогалина): does NOT show the 'unverified' badge for a contact that has at least one proof", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    listContacts.mockResolvedValue([
+      {
+        fingerprint: "a".repeat(64),
+        identityPubkeyWire: "W1",
+        firstSeen: 1,
+        deviceList: null,
+        proofSet: { proofs: [{ url: "https://example.com/proof", label: "telegram" }] }
+      }
+    ]);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+
+    await reachScreen("contacts");
+    await vi.waitFor(() => expect(listContacts).toHaveBeenCalled());
+
+    const row = document.querySelector("#contacts-list .list-row");
+    expect(row.querySelector(".unverified-badge")).toBeNull();
+    expect(row.textContent).toContain("telegram");
+  });
+
   it("contacts screen shows a message button per contact row", async () => {
     generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
     fingerprint.mockResolvedValue("sender-fp");

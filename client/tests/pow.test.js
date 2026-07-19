@@ -105,17 +105,27 @@ describe("solvePow", () => {
   // guards against reintroducing the fully-sequential-await pattern: at a
   // moderately high difficulty it must still complete well within a
   // generous wall-clock bound, not just be logically correct.
-  it("solves a moderately-high-difficulty challenge within a generous wall-clock bound (concurrent batching regression guard)", async () => {
-    const REGRESSION_DIFFICULTY_BITS = 16; // ~65536 expected attempts
-    const challenge = buildPowChallenge(1, "perf-regression-key");
-    const startedAt = Date.now();
-    const nonce = await solvePow(challenge, REGRESSION_DIFFICULTY_BITS);
-    const elapsedMs = Date.now() - startedAt;
-    expect(await verifyPow(challenge, nonce, REGRESSION_DIFFICULTY_BITS)).toBe(true);
-    // Generous bound: batched solving should comfortably finish in well
-    // under a second on any real test runner; the fully-sequential-await
-    // version this guards against took tens of seconds at 20 bits (4x this
-    // difficulty), so even a very unlucky run here should stay far below.
-    expect(elapsedMs).toBeLessThan(5000);
-  });
+  it(
+    "solves a moderately-high-difficulty challenge within a generous wall-clock bound (concurrent batching regression guard)",
+    async () => {
+      const REGRESSION_DIFFICULTY_BITS = 16; // ~65536 expected attempts
+      const challenge = buildPowChallenge(1, "perf-regression-key");
+      const startedAt = Date.now();
+      const nonce = await solvePow(challenge, REGRESSION_DIFFICULTY_BITS);
+      const elapsedMs = Date.now() - startedAt;
+      expect(await verifyPow(challenge, nonce, REGRESSION_DIFFICULTY_BITS)).toBe(true);
+      // Generous bound: batched solving should comfortably finish in well
+      // under this on any real test runner; the fully-sequential-await
+      // version this guards against took tens of seconds at 20 bits (4x this
+      // difficulty). 15s leaves ample headroom for a loaded/shared CI sandbox
+      // (observed flaky at vitest's default 5s test timeout under concurrent
+      // test-suite load) while still failing hard if the sequential-await
+      // bug were ever reintroduced. The explicit third-argument timeout
+      // below raises vitest's own per-test timeout to match -- the 15000ms
+      // assertion bound is meaningless if the test itself gets killed at
+      // vitest's default 5000ms first (exactly what happened before this).
+      expect(elapsedMs).toBeLessThan(15000);
+    },
+    20000
+  );
 });
