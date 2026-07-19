@@ -202,22 +202,34 @@ export function initApp(doc, options) {
   const state = {
     identityKeyPair: null,
     senderKey: null,
-    pc: null,
-    channel: null,
-    sessionKey: null,
-    // Set by the session helpers just before the session key is derived;
-    // needed to bind/verify identity announces to THIS session's ECDH keys.
-    sessionEcdhWires: null,
-    // Ratchet chains (Section P2b) -- only chat text uses these; every other
-    // message type (announces, calls, device-linking) stays on sessionKey.
-    sendChainKey: null,
-    receiveChainKey: null,
-    // Fingerprint of the peer's VERIFIED identity (null until a valid
-    // announce arrives; incoming chat text is refused while null).
-    peerFingerprint: null,
-    // The verified peer identity key -- device-list announces are checked
-    // against it (Section 13).
-    peerIdentityPublicKey: null,
+    // Section GC0 (specs/phase4/group-chats.md): multi-connection
+    // refactor. `peers` is now the single source of truth for every
+    // per-connection field that used to be a poodinokyi (single) slot
+    // directly on `state` (pc, channel, sessionKey, sessionEcdhWires,
+    // sendChainKey, receiveChainKey, peerFingerprint,
+    // peerIdentityPublicKey, isInviteOwner). Each entry is keyed by a
+    // randomly-generated connectionId (see randomConnectionId below),
+    // assigned at session-start time -- BEFORE peerFingerprint is known,
+    // since identity is only verified once the connection is already
+    // open. `activeConnectionId` tracks which entry the single
+    // conversation-screen UI is bound to; during this section there is
+    // always at most one entry (group logic is GC1-GC3, not implemented
+    // yet), so in practice this is just "the current connection".
+    //
+    // state.pc / state.channel / state.sessionKey / state.sessionEcdhWires /
+    // state.sendChainKey / state.receiveChainKey / state.peerFingerprint /
+    // state.peerIdentityPublicKey / state.isInviteOwner are defined further
+    // down (PEER_PROXY_FIELDS loop) as getters/setters that transparently
+    // proxy to the active entry in this Map. Every existing call site that
+    // reads/writes those fields keeps working completely unchanged -- same
+    // syntax, same 1:1 behavior -- while the underlying data now lives in
+    // state.peers, which is what makes multiple simultaneous connections
+    // representable (the GC1-GC3 prerequisite). Teardown/reset call sites
+    // were changed to call resetActiveConnection() instead of nulling
+    // fields individually, so a torn-down session's entry is deleted from
+    // the Map outright rather than left behind as stale all-null data.
+    peers: new Map(),
+    activeConnectionId: null,
     // Own camera/mic MediaStream, acquired for local preview as soon as the
     // conversation lobby opens (Section F6) -- null before then and used by
     // the camera/mic toggle buttons.
@@ -236,10 +248,6 @@ export function initApp(doc, options) {
     // channel-close, otherwise it fires after teardown and re-acquires
     // camera/mic for a session that no longer exists (exec review finding).
     localMediaPreviewTimeoutId: null,
-    // Whether THIS session's own invite (room-id/invite-token) is still
-    // this user's to share -- true for the initiator (btn-initiate/
-    // btn-quick-chat), false for the joiner, who never owns the invite.
-    isInviteOwner: false,
     // Own display name (Section 16), loaded from profile.js's unencrypted
     // nickname record on create/unlock; null in ephemeral quick-chat mode.
     nickname: null,
@@ -257,6 +265,121 @@ export function initApp(doc, options) {
     // offer never has an assembler (and therefore can never accept chunks).
     pendingFileOffers: {}
   };
+
+  // Section GC0 (specs/phase4/group-chats.md): connectionId generator --
+  // same random-hex pattern used elsewhere in this file/codebase for IDs
+  // (e.g. randomSenderKey below, historyStore.js's message-key suffix).
+  function randomConnectionId() {
+    return [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  // The full per-connection field set (Section GC0). `groupId: null` marks a
+  // plain 1:1 connection, not (yet) attached to any group -- GC1-GC3 will
+  // set this when a connection is created as part of a group.
+  function createPeerEntry() {
+    return {
+      pc: null,
+      channel: null,
+      sessionKey: null,
+      sessionEcdhWires: null,
+      sendChainKey: null,
+      receiveChainKey: null,
+      peerFingerprint: null,
+      peerIdentityPublicKey: null,
+      isInviteOwner: false,
+      groupId: null
+    };
+  }
+
+  // Returns the currently-active peer entry, or undefined if there is none
+  // (no session started yet, or the last one was torn down). This is the
+  // ONLY 1:1-mode accessor every existing call site should use going
+  // forward -- exposed for tests/future GC1-GC3 use via initApp's return
+  // value.
+  function getActivePeer() {
+    return state.activeConnectionId ? state.peers.get(state.activeConnectionId) : undefined;
+  }
+
+  // Lazily creates a fresh peer entry (and makes it active) if none is
+  // active yet, otherwise returns the existing active entry unchanged --
+  // this is what lets state.pc = ... (etc, via the PEER_PROXY_FIELDS
+  // setters below) keep working exactly like a plain assignment to a
+  // single global slot for the 1:1 case, while still being backed by the
+  // Map underneath.
+  function ensureActivePeer() {
+    let entry = getActivePeer();
+    if (!entry) {
+      const connectionId = randomConnectionId();
+      entry = createPeerEntry();
+      state.peers.set(connectionId, entry);
+      state.activeConnectionId = connectionId;
+    }
+    return entry;
+  }
+
+  // For future group use (GC1-GC3): look up a peer entry by the fingerprint
+  // of its VERIFIED peer identity. Unused by any 1:1 call site in this
+  // section -- present now so GC1-GC3 doesn't need another state-shape
+  // change.
+  function getPeerByFingerprint(fingerprint) {
+    for (const entry of state.peers.values()) {
+      if (entry.peerFingerprint === fingerprint) return entry;
+    }
+    return undefined;
+  }
+
+  // For future group use (GC1-GC3): look up a peer entry directly by its
+  // connectionId.
+  function getPeerByConnectionId(connectionId) {
+    return state.peers.get(connectionId);
+  }
+
+  // Tears down the CURRENTLY active connection: deletes its entry from
+  // state.peers outright (rather than nulling fields on it, which would
+  // leave a stale all-null entry behind -- an explicit spec requirement for
+  // this section) and clears activeConnectionId. Every former "reset these
+  // ~9 fields to null/false" teardown call site in this file now calls this
+  // instead.
+  function resetActiveConnection() {
+    if (state.activeConnectionId) state.peers.delete(state.activeConnectionId);
+    state.activeConnectionId = null;
+  }
+
+  // Section GC0: transparent proxy so every existing direct read/write of
+  // state.pc / state.channel / state.sessionKey / state.sessionEcdhWires /
+  // state.sendChainKey / state.receiveChainKey / state.peerFingerprint /
+  // state.peerIdentityPublicKey / state.isInviteOwner throughout this file
+  // keeps working unchanged, while the data actually lives in the active
+  // entry of state.peers. Reading before any connection exists returns the
+  // same "empty" value the old single-slot fields used to hold (null, or
+  // false for isInviteOwner); writing lazily creates the active entry if
+  // needed (ensureActivePeer), matching the old behavior where assigning to
+  // any of these fields "just worked" regardless of prior state.
+  const PEER_PROXY_FIELDS = [
+    "pc",
+    "channel",
+    "sessionKey",
+    "sessionEcdhWires",
+    "sendChainKey",
+    "receiveChainKey",
+    "peerFingerprint",
+    "peerIdentityPublicKey",
+    "isInviteOwner"
+  ];
+  for (const field of PEER_PROXY_FIELDS) {
+    Object.defineProperty(state, field, {
+      enumerable: true,
+      configurable: true,
+      get() {
+        const entry = getActivePeer();
+        if (!entry) return field === "isInviteOwner" ? false : null;
+        return entry[field];
+      },
+      set(value) {
+        ensureActivePeer()[field] = value;
+      }
+    });
+  }
 
   // Runtime values must survive language switches: the first dynamic write
   // strips the element's data-i18n so applyTranslations stops touching it.
@@ -775,19 +898,19 @@ export function initApp(doc, options) {
     state.identityKeyPair = null;
     state.senderKey = null;
     state.nickname = null;
-    state.channel = null;
-    state.pc = null;
-    state.sessionKey = null;
     state.localStream = null;
-    state.peerFingerprint = null;
     hideSafetyNumberHint();
-    state.peerIdentityPublicKey = null;
-    state.sessionEcdhWires = null;
-    // exec review finding: without these, a fresh post-logout session could
+    // Section GC0: deletes the active state.peers entry outright (pc,
+    // channel, sessionKey, sessionEcdhWires, sendChainKey, receiveChainKey,
+    // peerFingerprint, peerIdentityPublicKey, isInviteOwner all go with it)
+    // instead of nulling each field individually -- avoids leaving a stale
+    // all-null entry behind in the Map (exec review requirement for this
+    // section).
+    resetActiveConnection();
+    // exec review finding: without this, a fresh post-logout session could
     // inherit stale flags from the ended one -- e.g. acquireLocalStream()'s
     // one-time addLocalMediaTracks guard staying "already added" and silently
     // skipping media on the NEW peer connection.
-    state.isInviteOwner = false;
     state.localTracksAddedToPeer = false;
     setDynamicText(el("pub-key-display"), "");
     renderGuestQuickActions();
@@ -1371,8 +1494,20 @@ export function initApp(doc, options) {
   }
 
   function wireChannelCallbacks(disarmIceTimeout, { onDecryptedMessage = handleChatMessage, afterChannelOpen } = {}) {
+    // Section GC0 exec-review iter2 finding: snapshot which connection this
+    // set of callbacks belongs to at wiring time. onChannelOpen can fire
+    // asynchronously (ICE/DTLS completion) after logout has already torn
+    // down the session -- without this guard, state.channel = channel would
+    // resurrect a phantom state.peers entry the same way the ratchet
+    // writeback could (see serializedChainStep above).
+    const ownerConnectionIdAtWireTime = state.activeConnectionId;
     return {
       onChannelOpen: (channel) => {
+        // Skip if the session this callback belongs to was already torn
+        // down (logout) or superseded by a newer one before the channel
+        // actually finished opening -- otherwise this write would resurrect
+        // a phantom state.peers entry for a session that no longer exists.
+        if (ownerConnectionIdAtWireTime !== null && state.activeConnectionId !== ownerConnectionIdAtWireTime) return;
         state.channel = channel;
         setStatus(t("status.connected"));
         for (const id of ["btn-start-call", "btn-toggle-camera", "btn-toggle-mic"]) {
@@ -1435,9 +1570,22 @@ export function initApp(doc, options) {
   state.receiveChainLock = Promise.resolve();
 
   function serializedChainStep(lockField, chainField) {
+    // Section GC0 exec-review iter2 finding: `ratchetStep` awaits a real
+    // crypto.subtle call, yielding the event loop -- if btn-logout's
+    // resetActiveConnection() runs during that await, the writeback below
+    // would otherwise hit the PEER_PROXY_FIELDS setter's ensureActivePeer(),
+    // which -- finding no active entry -- lazily resurrects a brand-new
+    // phantom state.peers entry post-logout (a real divergence from the
+    // original flat-state code, where a late write just landed on an inert
+    // dead field). Snapshotting the connectionId before the await and
+    // skipping the writeback if it no longer matches the active connection
+    // avoids resurrecting an entry for a session that no longer exists.
+    const connectionIdAtStart = state.activeConnectionId;
     const step = state[lockField].then(async () => {
       const { messageKey, nextChainKeyBytes } = await ratchetStep(state[chainField]);
-      state[chainField] = nextChainKeyBytes;
+      if (state.activeConnectionId === connectionIdAtStart) {
+        state[chainField] = nextChainKeyBytes;
+      }
       return messageKey;
     });
     state[lockField] = step.then(
@@ -2607,4 +2755,11 @@ export function initApp(doc, options) {
       }
     })().catch((err) => setStatus(t("status.error", { msg: err.message })));
   }
+
+  // Section GC0 (specs/phase4/group-chats.md): expose the refactored
+  // multi-connection internals for tests (and future GC1-GC3 code) --
+  // additive only, nothing previously consumed initApp's return value
+  // (index.html calls initApp(document) and discards it), so this cannot
+  // change any existing behavior.
+  return { state, getActivePeer, getPeerByFingerprint, getPeerByConnectionId };
 }

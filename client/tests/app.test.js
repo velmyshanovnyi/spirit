@@ -5440,3 +5440,74 @@ describe("file transfer (Section FT2, specs/phase4/file-transfer.md)", () => {
     });
   });
 });
+
+describe("GC0: state.peers multi-connection refactor (specs/phase4/group-chats.md)", () => {
+  it("a second connection setup does not overwrite the first -- both entries coexist in state.peers", () => {
+    const { state, getPeerByFingerprint, getPeerByConnectionId } = initApp(document, { locale: "uk" });
+
+    // Simulate the first session's handshake writing its per-connection
+    // fields (mirrors what startInitiatorSession/startJoinerSession do to
+    // state.pc/state.sessionKey/etc via the PEER_PROXY_FIELDS setters).
+    state.pc = { id: "pc-1" };
+    state.channel = { id: "channel-1" };
+    state.sessionKey = "session-key-1";
+    state.peerFingerprint = "fingerprint-1";
+    const firstConnectionId = state.activeConnectionId;
+    expect(firstConnectionId).toBeTruthy();
+    expect(state.peers.size).toBe(1);
+
+    // Now simulate a second, independent connection being established
+    // (GC1-GC3 territory: multiple simultaneous peers) by explicitly
+    // starting a fresh active entry rather than reusing the first one.
+    state.activeConnectionId = null;
+    state.pc = { id: "pc-2" };
+    state.channel = { id: "channel-2" };
+    state.sessionKey = "session-key-2";
+    state.peerFingerprint = "fingerprint-2";
+    const secondConnectionId = state.activeConnectionId;
+
+    expect(secondConnectionId).toBeTruthy();
+    expect(secondConnectionId).not.toBe(firstConnectionId);
+    expect(state.peers.size).toBe(2);
+
+    // Both entries retain their own, independent field values -- the first
+    // was NOT overwritten by the second connection's setup.
+    const firstEntry = state.peers.get(firstConnectionId);
+    expect(firstEntry.pc).toEqual({ id: "pc-1" });
+    expect(firstEntry.channel).toEqual({ id: "channel-1" });
+    expect(firstEntry.sessionKey).toBe("session-key-1");
+    expect(firstEntry.peerFingerprint).toBe("fingerprint-1");
+
+    const secondEntry = state.peers.get(secondConnectionId);
+    expect(secondEntry.pc).toEqual({ id: "pc-2" });
+    expect(secondEntry.channel).toEqual({ id: "channel-2" });
+    expect(secondEntry.sessionKey).toBe("session-key-2");
+    expect(secondEntry.peerFingerprint).toBe("fingerprint-2");
+
+    // getPeerByFingerprint/getPeerByConnectionId (GC1-GC3 helpers) both
+    // resolve correctly against a multi-entry Map.
+    expect(getPeerByFingerprint("fingerprint-1")).toBe(firstEntry);
+    expect(getPeerByFingerprint("fingerprint-2")).toBe(secondEntry);
+    expect(getPeerByConnectionId(firstConnectionId)).toBe(firstEntry);
+    expect(getPeerByConnectionId(secondConnectionId)).toBe(secondEntry);
+  });
+
+  it("logout deletes the peers Map entry entirely rather than leaving a stale all-null one behind", () => {
+    const { state } = initApp(document, { locale: "uk" });
+    state.pc = { close: vi.fn() };
+    state.channel = { close: vi.fn(), send: vi.fn() };
+    state.sessionKey = "session-key";
+    state.peerFingerprint = "fingerprint";
+    expect(state.peers.size).toBe(1);
+
+    document.getElementById("btn-logout")?.click();
+
+    expect(state.peers.size).toBe(0);
+    expect(state.activeConnectionId).toBeNull();
+    expect(state.pc).toBeNull();
+    expect(state.channel).toBeNull();
+    expect(state.sessionKey).toBeNull();
+    expect(state.peerFingerprint).toBeNull();
+    expect(state.isInviteOwner).toBe(false);
+  });
+});
