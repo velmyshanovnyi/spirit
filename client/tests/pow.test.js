@@ -94,4 +94,28 @@ describe("solvePow", () => {
     const nonce2 = await solvePow(challenge, TEST_DIFFICULTY_BITS, { startAttempt: 0 });
     expect(nonce1).toBe(nonce2);
   });
+
+  // Live-verification bug (found post-deploy, 2026-07-18): the original loop
+  // did `for (...) { await verifyPow(...) }`, awaiting crypto.subtle.digest
+  // ONE candidate at a time. Each await has real per-call dispatch overhead
+  // in a real browser; at the spec's recommended production difficulty of
+  // 20 bits (~2^20 expected attempts) this made a real create_invite click
+  // hang for 30+ seconds instead of the assumed sub-second solve. Fixed by
+  // dispatching candidates in concurrent batches via Promise.all. This test
+  // guards against reintroducing the fully-sequential-await pattern: at a
+  // moderately high difficulty it must still complete well within a
+  // generous wall-clock bound, not just be logically correct.
+  it("solves a moderately-high-difficulty challenge within a generous wall-clock bound (concurrent batching regression guard)", async () => {
+    const REGRESSION_DIFFICULTY_BITS = 16; // ~65536 expected attempts
+    const challenge = buildPowChallenge(1, "perf-regression-key");
+    const startedAt = Date.now();
+    const nonce = await solvePow(challenge, REGRESSION_DIFFICULTY_BITS);
+    const elapsedMs = Date.now() - startedAt;
+    expect(await verifyPow(challenge, nonce, REGRESSION_DIFFICULTY_BITS)).toBe(true);
+    // Generous bound: batched solving should comfortably finish in well
+    // under a second on any real test runner; the fully-sequential-await
+    // version this guards against took tens of seconds at 20 bits (4x this
+    // difficulty), so even a very unlucky run here should stay far below.
+    expect(elapsedMs).toBeLessThan(5000);
+  });
 });

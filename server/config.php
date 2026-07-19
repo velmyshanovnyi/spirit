@@ -25,7 +25,10 @@ $config = [
     // clients will solve at the wrong (too easy, rejected; or too hard,
     // needlessly slow) difficulty.
     'POW_WINDOW_SECONDS' => 30,
-    'POW_DIFFICULTY_BITS' => 20,
+    // Recalibrated from 20 to 16 (2026-07-18, live measurement) -- see the
+    // matching comment on client/js/signalingClient.js's POW_DIFFICULTY_BITS
+    // for the measured timings that drove this change.
+    'POW_DIFFICULTY_BITS' => 16,
 
     // Access control (docs/signaling-protocol.md "Контроль доступу").
     // Default: open node relying solely on per-room invite tokens.

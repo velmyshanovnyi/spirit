@@ -100,6 +100,15 @@ function randomStartAttempt() {
   return crypto.getRandomValues(new Uint32Array(1))[0] % RANDOM_START_RANGE;
 }
 
+// Number of candidate nonces hashed concurrently per round (see solvePow's
+// doc comment for why this matters -- found via live browser verification,
+// 2026-07-18: awaiting crypto.subtle.digest one candidate at a time has
+// real per-call dispatch overhead that made a real solve at the production
+// difficulty (20 bits, ~2^20 expected attempts) take 30+ seconds in a real
+// browser instead of the assumed sub-second. Batching hides that dispatch
+// latency behind concurrency -- same total hash work, far less wall time.
+const DEFAULT_BATCH_SIZE = 256;
+
 /**
  * Brute-forces nonces (stringified increasing integers, starting from a
  * randomized offset by default -- see randomStartAttempt) until
@@ -114,21 +123,32 @@ function randomStartAttempt() {
  * legitimate, create_invite call as a false-positive "replay". Pass an
  * explicit startAttempt (e.g. 0) for deterministic behavior, as tests do.
  *
+ * Candidates are hashed in concurrent batches of `batchSize` (via
+ * Promise.all) rather than one at a time -- see DEFAULT_BATCH_SIZE. Within
+ * and across batches, candidates are still scanned in strictly increasing
+ * nonce order and the FIRST satisfying nonce found is returned, so behavior
+ * (including full determinism when startAttempt is given explicitly) is
+ * unchanged from a purely sequential search -- only wall-clock time differs.
+ *
  * @param {string} challenge
  * @param {number} difficultyBits
- * @param {{maxAttempts?: number, startAttempt?: number}} [options]
+ * @param {{maxAttempts?: number, startAttempt?: number, batchSize?: number}} [options]
  * @returns {Promise<string>}
  * @throws {Error} if no solution is found within maxAttempts
  */
 export async function solvePow(
   challenge,
   difficultyBits,
-  { maxAttempts = DEFAULT_MAX_ATTEMPTS, startAttempt = randomStartAttempt() } = {}
+  { maxAttempts = DEFAULT_MAX_ATTEMPTS, startAttempt = randomStartAttempt(), batchSize = DEFAULT_BATCH_SIZE } = {}
 ) {
-  for (let i = 0; i < maxAttempts; i++) {
-    const nonce = String(startAttempt + i);
-    if (await verifyPow(challenge, nonce, difficultyBits)) {
-      return nonce;
+  for (let base = 0; base < maxAttempts; base += batchSize) {
+    const count = Math.min(batchSize, maxAttempts - base);
+    const candidates = Array.from({ length: count }, (_, k) => String(startAttempt + base + k));
+    const digests = await Promise.all(candidates.map((nonce) => sha256(`${challenge}:${nonce}`)));
+    for (let k = 0; k < count; k++) {
+      if (countLeadingZeroBits(digests[k]) >= difficultyBits) {
+        return candidates[k];
+      }
     }
   }
   throw new Error(

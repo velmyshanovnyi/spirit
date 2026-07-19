@@ -8,7 +8,16 @@ import { buildPowChallenge, solvePow } from "./pow.js";
 // verification (wrong time-window bucketing) or solve at the wrong
 // (too easy/too hard) difficulty.
 export const POW_WINDOW_SECONDS = 30;
-export const POW_DIFFICULTY_BITS = 20;
+// Recalibrated from the spec's original recommendation of 20 (2026-07-18,
+// live browser measurement): batched solvePow (client/js/pow.js) still
+// took 30+ seconds at 20 bits in real live-verification testing --
+// per-call crypto.subtle.digest dispatch overhead dominates far more than
+// assumed, and batching only partially hides it. Measured live: 14 bits
+// ~1.3s, 16 bits ~1.1s (high variance, both order-of-seconds not
+// sub-second). 16 bits (~2^16 ~= 65K expected attempts) is the chosen
+// trade-off -- 16x less attacker cost than 20 bits, but a real
+// create_invite click actually completes reliably instead of hanging.
+export const POW_DIFFICULTY_BITS = 16;
 
 export class SignalingError extends Error {
   constructor(message, { status = null, cause } = {}) {
