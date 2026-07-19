@@ -421,7 +421,7 @@ describe("btn-quick-chat: zero-click ephemeral 'spirit mode' (Section F3)", () =
     document.getElementById("btn-quick-chat").click();
 
     await vi.waitFor(() => expect(generateIdentityKeyPair).toHaveBeenCalled());
-    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledWith("http://node.example/index.php", "sender-fp"));
+    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledWith("http://node.example/index.php", "sender-fp", expect.anything()));
     await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
 
     // No manual click on btn-initiate anywhere in this test -- the whole
@@ -479,6 +479,33 @@ describe("btn-quick-chat: zero-click ephemeral 'spirit mode' (Section F3)", () =
 
     resolveCreateInvite({ roomId: "room1", inviteToken: "tok1" });
     await vi.waitFor(() => expect(quickChatButton.disabled).toBe(false));
+  });
+
+  it("shows a solving-PoW status message while createInvite's PoW solve is in flight, per Section SR2", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+
+    let capturedOnPowStart;
+    let resolveCreateInvite;
+    createInvite.mockImplementation((url, senderKey, { onPowStart } = {}) => {
+      capturedOnPowStart = onPowStart;
+      return new Promise((resolve) => {
+        resolveCreateInvite = resolve;
+      });
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-quick-chat").click();
+
+    await vi.waitFor(() => expect(createInvite).toHaveBeenCalled());
+    expect(typeof capturedOnPowStart).toBe("function");
+
+    capturedOnPowStart();
+    expect(document.getElementById("connection-status").textContent).toBe("розв'язання захисту від спаму...");
+
+    resolveCreateInvite({ roomId: "room1", inviteToken: "tok1" });
+    await vi.waitFor(() => expect(document.getElementById("invite-token").value).toBe("tok1"));
   });
 });
 
@@ -1755,7 +1782,7 @@ describe("btn-initiate", () => {
 
     document.getElementById("btn-initiate").click();
     await vi.waitFor(() => expect(createInvite).toHaveBeenCalled());
-    expect(createInvite).toHaveBeenCalledWith("http://node.example/index.php", "sender-fp");
+    expect(createInvite).toHaveBeenCalledWith("http://node.example/index.php", "sender-fp", expect.anything());
 
     await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
     expect(document.getElementById("room-id").value).toBe("room1");
@@ -3791,7 +3818,7 @@ describe("zero-click default landing on chat, no registration (Section H5)", () 
 
     // No button click anywhere in this test.
     await vi.waitFor(() => expect(generateIdentityKeyPair).toHaveBeenCalled());
-    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledWith("http://node.example/index.php", "sender-fp"));
+    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledWith("http://node.example/index.php", "sender-fp", expect.anything()));
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
     expect(document.getElementById("invite-bar").hidden).toBe(false); // owns the invite, like btn-quick-chat
   });
@@ -4625,7 +4652,7 @@ describe("contacts and history screens (Sections N3/N4)", () => {
     const row = document.querySelector("#contacts-list .list-row");
     row.querySelector("[data-i18n='contacts.message']").click();
 
-    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledWith("http://node.example/index.php", "sender-fp"));
+    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledWith("http://node.example/index.php", "sender-fp", expect.anything()));
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
     expect(sendPushNotification).not.toHaveBeenCalled();
   });
@@ -4658,7 +4685,7 @@ describe("contacts and history screens (Sections N3/N4)", () => {
     const row = document.querySelector("#contacts-list .list-row");
     row.querySelector("[data-i18n='contacts.message']").click();
 
-    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledWith("http://node.example/index.php", "sender-fp"));
+    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledWith("http://node.example/index.php", "sender-fp", expect.anything()));
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
     await vi.waitFor(() =>
       expect(sendPushNotification).toHaveBeenCalledWith(pushSubscription, { room: "room1", token: "tok1" })

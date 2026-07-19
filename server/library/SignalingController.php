@@ -17,6 +17,7 @@ class SignalingController
     private Storage $storage;
     private InviteManager $inviteManager;
     private RateLimiter $rateLimiter;
+    private PowNonceStore $powNonceStore;
 
     public function __construct(array $config)
     {
@@ -32,6 +33,15 @@ class SignalingController
             $rl['ROOM_CREATION_WINDOW_SECONDS'],
             $rl['MAX_ROOM_CREATIONS_PER_WINDOW'],
             $rl['MAX_TRACKED_IPS']
+        );
+
+        // Section SR2: TTL matches 2 * POW_WINDOW_SECONDS -- the same
+        // tolerance window the pow_timestamp freshness check below uses, so
+        // an entry is never GC'd while it could still theoretically pass
+        // that freshness check.
+        $this->powNonceStore = new PowNonceStore(
+            $config['POW_SPENT_FILE'],
+            2 * $config['POW_WINDOW_SECONDS']
         );
     }
 
@@ -98,6 +108,19 @@ class SignalingController
             return $this->error(429, 'Too Many Requests');
         }
 
+        // Section SR2: PoW gate on create_invite, checked BEFORE the room is
+        // actually created (and before the general withLock/dispatch below)
+        // -- an additional gate on top of, not a replacement for, the
+        // general per-IP RateLimiter throttle already applied above. A
+        // failed check here is 400 (bad/missing proof-of-work), never 429
+        // (this isn't a rate-limit rejection).
+        if ($action === 'create_invite') {
+            $powError = $this->checkPow($input, $senderKey);
+            if ($powError !== null) {
+                return $powError;
+            }
+        }
+
         try {
             return $this->withLock(fn () => $this->dispatchAction($action, $input, $senderKey));
         } catch (\RuntimeException $e) {
@@ -107,6 +130,56 @@ class SignalingController
             // empty state, per Storage's contract.
             return $this->error(500, 'Internal Server Error');
         }
+    }
+
+    /**
+     * Section SR2: verifies create_invite's proof-of-work per
+     * specs/phase5/sybil-resistance.md -- timestamp freshness, hash
+     * difficulty, and anti-replay, in that order (cheapest checks first).
+     * Returns an error response (already in the handle()-return shape) if
+     * any check fails, or null if the PoW is valid and this request may
+     * proceed to actually create the room.
+     */
+    private function checkPow(array $input, string $senderKey): ?array
+    {
+        $powTimestamp = $input['pow_timestamp'] ?? null;
+        $powNonce = $input['pow_nonce'] ?? null;
+
+        if ((!is_int($powTimestamp) && !is_float($powTimestamp)) || !is_string($powNonce) || $powNonce === '') {
+            return $this->error(400, 'Bad Request: Missing or invalid proof-of-work fields');
+        }
+
+        $windowSeconds = $this->config['POW_WINDOW_SECONDS'];
+        $difficultyBits = $this->config['POW_DIFFICULTY_BITS'];
+
+        // Clock-skew/window-boundary tolerance, per the spec: reject a
+        // pow_timestamp too far from the server's own clock BEFORE trusting
+        // it to compute timeWindow -- otherwise a wildly stale or
+        // future-dated timestamp could be used to target an arbitrary
+        // (already- or not-yet-valid) window.
+        if (abs(time() - $powTimestamp) > 2 * $windowSeconds) {
+            return $this->error(400, 'Bad Request: proof-of-work timestamp is stale or out of tolerance');
+        }
+
+        $timeWindow = (int) floor($powTimestamp / $windowSeconds);
+        $challenge = Pow::buildChallenge($timeWindow, $senderKey);
+
+        if (!Pow::verify($challenge, $powNonce, $difficultyBits)) {
+            return $this->error(400, 'Bad Request: invalid proof-of-work');
+        }
+
+        // Anti-replay MUST be the last check (and, since it MUTATES state by
+        // marking the nonce spent, must only run once the request is
+        // otherwise fully valid) -- an invalid PoW that also happens to
+        // collide with a previously-spent triple should be rejected as
+        // "invalid proof-of-work" above, not consume anti-replay bookkeeping
+        // or produce a misleading "replay" error for a request that was
+        // never a real replay.
+        if (!$this->powNonceStore->checkAndMarkSpent((string) $timeWindow, $senderKey, $powNonce)) {
+            return $this->error(400, 'Bad Request: proof-of-work already used');
+        }
+
+        return null;
     }
 
     private function dispatchAction(string $action, array $input, string $senderKey): array

@@ -27,6 +27,21 @@ class Pow
     }
 
     /**
+     * Section SR2: builds the challenge string exactly as
+     * client/js/pow.js's buildPowChallenge(timeWindow, senderKey) does --
+     * "${timeWindow}:${senderKey}". PHP's string interpolation of an int
+     * produces the same plain decimal digits as JS's template-literal
+     * coercion of a number (no leading zeros, no locale-dependent
+     * formatting on either side), so this concatenation is byte-identical
+     * to the JS side for the same (timeWindow, senderKey) inputs -- the
+     * exact invariant SR1's cross-language review scrutinized.
+     */
+    public static function buildChallenge(int $timeWindow, string $senderKey): string
+    {
+        return $timeWindow . ':' . $senderKey;
+    }
+
+    /**
      * Counts leading zero BITS (not bytes) in a raw binary string,
      * most-significant-bit-first within each byte -- the same bit order as
      * client/js/pow.js's countLeadingZeroBits() over crypto.subtle.digest's

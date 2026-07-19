@@ -1,3 +1,15 @@
+import { buildPowChallenge, solvePow } from "./pow.js";
+
+// Section SR2 (specs/phase5/sybil-resistance.md): must exactly match
+// server/config.php's POW_WINDOW_SECONDS / POW_DIFFICULTY_BITS constants --
+// there's no shared-constants file across JS/PHP in this project, so these
+// are hardcoded on both sides with a cross-referencing comment. A mismatch
+// here would make every legitimate client's PoW fail server-side
+// verification (wrong time-window bucketing) or solve at the wrong
+// (too easy/too hard) difficulty.
+export const POW_WINDOW_SECONDS = 30;
+export const POW_DIFFICULTY_BITS = 20;
+
 export class SignalingError extends Error {
   constructor(message, { status = null, cause } = {}) {
     super(message);
@@ -33,8 +45,28 @@ async function apiRequest(baseUrl, body, { signal } = {}) {
   return data;
 }
 
-export async function createInvite(baseUrl, senderKey) {
-  const data = await apiRequest(baseUrl, { action: "create_invite", sender_key: senderKey });
+/**
+ * Section SR2: solves a PoW (specs/phase5/sybil-resistance.md's Sybil-
+ * resistance design) BEFORE POSTing create_invite -- this is what makes
+ * mass room creation from a botnet of fresh identity keys expensive per
+ * key, on top of RateLimiter.php's per-IP throttle. onPowStart, if given, is
+ * invoked synchronously right before the (potentially slow, up to ~1s or
+ * more on weak devices) solving loop starts, so callers can show UI status.
+ */
+export async function createInvite(baseUrl, senderKey, { onPowStart } = {}) {
+  const powTimestamp = Date.now() / 1000;
+  const timeWindow = Math.floor(powTimestamp / POW_WINDOW_SECONDS);
+  const challenge = buildPowChallenge(timeWindow, senderKey);
+
+  onPowStart?.();
+  const powNonce = await solvePow(challenge, POW_DIFFICULTY_BITS);
+
+  const data = await apiRequest(baseUrl, {
+    action: "create_invite",
+    sender_key: senderKey,
+    pow_timestamp: powTimestamp,
+    pow_nonce: powNonce
+  });
   return { roomId: data.room_id, inviteToken: data.invite_token };
 }
 

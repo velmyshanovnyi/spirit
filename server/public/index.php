@@ -12,6 +12,8 @@ require __DIR__ . '/../library/Storage.php';
 require __DIR__ . '/../library/InviteManager.php';
 require __DIR__ . '/../library/Cors.php';
 require __DIR__ . '/../library/RateLimiter.php';
+require __DIR__ . '/../library/Pow.php';
+require __DIR__ . '/../library/PowNonceStore.php';
 require __DIR__ . '/../library/SignalingController.php';
 
 use Spirit\SignalingController;

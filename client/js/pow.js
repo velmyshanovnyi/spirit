@@ -83,21 +83,50 @@ export async function verifyPow(challenge, nonce, difficultyBits) {
 // relying on this default.
 const DEFAULT_MAX_ATTEMPTS = 2 ** 24;
 
+// Upper bound for the randomized default search start (see solvePow below).
+// Kept well under Number.MAX_SAFE_INTEGER so `startAttempt + attempt`
+// arithmetic across DEFAULT_MAX_ATTEMPTS iterations never loses precision.
+const RANDOM_START_RANGE = 2 ** 32;
+
 /**
- * Brute-forces nonces (stringified increasing integers, starting at 0)
- * until verifyPow(challenge, nonce, difficultyBits) succeeds, returning the
- * winning nonce as a string ready to send in create_invite's
- * pow_nonce field.
+ * Picks a random starting attempt for solvePow's search -- see solvePow's
+ * doc comment for why this matters (SR2 exec-review finding,
+ * specs/reviews/sybil-resistance-SR2-iter1.md): a fixed start of 0 made
+ * solvePow fully deterministic for a given (challenge, difficultyBits),
+ * which collided with SR2's server-side anti-replay whenever the same
+ * identity legitimately created two invites within the same time window.
+ */
+function randomStartAttempt() {
+  return crypto.getRandomValues(new Uint32Array(1))[0] % RANDOM_START_RANGE;
+}
+
+/**
+ * Brute-forces nonces (stringified increasing integers, starting from a
+ * randomized offset by default -- see randomStartAttempt) until
+ * verifyPow(challenge, nonce, difficultyBits) succeeds, returning the
+ * winning nonce as a string ready to send in create_invite's pow_nonce
+ * field. Randomizing the start means two solves of the IDENTICAL challenge
+ * (e.g. the same identity calling create_invite twice within the same PoW
+ * time window) produce different nonces with overwhelming probability,
+ * while each nonce independently still satisfies verifyPow -- required so
+ * server-side per-(timeWindow, senderKey, nonce) anti-replay
+ * (server/library/PowNonceStore.php) doesn't reject a second, otherwise
+ * legitimate, create_invite call as a false-positive "replay". Pass an
+ * explicit startAttempt (e.g. 0) for deterministic behavior, as tests do.
  *
  * @param {string} challenge
  * @param {number} difficultyBits
- * @param {{maxAttempts?: number}} [options]
+ * @param {{maxAttempts?: number, startAttempt?: number}} [options]
  * @returns {Promise<string>}
  * @throws {Error} if no solution is found within maxAttempts
  */
-export async function solvePow(challenge, difficultyBits, { maxAttempts = DEFAULT_MAX_ATTEMPTS } = {}) {
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const nonce = String(attempt);
+export async function solvePow(
+  challenge,
+  difficultyBits,
+  { maxAttempts = DEFAULT_MAX_ATTEMPTS, startAttempt = randomStartAttempt() } = {}
+) {
+  for (let i = 0; i < maxAttempts; i++) {
+    const nonce = String(startAttempt + i);
     if (await verifyPow(challenge, nonce, difficultyBits)) {
       return nonce;
     }

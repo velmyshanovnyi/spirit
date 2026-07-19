@@ -1,4 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// Section SR2 (specs/phase5/sybil-resistance.md): createInvite() now solves a
+// PoW before POSTing. pow.js's own crypto core (solvePow/verifyPow/
+// buildPowChallenge) is already covered by pow.test.js -- mocked here so
+// these tests run at real speed regardless of signalingClient.js's hardcoded
+// POW_DIFFICULTY_BITS.
+vi.mock("../js/pow.js", () => ({
+  buildPowChallenge: (timeWindow, senderKey) => `${timeWindow}:${senderKey}`,
+  solvePow: vi.fn().mockResolvedValue("mock-nonce")
+}));
+
 import {
   createInvite,
   createOffer,
@@ -7,8 +18,10 @@ import {
   checkAnswer,
   pollForAnswer,
   fetchProof,
-  SignalingError
+  SignalingError,
+  POW_WINDOW_SECONDS
 } from "../js/signalingClient.js";
+import { solvePow } from "../js/pow.js";
 
 const BASE_URL = "https://node.example/index.php";
 
@@ -24,21 +37,67 @@ beforeEach(() => {
   global.fetch = vi.fn();
 });
 
+const WINDOW_INDEX = 42;
+const TIMESTAMP_SECONDS = WINDOW_INDEX * 30; // must match signalingClient.js's POW_WINDOW_SECONDS=30
+
 describe("createInvite", () => {
-  it("posts action=create_invite and returns { roomId, inviteToken }", async () => {
+  beforeEach(() => {
+    vi.mocked(solvePow).mockClear();
+    vi.mocked(solvePow).mockResolvedValue("mock-nonce");
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(TIMESTAMP_SECONDS * 1000)); // exact window boundary
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("solves a PoW before POSTing, and includes pow_timestamp/pow_nonce in the body", async () => {
+    expect(POW_WINDOW_SECONDS).toBe(30);
     mockFetchOnce(200, { status: "success", room_id: "abc123", invite_token: "tok456" });
 
     const result = await createInvite(BASE_URL, "senderKey1");
 
-    expect(global.fetch).toHaveBeenCalledWith(
-      BASE_URL,
-      expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ action: "create_invite", sender_key: "senderKey1" })
-      })
-    );
+    expect(solvePow).toHaveBeenCalledTimes(1);
+    const [challengeArg] = vi.mocked(solvePow).mock.calls[0];
+    expect(challengeArg).toBe(`${WINDOW_INDEX}:senderKey1`); // buildPowChallenge(timeWindow, senderKey)
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [, requestInit] = global.fetch.mock.calls[0];
+    const sentBody = JSON.parse(requestInit.body);
+    expect(sentBody).toEqual({
+      action: "create_invite",
+      sender_key: "senderKey1",
+      pow_timestamp: TIMESTAMP_SECONDS,
+      pow_nonce: "mock-nonce"
+    });
     expect(result).toEqual({ roomId: "abc123", inviteToken: "tok456" });
+  });
+
+  it("solves the PoW before making the network request at all (solving happens first)", async () => {
+    mockFetchOnce(200, { status: "success", room_id: "abc123", invite_token: "tok456" });
+    const callOrder = [];
+    vi.mocked(solvePow).mockImplementationOnce(async () => {
+      callOrder.push("solve");
+      return "mock-nonce";
+    });
+    global.fetch = vi.fn().mockImplementationOnce(async () => {
+      callOrder.push("fetch");
+      return { ok: true, status: 200, json: async () => ({ status: "success", room_id: "r", invite_token: "t" }) };
+    });
+
+    await createInvite(BASE_URL, "senderKey1");
+
+    expect(callOrder).toEqual(["solve", "fetch"]);
+  });
+
+  it("invokes an onPowStart callback before solving, for UI status reporting", async () => {
+    mockFetchOnce(200, { status: "success", room_id: "abc123", invite_token: "tok456" });
+    const onPowStart = vi.fn();
+
+    await createInvite(BASE_URL, "senderKey1", { onPowStart });
+
+    expect(onPowStart).toHaveBeenCalledTimes(1);
   });
 });
 

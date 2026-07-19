@@ -67,4 +67,31 @@ describe("solvePow", () => {
     // chance (~1 in 4 billion), so this deterministically exercises the cap.
     await expect(solvePow(challenge, 32, { maxAttempts: 1 })).rejects.toThrow();
   });
+
+  // Section SR2 exec-review finding (specs/reviews/sybil-resistance-SR2-iter1.md):
+  // solvePow used to be fully deterministic (always start searching from
+  // nonce "0") for a given (challenge, difficultyBits), which meant two
+  // create_invite calls from the SAME identity within the SAME 30s time
+  // window (identical challenge = "${timeWindow}:${senderKey}") always
+  // produced the identical nonce -- and SR2's server-side anti-replay then
+  // rejected the second, otherwise-completely-legitimate call as a "replay".
+  // solvePow now randomizes its search start by default so repeated solves
+  // of the same challenge produce different nonces (while each nonce still
+  // independently satisfies verifyPow, so server-side verification is
+  // unaffected).
+  it("produces a different nonce on repeated calls with the identical challenge (randomized search start)", async () => {
+    const challenge = buildPowChallenge(99, "same-identity-key");
+    const nonce1 = await solvePow(challenge, TEST_DIFFICULTY_BITS);
+    const nonce2 = await solvePow(challenge, TEST_DIFFICULTY_BITS);
+    expect(nonce1).not.toBe(nonce2);
+    expect(await verifyPow(challenge, nonce1, TEST_DIFFICULTY_BITS)).toBe(true);
+    expect(await verifyPow(challenge, nonce2, TEST_DIFFICULTY_BITS)).toBe(true);
+  });
+
+  it("is fully deterministic when an explicit startAttempt is given (regression control)", async () => {
+    const challenge = buildPowChallenge(1, "explicit-start-key");
+    const nonce1 = await solvePow(challenge, TEST_DIFFICULTY_BITS, { startAttempt: 0 });
+    const nonce2 = await solvePow(challenge, TEST_DIFFICULTY_BITS, { startAttempt: 0 });
+    expect(nonce1).toBe(nonce2);
+  });
 });

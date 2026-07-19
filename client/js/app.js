@@ -1945,7 +1945,14 @@ export function initApp(doc, options) {
     const senderKey = state.senderKey;
 
     const ecdhKeyPair = await generateEcdhKeyPair();
-    const { roomId, inviteToken } = await createInvite(serverUrl, senderKey);
+    // Section SR2 (specs/phase5/sybil-resistance.md): createInvite() now
+    // solves a PoW before it can POST, which can take a noticeable moment
+    // (up to ~1s at the recommended difficulty, longer on weak/mobile
+    // devices) -- surface that as a status message rather than leaving the
+    // UI looking stuck with no feedback.
+    const { roomId, inviteToken } = await createInvite(serverUrl, senderKey, {
+      onPowStart: () => setStatus(t("status.solvingPow"))
+    });
     el("room-id").value = roomId;
     el("invite-token").value = inviteToken;
     // Section PN5: notifying a specific offline contact out-of-band via Web
@@ -2062,7 +2069,9 @@ export function initApp(doc, options) {
     const senderKey = randomSenderKey();
 
     const ecdhKeyPair = await generateEcdhKeyPair();
-    const { roomId, inviteToken } = await createInvite(serverUrl, senderKey);
+    const { roomId, inviteToken } = await createInvite(serverUrl, senderKey, {
+      onPowStart: () => setDeviceLinkStatus(t("status.solvingPow"))
+    });
     el("room-id").value = roomId;
     el("invite-token").value = inviteToken;
     setDeviceLinkStatus(t("link.shareRoom"));

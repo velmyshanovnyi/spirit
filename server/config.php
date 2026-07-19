@@ -10,9 +10,22 @@ $dataDir = __DIR__ . '/data';
 $config = [
     'DB_FILE' => $dataDir . '/database.json',
     'RATE_LIMIT_FILE' => $dataDir . '/ratelimit.json',
+    'POW_SPENT_FILE' => $dataDir . '/pow_spent.json',
     'LOCK_FILE' => $dataDir . '/signaling.lock',
     'SESSION_TTL_SECONDS' => 300,
     'MAX_SESSIONS' => 1000,
+
+    // Section SR2 (specs/phase5/sybil-resistance.md): proof-of-work gate on
+    // create_invite. POW_WINDOW_SECONDS MUST exactly match
+    // client/js/signalingClient.js's hardcoded POW_WINDOW_SECONDS constant
+    // (no shared-constants file across JS/PHP in this project) -- a
+    // mismatch would bucket legitimate clients into the wrong time window
+    // and fail their PoW verification. POW_DIFFICULTY_BITS similarly must
+    // match the client's hardcoded POW_DIFFICULTY_BITS, or legitimate
+    // clients will solve at the wrong (too easy, rejected; or too hard,
+    // needlessly slow) difficulty.
+    'POW_WINDOW_SECONDS' => 30,
+    'POW_DIFFICULTY_BITS' => 20,
 
     // Access control (docs/signaling-protocol.md "Контроль доступу").
     // Default: open node relying solely on per-room invite tokens.
