@@ -92,8 +92,8 @@ const ADMIN_CONFIG_FIELDS = [
   "fetch_proof_max_bytes"
 ];
 
-const ROUTES = ["account", "profile", "server", "room", "conversation", "contacts", "history"];
-const GATED_ROUTES = ["profile", "conversation", "contacts", "history"];
+const ROUTES = ["account", "profile", "server", "room", "conversation", "manage", "history"];
+const GATED_ROUTES = ["profile", "conversation", "manage", "history"];
 
 // Per-profile own device list record key in the "profile" store (Section 15:
 // multiple accounts each maintain their own list).
@@ -1260,8 +1260,12 @@ export function initApp(doc, options) {
       }
     }
     const route = win.location.hash.replace(/^#\/?/, "");
-    if (route === "contacts") {
-      await renderContactsScreen();
+    // Section SD1 (specs/ui/persistent-sidebar.md): the sidebar's contact
+    // list is always visible now regardless of the active route, so it must
+    // re-render unconditionally -- only the manage-screen's groups/import
+    // cards stay gated to the "manage" route.
+    await renderContactsScreen();
+    if (route === "manage") {
       await renderGroupsCard();
       await renderImportedContactsScreen();
     }
@@ -1295,11 +1299,34 @@ export function initApp(doc, options) {
     hasIdentity: () => !!state.senderKey
   });
 
+  // Section SD1 (specs/ui/persistent-sidebar.md): populate the persistent
+  // sidebar's contact list immediately at startup, before any navigation or
+  // hashchange fires, so it isn't empty on first paint.
+  renderContactsScreen();
+
+  // Mobile responsive stacking (SD1): initRouter() above already resolved
+  // and rendered a real screen synchronously (e.g. "account" for a
+  // brand-new visitor) WITHOUT firing a hashchange event -- if main-active
+  // were only ever set from onScreenChange's hashchange listener, a mobile
+  // first-time visitor would see an empty sidebar with the account-creation
+  // screen invisible behind it until their first navigation. Mirror
+  // onScreenChange's toggle here once at startup so the just-rendered
+  // screen is actually visible on mobile from the first paint.
+  doc.body.classList.add("main-active");
+
   // Section H2 (specs/ui/chat-first-redesign.md): the old always-visible top
   // nav collapsed into a "⚙️ Налаштування" dropdown, in the same spirit as
   // Telegram's settings menu -- opens on toggle click, closes on selecting an
   // item, closes on an outside click, toggles closed on a second press of
   // the button itself.
+  // Section SD1 (specs/ui/persistent-sidebar.md): mobile responsive
+  // stacking's reverse toggle -- clicking "back" hides main content and
+  // shows the sidebar again, a plain CSS class removal (see onScreenChange
+  // above for where the class gets added).
+  el("btn-sidebar-back")?.addEventListener("click", () => {
+    doc.body.classList.remove("main-active");
+  });
+
   const settingsToggle = el("btn-settings-toggle");
   const settingsMenu = el("settings-menu");
   if (settingsToggle && settingsMenu) {
@@ -1535,8 +1562,15 @@ export function initApp(doc, options) {
   const win = doc.defaultView;
   const onScreenChange = () => {
     const route = win.location.hash.replace(/^#\/?/, "");
-    if (route === "contacts") {
-      renderContactsScreen();
+    // Sidebar's contact list is always in the DOM now (SD1) -- keep it live
+    // on every route change, not just when the "manage" screen is active.
+    renderContactsScreen();
+    // Mobile responsive stacking (SD1): any navigation away from the
+    // neutral/no-route state means the user is looking at a screen, so
+    // flip to showing main content full-width (a plain CSS class toggle,
+    // not a router route -- see #btn-sidebar-back below for the reverse).
+    doc.body.classList.add("main-active");
+    if (route === "manage") {
       renderGroupsCard();
       renderImportedContactsScreen();
     }

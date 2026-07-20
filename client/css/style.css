@@ -109,6 +109,106 @@ body {
   gap: 8px;
 }
 
+/* ---------- App body (SD1: persistent sidebar shell) ---------- */
+/* specs/ui/persistent-sidebar.md -- wraps #app-sidebar (always in the DOM,
+   outside router.js's [data-screen] mechanism entirely) and <main
+   class="layout"> side by side. Below the mobile breakpoint they stack
+   instead, toggled via the .main-active class (see app.js's sidebar
+   back/forward wiring) rather than any router route. */
+
+.app-body {
+  display: flex;
+  align-items: flex-start;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+#app-sidebar {
+  width: 300px;
+  flex: 0 0 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-right: 1px solid var(--border);
+  min-height: calc(100vh - 60px);
+  box-sizing: border-box;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sidebar-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.sidebar-filters .chip {
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: default;
+}
+
+.sidebar-filters .chip-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.app-body > .layout {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Desktop default: this is a mobile-only affordance -- hidden here, only
+   ever revealed inside the mobile breakpoint below. */
+#btn-sidebar-back {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .app-body {
+    display: block;
+  }
+
+  #app-sidebar {
+    width: 100%;
+    flex: none;
+    border-right: none;
+    min-height: auto;
+  }
+
+  /* Default (no route "active" yet): show the sidebar full-width, hide the
+     main content pane entirely. */
+  .app-body > .layout {
+    display: none;
+  }
+
+  /* Once a contact/route has been opened (body.main-active, set by a small
+     JS toggle in app.js -- not a router route), flip: hide the sidebar,
+     show main full-width with a "back" affordance at its top. */
+  body.main-active #app-sidebar {
+    display: none;
+  }
+
+  body.main-active .app-body > .layout {
+    display: grid;
+  }
+
+  body.main-active #btn-sidebar-back {
+    display: inline-flex;
+  }
+}
+
 /* ---------- Layout ---------- */
 
 .layout {

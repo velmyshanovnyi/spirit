@@ -39,9 +39,6 @@
           <a class="nav-item" data-route="conversation" href="#/conversation">
             <span class="nav-icon" aria-hidden="true">💬</span><span data-i18n="nav.conversation">Чат</span>
           </a>
-          <a class="nav-item" data-route="contacts" href="#/contacts">
-            <span class="nav-icon" aria-hidden="true">☰</span><span data-i18n="nav.contacts">Контакти</span>
-          </a>
           <a class="nav-item" data-route="history" href="#/history">
             <span class="nav-icon" aria-hidden="true">🕘</span><span data-i18n="nav.history">Історія</span>
           </a>
@@ -66,7 +63,40 @@
     </div>
   </div>
 
+  <div class="app-body">
+
+  <!-- ================= Постійний сайдбар (SD1, specs/ui/persistent-sidebar.md) =================
+       Deliberately outside any [data-screen] element -- router.js only
+       manages elements with that attribute, so this aside is invisible to
+       the router entirely and always stays in the DOM regardless of route. -->
+  <aside id="app-sidebar">
+    <div class="sidebar-header">
+      <div class="brand"><span class="logo">S</span> Spirit</div>
+      <button id="btn-sidebar-add" type="button" class="btn-icon nav-item" data-route="manage" aria-label="Керування" data-i18n-title="sidebar.manage">+</button>
+    </div>
+
+    <!-- Static visual placeholders only (per spec) -- no filtering logic
+         wired up here, that is a separate future section. -->
+    <div class="sidebar-filters">
+      <button type="button" class="chip chip-active" data-i18n="sidebar.filterAll">Усі</button>
+      <button type="button" class="chip" data-i18n="sidebar.filterVerified">Верифіковані</button>
+      <button type="button" class="chip" data-i18n="sidebar.filterGroups">Групи</button>
+    </div>
+
+    <!-- Future section: folder tree for organizing contacts (not built yet). -->
+
+    <div class="btn-row"><button id="btn-check-proofs-now" type="button" data-i18n="btn.checkProofsNow">Перевірити зараз</button></div>
+    <div id="proofs-check-status" class="status"></div>
+    <div id="contacts-list" class="list-area"></div>
+    <p id="contacts-empty" class="hint-text" data-i18n="contacts.empty">Поки що немає жодного контакту</p>
+  </aside>
+
   <main class="layout">
+
+    <!-- Mobile-only "back to sidebar" affordance (SD1 responsive behavior) --
+         hidden on desktop via CSS, hidden on mobile too unless
+         body.main-active is set (see app.js's sidebar toggle wiring). -->
+    <button id="btn-sidebar-back" type="button" class="btn-icon" data-i18n="sidebar.back">← Назад</button>
 
     <!-- ================= Створення акаунта / вхід ================= -->
     <!-- Section H4: rendered as a modal over the chat (not a full page nav)
@@ -380,16 +410,8 @@
       </section>
     </section>
 
-    <!-- ================= Контакти ================= -->
-    <section data-screen="contacts" class="screen">
-      <section class="card card-wide">
-        <h2 data-i18n="contacts.heading">Контакти</h2>
-        <div class="btn-row"><button id="btn-check-proofs-now" type="button" data-i18n="btn.checkProofsNow">Перевірити зараз</button></div>
-        <div id="proofs-check-status" class="status"></div>
-        <div id="contacts-list" class="list-area"></div>
-        <p id="contacts-empty" class="hint-text" data-i18n="contacts.empty">Поки що немає жодного контакту</p>
-      </section>
-
+    <!-- ================= Керування (групи + імпорт) ================= -->
+    <section data-screen="manage" class="screen">
       <!-- Section GC2 (specs/phase4/group-chats.md): star/tree invite
            topology -- selecting contacts here mints one 1:1 invite per
            selected member, tagged with a shared groupId. Mirrors
@@ -447,6 +469,8 @@
     </section>
 
   </main>
+
+  </div>
 
   <script type="module">
     import { initApp } from "./js/app.js";

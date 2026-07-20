@@ -214,7 +214,7 @@ import { deriveRootKey, deriveInitialChainKeys, ratchetStep } from "../js/ratche
 import { promptGoogleSignIn, verifyGoogleIdToken } from "../js/googleOAuth.js";
 import { initApp } from "../js/app.js";
 
-const ROUTES = ["account", "profile", "server", "room", "conversation", "contacts", "history"];
+const ROUTES = ["account", "profile", "server", "room", "conversation", "manage", "history"];
 
 const HTML = `
   <button id="theme-toggle" type="button"></button>
@@ -225,7 +225,9 @@ const HTML = `
   </div>
   <button id="btn-settings-toggle" type="button" aria-expanded="false"></button>
   <nav id="settings-menu" hidden>
-    ${ROUTES.map((r) => `<a class="nav-item" data-route="${r}" href="#/${r}">${r}</a>`).join("")}
+    ${ROUTES.filter((r) => r !== "account" && r !== "manage")
+      .map((r) => `<a class="nav-item" data-route="${r}" href="#/${r}">${r}</a>`)
+      .join("")}
     <button id="btn-logout" type="button" class="nav-item"></button>
   </nav>
   <div id="welcome-modal" hidden>
@@ -233,6 +235,18 @@ const HTML = `
     <p id="welcome-body" data-i18n="welcome.body"></p>
     <button id="btn-welcome-confirm" type="button"></button>
   </div>
+
+  <!-- Section SD1 (specs/ui/persistent-sidebar.md): persistent sidebar shell,
+       a SIBLING to the [data-screen] sections below -- outside router.js's
+       mechanism entirely, always in the DOM regardless of route. -->
+  <aside id="app-sidebar">
+    <button id="btn-sidebar-add" type="button" class="nav-item" data-route="manage"></button>
+    <button id="btn-check-proofs-now" type="button">Перевірити зараз</button>
+    <div id="proofs-check-status"></div>
+    <div id="contacts-list"></div>
+    <p id="contacts-empty"></p>
+  </aside>
+  <button id="btn-sidebar-back" type="button"></button>
 
   <section data-screen="account">
     <button id="btn-account-close" type="button"></button>
@@ -367,11 +381,7 @@ const HTML = `
     <input id="file-input" type="file">
   </section>
 
-  <section data-screen="contacts">
-    <div id="contacts-list"></div>
-    <p id="contacts-empty"></p>
-    <button id="btn-check-proofs-now" type="button">Перевірити зараз</button>
-    <div id="proofs-check-status"></div>
+  <section data-screen="manage">
     <div id="groups-card">
       <input id="group-name" type="text">
       <div id="group-contacts-list"></div>
@@ -4608,7 +4618,7 @@ describe("multi-screen navigation (Section N2)", () => {
     window.dispatchEvent(new Event("hashchange"));
     expect(visibleScreens()).toEqual(["account"]);
 
-    location.hash = "#/contacts";
+    location.hash = "#/manage";
     window.dispatchEvent(new Event("hashchange"));
     expect(visibleScreens()).toEqual(["account"]);
   });
@@ -4735,6 +4745,45 @@ describe("multi-screen navigation (Section N2)", () => {
 
     // Must stay on profile -- this channel is for device linking, not chat.
     expect(visibleScreens()).toEqual(["profile"]);
+  });
+});
+
+describe("persistent sidebar shell (Section SD1, specs/ui/persistent-sidebar.md)", () => {
+  it("populates the sidebar's #contacts-list immediately after initApp(), before any navigation/hashchange occurs at all", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    listContacts.mockResolvedValue([
+      { fingerprint: "a".repeat(64), identityPubkeyWire: "W1", firstSeen: 1, deviceList: null }
+    ]);
+
+    initApp(document, { locale: "uk" });
+
+    // No btn-generate click, no hash change -- renderContactsScreen() must
+    // have been called synchronously off initApp() itself.
+    await vi.waitFor(() => expect(listContacts).toHaveBeenCalled());
+    await vi.waitFor(() => expect(document.querySelectorAll("#contacts-list .list-row").length).toBe(1));
+  });
+
+  it("the sidebar's + button (.nav-item[data-route=manage]) navigates to the manage screen when clicked, via router.js's own auto-wiring", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+
+    const addButton = document.getElementById("btn-sidebar-add");
+    expect(addButton.classList.contains("nav-item")).toBe(true);
+    expect(addButton.dataset.route).toBe("manage");
+
+    addButton.click();
+
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["manage"]));
+  });
+
+  it("#settings-menu no longer contains a nav item with data-route=contacts", () => {
+    initApp(document, { locale: "uk" });
+    expect(document.querySelector('#settings-menu [data-route="contacts"]')).toBeNull();
   });
 });
 
@@ -4955,7 +5004,7 @@ describe("contacts and history screens (Sections N3/N4)", () => {
 
 describe("contact import UI (Section I2, specs/phase2b/import.md)", () => {
   async function reachContacts() {
-    location.hash = "#/contacts";
+    location.hash = "#/manage";
     window.dispatchEvent(new Event("hashchange"));
     await vi.waitFor(() => expect(listContacts).toHaveBeenCalled());
   }
@@ -5158,7 +5207,7 @@ describe("imported history (Section I3, specs/phase2b/import.md)", () => {
     document.getElementById("btn-profile-confirm").click();
     await vi.waitFor(() => expect(document.getElementById("backup-step").hidden).toBe(false));
     document.getElementById("btn-backup-skip").click();
-    location.hash = "#/contacts";
+    location.hash = "#/manage";
     window.dispatchEvent(new Event("hashchange"));
     await vi.waitFor(() => expect(listContacts).toHaveBeenCalled());
   }
@@ -5237,7 +5286,7 @@ describe("imported history (Section I3, specs/phase2b/import.md)", () => {
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
-    location.hash = "#/contacts";
+    location.hash = "#/manage";
     window.dispatchEvent(new Event("hashchange"));
     await vi.waitFor(() => expect(listContacts).toHaveBeenCalled());
 
@@ -5377,7 +5426,7 @@ describe("identity verification proofs (Section E)", () => {
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
-    location.hash = "#/contacts";
+    location.hash = "#/manage";
     window.dispatchEvent(new Event("hashchange"));
 
     await vi.waitFor(() => expect(document.getElementById("contacts-list").textContent).toContain("telegram"));
@@ -5401,7 +5450,7 @@ describe("identity verification proofs (Section E)", () => {
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
-    location.hash = "#/contacts";
+    location.hash = "#/manage";
     window.dispatchEvent(new Event("hashchange"));
     await vi.waitFor(() => expect(document.getElementById("contacts-list").textContent).toContain("telegram"));
 
@@ -5430,7 +5479,7 @@ describe("identity verification proofs (Section E)", () => {
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
-    location.hash = "#/contacts";
+    location.hash = "#/manage";
     window.dispatchEvent(new Event("hashchange"));
     await vi.waitFor(() => expect(listContacts).toHaveBeenCalled());
 
@@ -5460,7 +5509,7 @@ describe("identity verification proofs (Section E)", () => {
     initApp(document, { locale: "uk" });
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
-    location.hash = "#/contacts";
+    location.hash = "#/manage";
     window.dispatchEvent(new Event("hashchange"));
     await vi.waitFor(() => expect(document.getElementById("contacts-list").textContent).toContain("telegram"));
 
@@ -6076,7 +6125,7 @@ describe("GC2: group invite orchestration (specs/phase4/group-chats.md)", () => 
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
 
-    location.hash = "#/contacts";
+    location.hash = "#/manage";
     window.dispatchEvent(new Event("hashchange"));
     await vi.waitFor(() => expect(document.querySelectorAll("[data-group-contact-fingerprint]").length).toBe(2));
 
@@ -6363,7 +6412,7 @@ describe("GC3: fan-out send + group UI (specs/phase4/group-chats.md)", () => {
 
       listGroups.mockResolvedValue([{ groupId: "group-1", name: "Друзі", memberFingerprints: [] }]);
 
-      location.hash = "#/contacts";
+      location.hash = "#/manage";
       window.dispatchEvent(new Event("hashchange"));
       await vi.waitFor(() => expect(document.querySelector('[data-open-group-btn="group-1"]')).toBeTruthy());
       document.querySelector('[data-open-group-btn="group-1"]').click();
@@ -6489,7 +6538,7 @@ describe("GC3: fan-out send + group UI (specs/phase4/group-chats.md)", () => {
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
 
-    location.hash = "#/contacts";
+    location.hash = "#/manage";
     window.dispatchEvent(new Event("hashchange"));
     await vi.waitFor(() => expect(document.getElementById("groups-list").textContent).toContain("Робота"));
     expect(document.getElementById("groups-list").textContent).toContain("Друзі");
