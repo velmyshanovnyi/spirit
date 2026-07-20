@@ -810,6 +810,39 @@ export function initApp(doc, options) {
     const contacts = await listContacts();
     list.innerHTML = "";
     empty.hidden = contacts.length > 0;
+
+    // Секція RF3 (shape-coded avatar system, "Тінь"): ефемерна "духова"
+    // сесія (F3, specs/ui/ephemeral-spirit-mode.md) НЕ є контактом -- за
+    // архітектурним інваріантом D1 (zero-database) нічого про неї не
+    // зберігається, тож у папку/фільтр вона не потрапляє і зникає, щойно
+    // з'єднання завершено. Це лише живий покажчик "зараз є активна ефемерна
+    // розмова" -- shape-ghost-аватар, клік повертає до екрана розмови.
+    // Умова -- та сама, що вже використовує ephemeral-identity-banner
+    // (isEphemeral, рядок ~574): є тимчасовий нік, але немає vaultKey.
+    const isEphemeral = !!state.nickname && !(state.identityKeyPair && state.identityKeyPair.vaultKey);
+    if (isEphemeral && state.activeConnectionId) {
+      const ghostRow = doc.createElement("div");
+      ghostRow.className = "list-row";
+      ghostRow.dataset.ephemeralSession = "1";
+      const avatar = doc.createElement("div");
+      avatar.className = "avatar shape-ghost";
+      avatar.innerHTML = buildIdenticonSvg(state.activeConnectionId);
+      ghostRow.appendChild(avatar);
+      const cMain = doc.createElement("div");
+      cMain.className = "c-main";
+      const cTop = doc.createElement("div");
+      cTop.className = "c-top";
+      const nameEl = doc.createElement("span");
+      nameEl.className = "contact-name";
+      nameEl.textContent = state.nickname;
+      cTop.appendChild(nameEl);
+      cMain.appendChild(cTop);
+      ghostRow.appendChild(cMain);
+      ghostRow.addEventListener("click", () => router.navigate("conversation"));
+      list.appendChild(ghostRow);
+      empty.hidden = true;
+    }
+
     for (const contact of contacts) {
       const row = doc.createElement("div");
       row.className = "list-row";

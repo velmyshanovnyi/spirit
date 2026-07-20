@@ -503,6 +503,43 @@ describe("btn-quick-chat: zero-click ephemeral 'spirit mode' (Section F3)", () =
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
   });
 
+  it("shows a shape-ghost sidebar entry with the ephemeral nickname while a spirit-mode session is live, and clicking it jumps back to the conversation", async () => {
+    const keyPair = { privateKey: {}, publicKey: fakePublicKey("identity-pub") };
+    generateIdentityKeyPair.mockResolvedValue(keyPair);
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    generateAnonymousNickname.mockReturnValue("Тихий Привид");
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-quick-chat").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(fakeChannel());
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
+
+    // Navigate away -- the sidebar (and its ghost entry) stays rendered
+    // regardless of route (SD1's persistent-sidebar architecture).
+    location.hash = "#/history";
+    window.dispatchEvent(new Event("hashchange"));
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["history"]));
+
+    const ghostRow = document.querySelector('#contacts-list [data-ephemeral-session]');
+    expect(ghostRow).not.toBeNull();
+    expect(ghostRow.querySelector(".avatar").classList.contains("shape-ghost")).toBe(true);
+    expect(ghostRow.textContent).toContain("Тихий Привид");
+
+    ghostRow.click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
+  });
+
   it("lands straight on the conversation screen with the invite bar visible WHILE waiting for a peer, instead of leaving the user on a blank account screen (bug report 2026-07-17, refined 2026-07-17)", async () => {
     const keyPair = { privateKey: {}, publicKey: fakePublicKey("identity-pub") };
     generateIdentityKeyPair.mockResolvedValue(keyPair);
