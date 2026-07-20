@@ -27,8 +27,15 @@
 
 ## Секція GC1: Модель групи (сховище, membership)
 
-- [ ] **Tests**: TBD — `client/tests/groups.test.js`, CRUD для `groups`-стору, `historyStore.js`'s розширення на `groupId`-неймспейс.
-- [ ] **Impl**: TBD — `client/js/groups.js`, `db.js` bump версії.
+Уточнено перед стартом (2026-07-18, без потреби в AskUserQuestion — чисто технічна деталізація, не архітектурне рішення): `historyStore.js`'s `appendMessage(vaultKey, profileId, contactId, {...})`/`listMessages(vaultKey, profileId, contactId)`/`listConversations(vaultKey, profileId)` уже приймають `contactId` як звичайний рядок-параметр ключа — жодних змін сигнатури не потрібно, виклики для групи просто передають `groupId` замість fingerprint-рядка (той самий тип, той самий namespace-механізм, нуль спеціальної обробки в `historyStore.js` самому).
+
+`client/js/groups.js` (новий, мірорить стиль `contacts.js`):
+- `createGroup({ name, memberFingerprints })` → генерує `groupId` (той самий випадковий hex-патерн, що й `connectionId`/`randomFileId`), зберігає `{ groupId, name, memberFingerprints, createdAt }` у новому `groups`-сторі, повертає запис.
+- `getGroup(groupId)`, `listGroups()`, `updateGroupMembers(groupId, memberFingerprints)` (для GC2 — додавання нового учасника), `deleteGroup(groupId)`.
+- `db.js`: `groups` додається до `STORE_NAMES`, `DB_VERSION` bump (той самий ідемпотентний upgrade-патерн, що й для `trustedShares` у Секції S2).
+
+- [ ] **Tests**: `client/tests/groups.test.js` — CRUD для `groups`-стору (створення генерує унікальний `groupId`, `getGroup`/`listGroups`/`updateGroupMembers`/`deleteGroup` коректні, оновлення членів не чіпає `groupId`/`createdAt`); `client/tests/historyStore.test.js` (доповнення) — `appendMessage`/`listMessages` з `groupId` замість `contactId` працюють ідентично (той самий namespace-механізм, підтверджено, що групові й особисті повідомлення не змішуються навіть якщо `groupId` випадково збігається форматом з fingerprint).
+- [ ] **Impl**: `client/js/groups.js` (новий, CRUD-функції, мірорить стиль `contacts.js`), `client/js/db.js` (`groups` у `STORE_NAMES`, `DB_VERSION` bump, ідемпотентний upgrade). `historyStore.js` НЕ потребує змін — `contactId`-параметр уже приймає довільний рядок-ключ без спеціальної обробки.
 - [ ] **Exec review**: —
 
 ## Секція GC2: Оркестрація приєднання (M паралельних 1:1-хендшейків)
