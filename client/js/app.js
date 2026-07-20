@@ -1145,8 +1145,8 @@ export function initApp(doc, options) {
     const selected = [...doc.querySelectorAll("[data-group-contact-fingerprint]:checked")].map(
       (checkbox) => checkbox.dataset.groupContactFingerprint
     );
-    if (!name || selected.length === 0) {
-      setGroupStatus(t("groups.needNameAndMembers"));
+    if (!name) {
+      setGroupStatus(t("groups.needName"));
       return;
     }
     if (!state.senderKey) {

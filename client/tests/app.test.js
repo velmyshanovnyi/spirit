@@ -6155,6 +6155,32 @@ describe("GC2: group invite orchestration (specs/phase4/group-chats.md)", () => 
     expect(document.getElementById("group-invite-links").textContent).toContain("Марія");
   });
 
+  it("creating a group with a name but zero selected contacts creates an empty group instead of blocking on validation", async () => {
+    listContacts.mockResolvedValue([{ fingerprint: "fp-a", nickname: "Іван" }]);
+    createGroup.mockResolvedValue({ groupId: "group-empty", name: "Майбутня команда", memberFingerprints: [], createdAt: 1 });
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: { __tag: "id-priv" }, publicKey: fakePublicKey("id-pub") });
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+
+    location.hash = "#/manage";
+    window.dispatchEvent(new Event("hashchange"));
+    await vi.waitFor(() => expect(document.querySelectorAll("[data-group-contact-fingerprint]").length).toBe(1));
+
+    document.getElementById("group-name").value = "Майбутня команда";
+    document.getElementById("btn-create-group").click();
+
+    await vi.waitFor(() => expect(createGroup).toHaveBeenCalledWith({ name: "Майбутня команда", memberFingerprints: [] }));
+    expect(createInvite).not.toHaveBeenCalled();
+    expect(startAsInitiator).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(document.getElementById("group-status").textContent).toBe('Групу "Майбутня команда" створено')
+    );
+  });
+
   it("a verified identity-announce on a groupId-tagged connection adds the member to the group and broadcasts to other same-group peers only", async () => {
     const { state, captured, channel } = await establishedProfileChat();
 
