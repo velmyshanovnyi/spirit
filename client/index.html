@@ -273,6 +273,18 @@
           публічний STUN (як Google) не вміє ретранслювати трафік і з'єднання просто не
           встановиться.
         </p>
+
+        <!-- specs/phase4/multi-node-ui.md: localStorage-backed list of saved
+             server-url/stun-url/force-turn-relay presets. Clicking an entry
+             only fills the three fields above (no auto-reconnect) --
+             mirrors #groups-card's list-rendering pattern (Phase 4, GC2). -->
+        <h3 data-i18n="infra.savedNodesHeading">Збережені вузли</h3>
+        <div id="signaling-nodes-list" class="list-area"></div>
+        <p id="signaling-nodes-empty" class="hint-text" data-i18n="infra.savedNodesEmpty">Немає збережених вузлів</p>
+        <label class="field"><span data-i18n="label.signalingNodeName">Назва:</span>
+          <input id="signaling-node-name" type="text">
+        </label>
+        <div class="btn-row"><button id="btn-save-signaling-node" type="button" data-i18n="btn.saveSignalingNode">Зберегти поточні налаштування як...</button></div>
       </section>
 
       <section class="card">

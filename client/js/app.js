@@ -1127,6 +1127,116 @@ export function initApp(doc, options) {
     list.hidden = false;
   }
 
+  // Section: multi-node signaling/TURN UI (specs/phase4/multi-node-ui.md).
+  // localStorage, not the "profile" IndexedDB store -- this is a
+  // browser/device-level setting (which signaling node this machine talks
+  // to), independent of which Spirit account is currently active, same
+  // storage tier as spirit.theme/spirit.locale. Guarded try/catch on every
+  // access matches the pattern already used for spirit.welcomeSeen above:
+  // storage can throw (private-mode/blocked site data) or hold malformed
+  // JSON (e.g. hand-edited or corrupted by another script) -- either case
+  // must fail open to an empty list, never take down the whole Server
+  // screen's init.
+  const SIGNALING_NODES_KEY = "spirit.signalingNodes";
+
+  function loadSignalingNodes() {
+    try {
+      const raw = doc.defaultView.localStorage.getItem(SIGNALING_NODES_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveSignalingNodes(nodes) {
+    try {
+      doc.defaultView.localStorage.setItem(SIGNALING_NODES_KEY, JSON.stringify(nodes));
+    } catch {
+      // Storage unavailable -- the in-memory list still rendered for this
+      // page view, but it won't persist across reloads. Acceptable
+      // degraded UX, matches spirit.welcomeSeen's fail-open policy.
+    }
+  }
+
+  function randomSignalingNodeId() {
+    return [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  function renderSignalingNodesList() {
+    const list = el("signaling-nodes-list");
+    const empty = el("signaling-nodes-empty");
+    if (!list) return;
+    const nodes = loadSignalingNodes();
+    list.innerHTML = "";
+    if (empty) empty.hidden = nodes.length > 0;
+    for (const node of nodes) {
+      const row = doc.createElement("div");
+      row.className = "list-row";
+
+      const selectButton = doc.createElement("button");
+      selectButton.type = "button";
+      selectButton.dataset.signalingNodeSelect = node.id;
+      // Defensive against a hand-edited/foreign localStorage array element
+      // missing expected string fields (loadSignalingNodes only validates
+      // that the top level is an array, not each element's shape) -- falls
+      // back to "" rather than throwing and breaking the whole Server
+      // screen, matching the fail-open intent of the storage guards above.
+      const url = typeof node.serverUrl === "string" ? node.serverUrl : "";
+      const shortUrl = url.length > 40 ? `${url.slice(0, 37)}...` : url;
+      selectButton.textContent = `${node.name ?? ""} (${shortUrl})`;
+      row.appendChild(selectButton);
+
+      const deleteButton = doc.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.dataset.signalingNodeDelete = node.id;
+      deleteButton.textContent = t("btn.deleteSignalingNode");
+      row.appendChild(deleteButton);
+
+      list.appendChild(row);
+    }
+  }
+  renderSignalingNodesList();
+
+  if (el("btn-save-signaling-node")) el("btn-save-signaling-node").addEventListener("click", () => {
+    const name = el("signaling-node-name").value.trim();
+    if (!name) return;
+    const nodes = loadSignalingNodes();
+    nodes.push({
+      id: randomSignalingNodeId(),
+      name,
+      serverUrl: el("server-url").value,
+      stunUrl: el("stun-url").value,
+      forceTurnRelay: el("force-turn-relay").checked
+    });
+    saveSignalingNodes(nodes);
+    el("signaling-node-name").value = "";
+    renderSignalingNodesList();
+  });
+
+  el("signaling-nodes-list")?.addEventListener("click", (event) => {
+    const selectButton = event.target.closest("[data-signaling-node-select]");
+    if (selectButton) {
+      const node = loadSignalingNodes().find((n) => n.id === selectButton.dataset.signalingNodeSelect);
+      if (node) {
+        // Purely fills the fields -- matches the existing manual-apply
+        // philosophy of server-url/stun-url/force-turn-relay (spec design
+        // note): no auto-reconnect of any in-progress session.
+        el("server-url").value = node.serverUrl;
+        el("stun-url").value = node.stunUrl;
+        el("force-turn-relay").checked = !!node.forceTurnRelay;
+      }
+      return;
+    }
+    const deleteButton = event.target.closest("[data-signaling-node-delete]");
+    if (deleteButton) {
+      const nodes = loadSignalingNodes().filter((n) => n.id !== deleteButton.dataset.signalingNodeDelete);
+      saveSignalingNodes(nodes);
+      renderSignalingNodesList();
+    }
+  });
+
   withBusyButton(el("btn-admin-login"), async () => {
     const password = el("admin-password").value;
     if (!password) {

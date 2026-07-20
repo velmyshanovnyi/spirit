@@ -301,6 +301,10 @@ const HTML = `
     <input id="server-url" type="text" value="http://node.example/index.php">
     <input id="stun-url" type="text" value="stun:stun.example:19302">
     <input id="force-turn-relay" type="checkbox">
+    <input id="signaling-node-name" type="text">
+    <button id="btn-save-signaling-node" type="button">Зберегти</button>
+    <div id="signaling-nodes-list"></div>
+    <p id="signaling-nodes-empty"></p>
     <div id="admin-login-form">
       <input id="admin-password" type="password">
       <button id="btn-admin-login" type="button">Увійти</button>
@@ -612,6 +616,101 @@ describe("force-turn-relay toggle (Section P1(a), specs/phase5/security-hardenin
       iceServers: [{ urls: "stun:stun.example:19302" }],
       iceTransportPolicy: "relay"
     });
+  });
+});
+
+describe("multi-node signaling UI (specs/phase4/multi-node-ui.md)", () => {
+  it("shows the empty-list hint and does not touch the server/stun/relay fields' defaults when no node is saved", () => {
+    initApp(document, { locale: "uk" });
+    expect(localStorage.getItem("spirit.signalingNodes")).toBeNull();
+    expect(document.getElementById("signaling-nodes-list").children.length).toBe(0);
+    expect(document.getElementById("signaling-nodes-empty").hidden).toBe(false);
+    expect(document.getElementById("server-url").value).toBe("http://node.example/index.php");
+    expect(document.getElementById("stun-url").value).toBe("stun:stun.example:19302");
+    expect(document.getElementById("force-turn-relay").checked).toBe(false);
+  });
+
+  it("saves the current field values under the given name, appends it to localStorage, and renders it in the list", () => {
+    initApp(document, { locale: "uk" });
+    document.getElementById("server-url").value = "https://my-node.example/index.php";
+    document.getElementById("stun-url").value = "turn:my-turn.example:3478";
+    document.getElementById("force-turn-relay").checked = true;
+    document.getElementById("signaling-node-name").value = "Мій вузол";
+    document.getElementById("btn-save-signaling-node").click();
+
+    const stored = JSON.parse(localStorage.getItem("spirit.signalingNodes"));
+    expect(stored.length).toBe(1);
+    expect(stored[0]).toMatchObject({
+      name: "Мій вузол",
+      serverUrl: "https://my-node.example/index.php",
+      stunUrl: "turn:my-turn.example:3478",
+      forceTurnRelay: true
+    });
+    expect(typeof stored[0].id).toBe("string");
+    expect(stored[0].id.length).toBeGreaterThan(0);
+
+    const list = document.getElementById("signaling-nodes-list");
+    expect(list.children.length).toBe(1);
+    expect(list.textContent).toContain("Мій вузол");
+    expect(document.getElementById("signaling-nodes-empty").hidden).toBe(true);
+    // Name field is cleared after a successful save (matches #group-name's
+    // clear-after-create pattern).
+    expect(document.getElementById("signaling-node-name").value).toBe("");
+  });
+
+  it("clicking a saved node populates the three fields without touching anything else (no auto-reconnect)", () => {
+    localStorage.setItem("spirit.signalingNodes", JSON.stringify([
+      { id: "node-a", name: "Вузол А", serverUrl: "https://a.example/index.php", stunUrl: "stun:a.example:19302", forceTurnRelay: false },
+      { id: "node-b", name: "Вузол Б", serverUrl: "https://b.example/index.php", stunUrl: "turn:b.example:3478", forceTurnRelay: true }
+    ]));
+    initApp(document, { locale: "uk" });
+
+    const rowB = document.querySelector('[data-signaling-node-select="node-b"]');
+    expect(rowB).not.toBeNull();
+    rowB.click();
+
+    expect(document.getElementById("server-url").value).toBe("https://b.example/index.php");
+    expect(document.getElementById("stun-url").value).toBe("turn:b.example:3478");
+    expect(document.getElementById("force-turn-relay").checked).toBe(true);
+  });
+
+  it("deletes a saved node from both the DOM list and localStorage", () => {
+    localStorage.setItem("spirit.signalingNodes", JSON.stringify([
+      { id: "node-a", name: "Вузол А", serverUrl: "https://a.example/index.php", stunUrl: "stun:a.example:19302", forceTurnRelay: false }
+    ]));
+    initApp(document, { locale: "uk" });
+
+    expect(document.getElementById("signaling-nodes-list").children.length).toBe(1);
+    document.querySelector('[data-signaling-node-delete="node-a"]').click();
+
+    expect(document.getElementById("signaling-nodes-list").children.length).toBe(0);
+    expect(document.getElementById("signaling-nodes-empty").hidden).toBe(false);
+    expect(JSON.parse(localStorage.getItem("spirit.signalingNodes"))).toEqual([]);
+  });
+
+  it("supports multiple saved nodes coexisting, each independently selectable and deletable", () => {
+    initApp(document, { locale: "uk" });
+    for (const [name, url] of [["Перший", "https://first.example"], ["Другий", "https://second.example"]]) {
+      document.getElementById("server-url").value = url;
+      document.getElementById("signaling-node-name").value = name;
+      document.getElementById("btn-save-signaling-node").click();
+    }
+    const stored = JSON.parse(localStorage.getItem("spirit.signalingNodes"));
+    expect(stored.length).toBe(2);
+    expect(document.getElementById("signaling-nodes-list").children.length).toBe(2);
+
+    document.querySelector(`[data-signaling-node-delete="${stored[0].id}"]`).click();
+    const afterDelete = JSON.parse(localStorage.getItem("spirit.signalingNodes"));
+    expect(afterDelete.length).toBe(1);
+    expect(afterDelete[0].name).toBe("Другий");
+    expect(document.getElementById("signaling-nodes-list").children.length).toBe(1);
+  });
+
+  it("fails open to an empty list (no throw) when the stored JSON is malformed", () => {
+    localStorage.setItem("spirit.signalingNodes", "{not valid json");
+    expect(() => initApp(document, { locale: "uk" })).not.toThrow();
+    expect(document.getElementById("signaling-nodes-list").children.length).toBe(0);
+    expect(document.getElementById("signaling-nodes-empty").hidden).toBe(false);
   });
 });
 
