@@ -457,10 +457,37 @@ export function initApp(doc, options) {
   // came from parseChatExport + a manual match rather than a live P2P
   // handshake -- it never went through E2EE, so it gets a visible
   // "історичне (імпортоване)" badge distinguishing it from native messages.
+  // Renders one message as an actual bubble element (not a text-blob append)
+  // -- UI redesign (specs/ui/persistent-sidebar.md follow-up): visually
+  // matches the agreed mockup's chat bubbles. A trailing "\n" text node
+  // after each bubble keeps `chat-log.textContent` newline-delimited per
+  // message, same as the old format, so existing line-splitting tests
+  // (e.g. the imported-history-badge test) keep working unchanged --
+  // `textContent` concatenates all descendant text with no added
+  // whitespace between elements, so that separator has to be explicit.
   const appendChat = (text, direction, timestamp = Date.now(), imported = false) => {
-    const arrow = direction === "out" ? "→" : "←";
-    const badge = imported ? `[${t("import.historyBadge")}] ` : "";
-    el("chat-log").textContent += `[${formatClockTime(timestamp)}] ${arrow} ${badge}${text}\n`;
+    const log = el("chat-log");
+    if (!log) return;
+    const row = doc.createElement("div");
+    row.className = direction === "out" ? "row-out" : "row-in";
+    const bubble = doc.createElement("div");
+    bubble.className = "bubble";
+    if (imported) {
+      const badge = doc.createElement("span");
+      badge.className = "imported-badge";
+      badge.textContent = t("import.historyBadge");
+      bubble.appendChild(badge);
+      bubble.appendChild(doc.createElement("br"));
+    }
+    bubble.appendChild(doc.createTextNode(text));
+    const meta = doc.createElement("span");
+    meta.className = "bubble-meta";
+    meta.textContent = formatClockTime(timestamp);
+    bubble.appendChild(meta);
+    row.appendChild(bubble);
+    log.appendChild(row);
+    log.appendChild(doc.createTextNode("\n"));
+    log.scrollTop = log.scrollHeight;
   };
 
   // Section GC3 (specs/phase4/group-chats.md): the group-conversation
@@ -472,7 +499,24 @@ export function initApp(doc, options) {
     const container = el("group-chat-log");
     if (!container) return;
     const label = direction === "out" ? t("groups.you") : senderLabel;
-    container.textContent += `[${formatClockTime(timestamp)}] ${label}: ${text}\n`;
+    const row = doc.createElement("div");
+    row.className = direction === "out" ? "row-out" : "row-in";
+    const bubble = doc.createElement("div");
+    bubble.className = "bubble";
+    const sender = doc.createElement("span");
+    sender.className = "bubble-sender";
+    sender.textContent = label;
+    bubble.appendChild(sender);
+    bubble.appendChild(doc.createElement("br"));
+    bubble.appendChild(doc.createTextNode(text));
+    const meta = doc.createElement("span");
+    meta.className = "bubble-meta";
+    meta.textContent = formatClockTime(timestamp);
+    bubble.appendChild(meta);
+    row.appendChild(bubble);
+    container.appendChild(row);
+    container.appendChild(doc.createTextNode("\n"));
+    container.scrollTop = container.scrollHeight;
   };
 
   // Once identity is established, an invite-link visitor should land where
@@ -781,10 +825,25 @@ export function initApp(doc, options) {
       avatar.innerHTML = buildIdenticonSvg(contact.fingerprint);
       row.appendChild(avatar);
 
+      // Two-line row layout (UI redesign follow-up to SD1, matching the
+      // agreed mockup): avatar on the left, name+trust-shield on the top
+      // line, proof badges + message button on the line below. Nesting
+      // doesn't affect existing selectors -- row.querySelector(...) finds
+      // these by class/attribute regardless of depth.
+      const cMain = doc.createElement("div");
+      cMain.className = "c-main";
+      const cTop = doc.createElement("div");
+      cTop.className = "c-top";
+      const cSub = doc.createElement("div");
+      cSub.className = "c-sub";
+      cMain.appendChild(cTop);
+      cMain.appendChild(cSub);
+      row.appendChild(cMain);
+
       const nameEl = doc.createElement("span");
       nameEl.className = "contact-name";
       nameEl.textContent = formatSpiritId(contact.fingerprint);
-      row.appendChild(nameEl);
+      cTop.appendChild(nameEl);
 
       // Фаза 4 (docs/roadmap.md, TOFU-прогалина зафіксована 2026-07-18):
       // identity-announce вже автентифікує ECDH-сесію (Секція 12), але сам
@@ -823,7 +882,7 @@ export function initApp(doc, options) {
         shield.appendChild(checkPath);
       }
       shield.setAttribute("title", shieldTitle.textContent);
-      row.appendChild(shield);
+      cTop.appendChild(shield);
 
       for (const proof of contact.proofSet?.proofs ?? []) {
         const badge = doc.createElement("span");
@@ -836,13 +895,14 @@ export function initApp(doc, options) {
         } else {
           badge.textContent = ` ${proof.label}`;
         }
-        row.appendChild(badge);
+        cSub.appendChild(badge);
       }
       const messageButton = doc.createElement("button");
       messageButton.type = "button";
+      messageButton.className = "btn-icon";
       messageButton.dataset.i18n = "contacts.message";
       messageButton.textContent = t("contacts.message");
-      row.appendChild(messageButton);
+      cSub.appendChild(messageButton);
       list.appendChild(row);
     }
   }
@@ -863,6 +923,144 @@ export function initApp(doc, options) {
     const contact = await getContact(targetFingerprint);
     await initiateChatSession({ pushToContact: contact ?? null });
   });
+
+  // Sidebar search (UI redesign follow-up to SD1): plain client-side
+  // substring filter over already-rendered #contacts-list rows -- no
+  // separate index, no server round-trip. Static per the original
+  // sidebar-filters chips design; this input is the one genuinely wired
+  // piece of the sidebar's "Пошук" affordance in this pass.
+  el("sidebar-search-input")?.addEventListener("input", (event) => {
+    const query = event.target.value.trim().toLowerCase();
+    for (const row of doc.querySelectorAll("#contacts-list .list-row")) {
+      row.hidden = query.length > 0 && !row.textContent.toLowerCase().includes(query);
+    }
+  });
+
+  // Мінімальне дерево папок (UI redesign follow-up, специфіковано в
+  // мокапі): вкладені, необмежена глибина, drag&drop переміщення/вкладення,
+  // localStorage-персистентність (пристрій-рівень, не IndexedDB/профіль --
+  // та сама причина, що й `spirit.signalingNodes`, Секція multi-node-ui).
+  // Це перша, чисто клієнтська ітерація -- папки поки що не фільтрують
+  // список контактів і не синхронізуються між пристроями; повна модель
+  // (прив'язка контактів до папок, IndexedDB) -- окрема майбутня секція.
+  const FOLDER_STORAGE_KEY = "spirit.folders";
+  function loadFolders() {
+    try {
+      const raw = localStorage.getItem(FOLDER_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  }
+  function saveFolders(nodes) {
+    try {
+      localStorage.setItem(FOLDER_STORAGE_KEY, JSON.stringify(nodes));
+    } catch {
+      // Best-effort only -- a full/unavailable localStorage just means
+      // folders won't persist across reloads, not a functional break.
+    }
+  }
+  const folders = loadFolders();
+  const folderCollapsed = new Set();
+  let folderDragId = null;
+
+  function findFolder(nodes, id) {
+    for (const n of nodes) {
+      if (n.id === id) return n;
+      const found = findFolder(n.children, id);
+      if (found) return found;
+    }
+    return null;
+  }
+  function isFolderDescendant(node, id) {
+    if (node.id === id) return true;
+    return node.children.some((c) => isFolderDescendant(c, id));
+  }
+  function removeFolder(nodes, id) {
+    for (let i = 0; i < nodes.length; i++) {
+      if (nodes[i].id === id) return nodes.splice(i, 1)[0];
+      const found = removeFolder(nodes[i].children, id);
+      if (found) return found;
+    }
+    return null;
+  }
+  function randomFolderId() {
+    return "fd" + Math.random().toString(36).slice(2, 10);
+  }
+  function renderFolderNodes(nodes) {
+    return nodes
+      .map((n) => {
+        const collapsed = folderCollapsed.has(n.id);
+        const hasKids = n.children.length > 0;
+        return `
+          <div class="folder-row ${collapsed ? "collapsed" : ""}" data-folder-id="${n.id}" draggable="true">
+            <span class="chev">${hasKids ? "▾" : ""}</span>
+            <span class="folder-name"></span>
+          </div>
+          ${hasKids ? `<div class="folder-children ${collapsed ? "collapsed" : ""}">${renderFolderNodes(n.children)}</div>` : ""}
+        `;
+      })
+      .join("");
+  }
+  function renderFolderTree() {
+    const treeEl = el("folder-tree");
+    if (!treeEl) return;
+    treeEl.innerHTML =
+      `<div class="folder-tree-label"><span>${t("sidebar.foldersHeading")}</span>` +
+      `<button type="button" data-add-folder title="${t("sidebar.addFolder")}">+</button></div>` +
+      renderFolderNodes(folders);
+    // Folder names go through textContent, not the innerHTML template above,
+    // so a user-chosen folder name can never inject markup.
+    const nameEls = [...treeEl.querySelectorAll("[data-folder-id] .folder-name")];
+    const flatNodes = [];
+    (function collect(nodes) {
+      for (const n of nodes) {
+        flatNodes.push(n);
+        collect(n.children);
+      }
+    })(folders);
+    nameEls.forEach((elNode, i) => {
+      elNode.textContent = flatNodes[i]?.name ?? "";
+    });
+    treeEl.querySelectorAll("[data-folder-id]").forEach((rowEl) => {
+      const id = rowEl.dataset.folderId;
+      rowEl.addEventListener("dragstart", () => {
+        folderDragId = id;
+      });
+      rowEl.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        const dragged = folderDragId && findFolder(folders, folderDragId);
+        if (dragged && folderDragId !== id && !isFolderDescendant(dragged, id)) {
+          rowEl.classList.add("drag-over");
+        }
+      });
+      rowEl.addEventListener("dragleave", () => rowEl.classList.remove("drag-over"));
+      rowEl.addEventListener("drop", (event) => {
+        event.preventDefault();
+        rowEl.classList.remove("drag-over");
+        if (!folderDragId || folderDragId === id) return;
+        const dragged = findFolder(folders, folderDragId);
+        if (!dragged || isFolderDescendant(dragged, id)) return;
+        removeFolder(folders, folderDragId);
+        const target = findFolder(folders, id);
+        target.children.push(dragged);
+        folderCollapsed.delete(id);
+        saveFolders(folders);
+        renderFolderTree();
+      });
+      rowEl.querySelector(".chev")?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        folderCollapsed.has(id) ? folderCollapsed.delete(id) : folderCollapsed.add(id);
+        renderFolderTree();
+      });
+    });
+    treeEl.querySelector("[data-add-folder]")?.addEventListener("click", () => {
+      folders.push({ id: randomFolderId(), name: t("sidebar.newFolder"), children: [] });
+      saveFolders(folders);
+      renderFolderTree();
+    });
+  }
+  renderFolderTree();
 
   const setGroupStatus = (text) => {
     const status = el("group-status");

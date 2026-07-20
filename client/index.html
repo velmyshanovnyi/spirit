@@ -75,6 +75,10 @@
       <button id="btn-sidebar-add" type="button" class="btn-icon nav-item" data-route="manage" aria-label="Керування" data-i18n-title="sidebar.manage">+</button>
     </div>
 
+    <div class="sidebar-search">
+      <input id="sidebar-search-input" type="text" data-i18n-placeholder="sidebar.searchPlaceholder" placeholder="Пошук контактів, груп, папок…">
+    </div>
+
     <!-- Static visual placeholders only (per spec) -- no filtering logic
          wired up here, that is a separate future section. -->
     <div class="sidebar-filters">
@@ -83,7 +87,10 @@
       <button type="button" class="chip" data-i18n="sidebar.filterGroups">Групи</button>
     </div>
 
-    <!-- Future section: folder tree for organizing contacts (not built yet). -->
+    <!-- Мінімальне дерево папок (клієнтське, localStorage) -- перша ітерація
+         уточненої концепції, повна модель (IndexedDB, синхронізація) --
+         окрема майбутня секція. -->
+    <div id="folder-tree" class="folder-tree"></div>
 
     <div class="btn-row"><button id="btn-check-proofs-now" type="button" data-i18n="btn.checkProofsNow">Перевірити зараз</button></div>
     <div id="proofs-check-status" class="status"></div>
