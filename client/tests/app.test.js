@@ -241,6 +241,10 @@ const HTML = `
        mechanism entirely, always in the DOM regardless of route. -->
   <aside id="app-sidebar">
     <button id="btn-sidebar-add" type="button" class="nav-item" data-route="manage"></button>
+    <input id="sidebar-search-input" type="text">
+    <button id="chip-filter-all" type="button" class="chip chip-active" data-filter="all"></button>
+    <button id="chip-filter-verified" type="button" class="chip" data-filter="verified"></button>
+    <button id="chip-filter-groups" type="button" class="chip nav-item" data-route="manage"></button>
     <button id="btn-check-proofs-now" type="button">Перевірити зараз</button>
     <div id="proofs-check-status"></div>
     <div id="contacts-list"></div>
@@ -5491,6 +5495,71 @@ describe("identity verification proofs (Section E)", () => {
       expect(avatar.classList.contains("shape-user")).toBe(true);
       expect(avatar.querySelector("svg")).not.toBeNull();
     }
+  });
+
+  it("sidebar search box hides #contacts-list rows that don't match the query, case-insensitively", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    listContacts.mockResolvedValue([
+      { fingerprint: "a".repeat(64), nickname: "Іван", identityPubkeyWire: "W1", firstSeen: 1, deviceList: null },
+      { fingerprint: "b".repeat(64), nickname: "Марія", identityPubkeyWire: "W2", firstSeen: 2, deviceList: null }
+    ]);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+    await vi.waitFor(() => expect(document.querySelectorAll("#contacts-list .list-row").length).toBe(2));
+
+    const input = document.getElementById("sidebar-search-input");
+    input.value = "марі";
+    input.dispatchEvent(new Event("input"));
+
+    const [rowIvan, rowMariya] = document.querySelectorAll("#contacts-list .list-row");
+    expect(rowIvan.hidden).toBe(true);
+    expect(rowMariya.hidden).toBe(false);
+
+    input.value = "";
+    input.dispatchEvent(new Event("input"));
+    expect(rowIvan.hidden).toBe(false);
+    expect(rowMariya.hidden).toBe(false);
+  });
+
+  it("'Верифіковані' chip shows only contacts with an already-verified proof; 'Усі' resets the filter", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    const verifiedContact = {
+      fingerprint: "a".repeat(64),
+      identityPubkeyWire: "PEER_WIRE",
+      firstSeen: 1,
+      deviceList: null,
+      proofSet: { version: 1, proofs: [{ url: "https://t.me/x/1", label: "telegram", added_at: 1 }], revoked: [] }
+    };
+    const unverifiedContact = { fingerprint: "b".repeat(64), identityPubkeyWire: "W2", firstSeen: 2, deviceList: null };
+    listContacts.mockResolvedValue([verifiedContact, unverifiedContact]);
+    fetchProofPageText.mockResolvedValue("page text with the block embedded");
+    parseProofBlock.mockReturnValue({ identity: "PEER_WIRE", statement: "s", timestamp: 1, nonce: "n", signature: "sig" });
+    verifyProofBlock.mockResolvedValue(true);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+    await vi.waitFor(() => expect(document.querySelectorAll("#contacts-list .list-row").length).toBe(2));
+
+    document.getElementById("btn-check-proofs-now").click();
+    await vi.waitFor(() =>
+      expect(document.querySelector("#contacts-list .list-row .trust-shield-verified")).not.toBeNull()
+    );
+
+    document.getElementById("chip-filter-verified").click();
+    const rows = document.querySelectorAll("#contacts-list .list-row");
+    const verifiedRow = [...rows].find((r) => r.dataset.verified === "1");
+    const unverifiedRow = [...rows].find((r) => r.dataset.verified === "0");
+    expect(verifiedRow.hidden).toBe(false);
+    expect(unverifiedRow.hidden).toBe(true);
+
+    document.getElementById("chip-filter-all").click();
+    expect(verifiedRow.hidden).toBe(false);
+    expect(unverifiedRow.hidden).toBe(false);
   });
 
   it("shows a distinct status after several consecutive verification failures, without the badge disappearing", async () => {

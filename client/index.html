@@ -82,12 +82,14 @@
       <input id="sidebar-search-input" type="text" data-i18n-placeholder="sidebar.searchPlaceholder" placeholder="Пошук контактів, груп, папок…">
     </div>
 
-    <!-- Static visual placeholders only (per spec) -- no filtering logic
-         wired up here, that is a separate future section. -->
+    <!-- "Усі"/"Верифіковані" toggle a real dataset.verified filter on
+         #contacts-list rows (see app.js's applyContactsFilter). "Групи"
+         reuses router.js's .nav-item[data-route] auto-wiring to jump to the
+         manage screen, since groups don't render in this sidebar list yet. -->
     <div class="sidebar-filters">
-      <button type="button" class="chip chip-active" data-i18n="sidebar.filterAll">Усі</button>
-      <button type="button" class="chip" data-i18n="sidebar.filterVerified">Верифіковані</button>
-      <button type="button" class="chip" data-i18n="sidebar.filterGroups">Групи</button>
+      <button id="chip-filter-all" type="button" class="chip chip-active" data-filter="all" data-i18n="sidebar.filterAll">Усі</button>
+      <button id="chip-filter-verified" type="button" class="chip" data-filter="verified" data-i18n="sidebar.filterVerified">Верифіковані</button>
+      <button id="chip-filter-groups" type="button" class="chip nav-item" data-route="manage" data-i18n="sidebar.filterGroups">Групи</button>
     </div>
 
     <!-- Мінімальне дерево папок (клієнтське, localStorage) -- перша ітерація

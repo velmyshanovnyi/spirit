@@ -842,7 +842,9 @@ export function initApp(doc, options) {
 
       const nameEl = doc.createElement("span");
       nameEl.className = "contact-name";
-      nameEl.textContent = formatSpiritId(contact.fingerprint);
+      nameEl.textContent = contact.nickname
+        ? `${contact.nickname} (${formatSpiritId(contact.fingerprint)})`
+        : formatSpiritId(contact.fingerprint);
       cTop.appendChild(nameEl);
 
       // Фаза 4 (docs/roadmap.md, TOFU-прогалина зафіксована 2026-07-18):
@@ -883,6 +885,7 @@ export function initApp(doc, options) {
       }
       shield.setAttribute("title", shieldTitle.textContent);
       cTop.appendChild(shield);
+      row.dataset.verified = hasVerifiedProof ? "1" : "0";
 
       for (const proof of contact.proofSet?.proofs ?? []) {
         const badge = doc.createElement("span");
@@ -905,6 +908,7 @@ export function initApp(doc, options) {
       cSub.appendChild(messageButton);
       list.appendChild(row);
     }
+    applyContactsFilter();
   }
 
   // Section PN5 (specs/phase5/push-notifications.md): a single delegated
@@ -929,11 +933,33 @@ export function initApp(doc, options) {
   // separate index, no server round-trip. Static per the original
   // sidebar-filters chips design; this input is the one genuinely wired
   // piece of the sidebar's "Пошук" affordance in this pass.
-  el("sidebar-search-input")?.addEventListener("input", (event) => {
-    const query = event.target.value.trim().toLowerCase();
+  let contactsVerifiedOnly = false;
+  function applyContactsFilter() {
+    const query = (el("sidebar-search-input")?.value ?? "").trim().toLowerCase();
     for (const row of doc.querySelectorAll("#contacts-list .list-row")) {
-      row.hidden = query.length > 0 && !row.textContent.toLowerCase().includes(query);
+      const matchesQuery = query.length === 0 || row.textContent.toLowerCase().includes(query);
+      const matchesFilter = !contactsVerifiedOnly || row.dataset.verified === "1";
+      row.hidden = !matchesQuery || !matchesFilter;
     }
+  }
+  el("sidebar-search-input")?.addEventListener("input", applyContactsFilter);
+
+  // Section RF3 (UI redesign follow-up): "Групи" now navigates to the
+  // manage screen via router.js's existing .nav-item[data-route] auto-wiring
+  // (see index.html), so only "Усі"/"Верифіковані" need a click handler here
+  // -- they toggle contactsVerifiedOnly and re-run the same filter the
+  // search box uses, rather than being a separate filtering path.
+  el("chip-filter-all")?.addEventListener("click", () => {
+    contactsVerifiedOnly = false;
+    el("chip-filter-all")?.classList.add("chip-active");
+    el("chip-filter-verified")?.classList.remove("chip-active");
+    applyContactsFilter();
+  });
+  el("chip-filter-verified")?.addEventListener("click", () => {
+    contactsVerifiedOnly = true;
+    el("chip-filter-verified")?.classList.add("chip-active");
+    el("chip-filter-all")?.classList.remove("chip-active");
+    applyContactsFilter();
   });
 
   // Мінімальне дерево папок (UI redesign follow-up, специфіковано в
