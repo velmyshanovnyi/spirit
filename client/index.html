@@ -70,8 +70,11 @@
        manages elements with that attribute, so this aside is invisible to
        the router entirely and always stays in the DOM regardless of route. -->
   <aside id="app-sidebar">
+    <!-- No brand label here -- the global .app-header above already
+         establishes it once; repeating "Spirit" in both places read as a
+         visual duplication bug when compared against the agreed mockup. -->
     <div class="sidebar-header">
-      <div class="brand"><span class="logo">S</span> Spirit</div>
+      <span class="sidebar-heading" data-i18n="sidebar.heading">Чати</span>
       <button id="btn-sidebar-add" type="button" class="btn-icon nav-item" data-route="manage" aria-label="Керування" data-i18n-title="sidebar.manage">+</button>
     </div>
 
