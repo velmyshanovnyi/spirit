@@ -4779,7 +4779,7 @@ describe("contacts and history screens (Sections N3/N4)", () => {
     expect(document.querySelectorAll("#contacts-list .list-row").length).toBe(0);
   });
 
-  it("Фаза 4 (TOFU-прогалина): shows an 'unverified' badge for a contact with no proofs at all", async () => {
+  it("Секція RF2 (specs/ui/redesign-foundation.md): shows an outline trust-shield for a contact with no proofs at all", async () => {
     generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
     fingerprint.mockResolvedValue("sender-fp");
     listContacts.mockResolvedValue([
@@ -4794,12 +4794,13 @@ describe("contacts and history screens (Sections N3/N4)", () => {
     await vi.waitFor(() => expect(listContacts).toHaveBeenCalled());
 
     const row = document.querySelector("#contacts-list .list-row");
-    const badge = row.querySelector(".unverified-badge");
-    expect(badge).not.toBeNull();
-    expect(badge.textContent).toMatch(/не підтверджен/i);
+    const shield = row.querySelector(".trust-shield");
+    expect(shield).not.toBeNull();
+    expect(shield.classList.contains("trust-shield-verified")).toBe(false);
+    expect(shield.getAttribute("aria-label") || shield.getAttribute("title")).toMatch(/не підтверджен/i);
   });
 
-  it("Фаза 4 (TOFU-прогалина): does NOT show the 'unverified' badge for a contact that has at least one proof", async () => {
+  it("Секція RF2: shows a filled/checkmark trust-shield for a contact with at least one confirmed-verified proof", async () => {
     generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
     fingerprint.mockResolvedValue("sender-fp");
     listContacts.mockResolvedValue([
@@ -4820,8 +4821,11 @@ describe("contacts and history screens (Sections N3/N4)", () => {
     await vi.waitFor(() => expect(listContacts).toHaveBeenCalled());
 
     const row = document.querySelector("#contacts-list .list-row");
-    expect(row.querySelector(".unverified-badge")).toBeNull();
     expect(row.textContent).toContain("telegram");
+    // No verifiedAt recorded yet for this proof -- still outline, not filled.
+    const shield = row.querySelector(".trust-shield");
+    expect(shield).not.toBeNull();
+    expect(shield.classList.contains("trust-shield-verified")).toBe(false);
   });
 
   it("contacts screen shows a message button per contact row", async () => {
@@ -5408,6 +5412,36 @@ describe("identity verification proofs (Section E)", () => {
     await vi.waitFor(() =>
       expect(document.getElementById("contacts-list").textContent).toMatch(/перевірено/i)
     );
+    // Секція RF2: щойно проходить перевірка (verifiedAt записано), щит стає
+    // заповненим/з галочкою, а не лишається контурним.
+    const shield = document.querySelector("#contacts-list .list-row .trust-shield");
+    expect(shield).not.toBeNull();
+    expect(shield.classList.contains("trust-shield-verified")).toBe(true);
+  });
+
+  it("Секція RF2: every rendered contact row has an .avatar element containing identicon SVG, with the shape-user class", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    listContacts.mockResolvedValue([
+      { fingerprint: "a".repeat(64), identityPubkeyWire: "W1", firstSeen: 1, deviceList: null },
+      { fingerprint: "b".repeat(64), identityPubkeyWire: "W2", firstSeen: 2, deviceList: null }
+    ]);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+    location.hash = "#/contacts";
+    window.dispatchEvent(new Event("hashchange"));
+    await vi.waitFor(() => expect(listContacts).toHaveBeenCalled());
+
+    const rows = document.querySelectorAll("#contacts-list .list-row");
+    expect(rows.length).toBe(2);
+    for (const row of rows) {
+      const avatar = row.querySelector(".avatar");
+      expect(avatar).not.toBeNull();
+      expect(avatar.classList.contains("shape-user")).toBe(true);
+      expect(avatar.querySelector("svg")).not.toBeNull();
+    }
   });
 
   it("shows a distinct status after several consecutive verification failures, without the badge disappearing", async () => {

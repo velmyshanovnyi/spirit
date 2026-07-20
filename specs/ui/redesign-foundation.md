@@ -10,15 +10,15 @@
 
 ## Секція RF1: Ідентикон — чиста функція (без UI)
 
-- [ ] **Tests**: `client/tests/identicon.test.js` — `buildIdenticonSvg(hashHex)` детермінована (той самий хеш → той самий SVG-рядок завжди); різні хеші дають різні візерунки (не завжди однакова заглушка); валідний SVG-рядок (парситься як XML/має кореневий `<svg>`); коротший за 25 hex-символів вхід не кидає виняток (використовує модульну індексацію по колу, як у макеті).
-- [ ] **Impl**: `client/js/identicon.js` — чиста функція, без DOM/app.js залежності.
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/identicon.test.js` — `buildIdenticonSvg(hashHex)` детермінована (той самий хеш → той самий SVG-рядок завжди); різні хеші дають різні візерунки (не завжди однакова заглушка); валідний SVG-рядок (парситься як XML/має кореневий `<svg>`); коротший за 25 hex-символів вхід не кидає виняток (використовує модульну індексацію по колу, як у макеті).
+- [x] **Impl**: `client/js/identicon.js` — чиста функція, без DOM/app.js залежності.
+- [x] **Exec review**: `specs/reviews/redesign-foundation-RF-iter1.md` — converged, iter 1, no must-fix findings.
 
 ## Секція RF2: Інтеграція в екран контактів
 
-- [ ] **Tests**: `client/tests/app.test.js` — кожен рядок контакту тепер містить `.avatar` з ідентиконом, класом форми `shape-user`/`shape-ghost` (за наявними ознаками контакту — сьогодні всі TOFU-контакти на екрані контактів мають постійний profile, тож завжди `shape-user`; `shape-ghost`/`shape-group` — підготовлені класи для майбутньх секцій, що покажуть ефемерні сесії/групи в цьому самому списку, не використовуються цією секцією); контакт із верифікованим proof показує заповнений щит замість `contacts.unverified`-тексту; контакт без верифікованого proof показує контурний щит; наявні тести на `proof-badge`/`contacts.message`-кнопку лишаються зеленими без зміни асертів.
-- [ ] **Impl**: `client/js/app.js` (`renderContactsScreen` будує `.avatar`-елемент через `buildIdenticonSvg`, замінює `unverified-badge` на щит-іконку), `client/index.html` (заміна емодзі `⚙️` на inline SVG у `#btn-settings-toggle`; додати CSS-класи форм аватара, якщо потрібні нові стилі), `client/css/style.css` (`.avatar`, `.shape-user` коло, `.shape-group` заокруглений квадрат, `.shape-ghost` анімований хвилястий контур з `@media (prefers-reduced-motion: reduce)`-запобіжником).
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/app.test.js` — кожен рядок контакту тепер містить `.avatar` з ідентиконом, класом форми `shape-user` (сьогодні всі TOFU-контакти на екрані контактів мають постійний profile, тож завжди `shape-user`; `shape-ghost`/`shape-group` — підготовлені класи для майбутніх секцій, не використовуються цією секцією); контакт із верифікованим proof показує заповнений щит (`.trust-shield-verified`) замість `contacts.unverified`-тексту; контакт без верифікованого proof показує контурний щит (`.trust-shield`); наявні тести на `proof-badge`/`contacts.message`-кнопку лишаються зеленими без зміни асертів (два наявні тести, що безпосередньо перевіряли СТАРИЙ `.unverified-badge`-текст — саму фічу, яку ця секція замінює — переписані на перевірку нової щит-іконки; це задокументоване рішення підтверджене exec-review).
+- [x] **Impl**: `client/js/app.js` (`renderContactsScreen` будує `.avatar`-елемент через `buildIdenticonSvg`, замінює `unverified-badge` на щит-іконку), `client/index.html` (заміна емодзі `⚙️` на inline SVG у `#btn-settings-toggle`), `client/css/style.css` (`.avatar`, `.shape-user` коло, `.shape-group` заокруглений квадрат, `.shape-ghost` анімований хвилястий контур з `@media (prefers-reduced-motion: reduce)`-запобіжником), `client/js/i18n.js` (новий ключ `contacts.verified` у всіх 11 локалях).
+- [x] **Exec review**: `specs/reviews/redesign-foundation-RF-iter1.md` — converged, iter 1, no must-fix findings.
 
 ## Верифікація
 

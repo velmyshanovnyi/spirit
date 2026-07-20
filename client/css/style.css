@@ -622,6 +622,76 @@ button:disabled {
   border-color: var(--accent);
 }
 
+/* ---------- Avatar shapes + trust shield (Section RF, specs/ui/redesign-foundation.md) ---------- */
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-right: 10px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  overflow: hidden;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.avatar svg {
+  width: 70%;
+  height: 70%;
+}
+
+/* Звичайний постійний контакт (identity-announce verified) -- коло. */
+.shape-user {
+  border-radius: 50%;
+}
+
+/* Група (groups.js) -- заокруглений квадрат. */
+.shape-group {
+  border-radius: var(--radius-sm);
+}
+
+/* Ефемерна личность (сесія без vault key) -- хвилястий контур із легкою
+   "дихаючою" анімацією; вимикається за prefers-reduced-motion. */
+.shape-ghost {
+  border-radius: 42% 58% 55% 45% / 45% 42% 58% 55%;
+  animation: ghost-breathe 3.2s ease-in-out infinite;
+}
+
+@keyframes ghost-breathe {
+  0%, 100% {
+    border-radius: 42% 58% 55% 45% / 45% 42% 58% 55%;
+  }
+  50% {
+    border-radius: 55% 45% 42% 58% / 58% 55% 45% 42%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shape-ghost {
+    animation: none;
+  }
+}
+
+.contact-name {
+  vertical-align: middle;
+}
+
+.trust-shield {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-left: 8px;
+  vertical-align: middle;
+  color: var(--muted);
+}
+
+.trust-shield-verified {
+  color: var(--accent);
+}
+
 /* ---------- Linked-identity proof badges (Section E, specs/phase2c/identity-verification.md) ---------- */
 
 .proof-badge {
