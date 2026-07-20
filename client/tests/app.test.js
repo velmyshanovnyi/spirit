@@ -247,6 +247,7 @@ const HTML = `
     <button id="chip-filter-groups" type="button" class="chip nav-item" data-route="manage"></button>
     <button id="btn-check-proofs-now" type="button">Перевірити зараз</button>
     <div id="proofs-check-status"></div>
+    <div id="folder-tree"></div>
     <div id="contacts-list"></div>
     <p id="contacts-empty"></p>
   </aside>
@@ -5560,6 +5561,45 @@ describe("identity verification proofs (Section E)", () => {
     document.getElementById("chip-filter-all").click();
     expect(verifiedRow.hidden).toBe(false);
     expect(unverifiedRow.hidden).toBe(false);
+  });
+
+  it("dragging a contact onto a folder assigns it there; clicking the folder filters the sidebar list to just that folder", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    listContacts.mockResolvedValue([
+      { fingerprint: "a".repeat(64), nickname: "Іван", identityPubkeyWire: "W1", firstSeen: 1, deviceList: null },
+      { fingerprint: "b".repeat(64), nickname: "Марія", identityPubkeyWire: "W2", firstSeen: 2, deviceList: null }
+    ]);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+    await vi.waitFor(() => expect(document.querySelectorAll("#contacts-list .list-row").length).toBe(2));
+
+    document.querySelector("#folder-tree [data-add-folder]").click();
+    const folderRow = document.querySelector("#folder-tree .folder-row");
+    expect(folderRow).not.toBeNull();
+
+    const [rowIvan, rowMariya] = document.querySelectorAll("#contacts-list .list-row");
+    rowIvan.dispatchEvent(new Event("dragstart"));
+    folderRow.dispatchEvent(new Event("dragover", { cancelable: true }));
+    folderRow.dispatchEvent(new Event("drop", { cancelable: true }));
+    rowIvan.dispatchEvent(new Event("dragend"));
+
+    // Assignment persisted to localStorage, not just in-memory.
+    const stored = JSON.parse(localStorage.getItem("spirit.folders"));
+    expect(stored[0].contactFingerprints).toEqual(["a".repeat(64)]);
+    expect(document.querySelector("#folder-tree .folder-count").textContent).toBe("1");
+
+    folderRow.click();
+    expect(document.querySelector("#folder-tree .folder-row").classList.contains("selected")).toBe(true);
+    expect(rowIvan.hidden).toBe(false);
+    expect(rowMariya.hidden).toBe(true);
+
+    document.getElementById("chip-filter-all").click();
+    expect(rowIvan.hidden).toBe(false);
+    expect(rowMariya.hidden).toBe(false);
+    expect(document.querySelector("#folder-tree .folder-row").classList.contains("selected")).toBe(false);
   });
 
   it("shows a distinct status after several consecutive verification failures, without the badge disappearing", async () => {

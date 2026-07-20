@@ -886,6 +886,11 @@ button:disabled {
   background: var(--accent-soft);
 }
 
+.folder-row.selected {
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
 .folder-row .chev {
   width: 12px;
   font-size: 10px;

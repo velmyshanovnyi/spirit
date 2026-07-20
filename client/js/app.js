@@ -814,6 +814,13 @@ export function initApp(doc, options) {
       const row = doc.createElement("div");
       row.className = "list-row";
       row.dataset.contactFingerprint = contact.fingerprint;
+      row.draggable = true;
+      row.addEventListener("dragstart", () => {
+        contactDragFingerprint = contact.fingerprint;
+      });
+      row.addEventListener("dragend", () => {
+        contactDragFingerprint = null;
+      });
 
       // Секція RF2 (specs/ui/redesign-foundation.md): identicon-аватар,
       // детермінований з fingerprint. Кожен контакт у цьому списку сьогодні
@@ -934,12 +941,21 @@ export function initApp(doc, options) {
   // sidebar-filters chips design; this input is the one genuinely wired
   // piece of the sidebar's "Пошук" affordance in this pass.
   let contactsVerifiedOnly = false;
+  let selectedFolderId = null;
+  function collectFolderFingerprints(node) {
+    let ids = [...(node.contactFingerprints || [])];
+    for (const child of node.children) ids = ids.concat(collectFolderFingerprints(child));
+    return ids;
+  }
   function applyContactsFilter() {
     const query = (el("sidebar-search-input")?.value ?? "").trim().toLowerCase();
+    const selectedFolder = selectedFolderId && findFolder(folders, selectedFolderId);
+    const folderFingerprints = selectedFolder ? new Set(collectFolderFingerprints(selectedFolder)) : null;
     for (const row of doc.querySelectorAll("#contacts-list .list-row")) {
       const matchesQuery = query.length === 0 || row.textContent.toLowerCase().includes(query);
-      const matchesFilter = !contactsVerifiedOnly || row.dataset.verified === "1";
-      row.hidden = !matchesQuery || !matchesFilter;
+      const matchesVerified = !contactsVerifiedOnly || row.dataset.verified === "1";
+      const matchesFolder = !folderFingerprints || folderFingerprints.has(row.dataset.contactFingerprint);
+      row.hidden = !matchesQuery || !matchesVerified || !matchesFolder;
     }
   }
   el("sidebar-search-input")?.addEventListener("input", applyContactsFilter);
@@ -948,11 +964,15 @@ export function initApp(doc, options) {
   // manage screen via router.js's existing .nav-item[data-route] auto-wiring
   // (see index.html), so only "Усі"/"Верифіковані" need a click handler here
   // -- they toggle contactsVerifiedOnly and re-run the same filter the
-  // search box uses, rather than being a separate filtering path.
+  // search box uses, rather than being a separate filtering path. "Усі"
+  // also clears any active folder selection (see renderFolderTree below),
+  // since it means "show every contact, no filter at all".
   el("chip-filter-all")?.addEventListener("click", () => {
     contactsVerifiedOnly = false;
+    selectedFolderId = null;
     el("chip-filter-all")?.classList.add("chip-active");
     el("chip-filter-verified")?.classList.remove("chip-active");
+    renderFolderTree();
     applyContactsFilter();
   });
   el("chip-filter-verified")?.addEventListener("click", () => {
@@ -962,18 +982,28 @@ export function initApp(doc, options) {
     applyContactsFilter();
   });
 
-  // Мінімальне дерево папок (UI redesign follow-up, специфіковано в
-  // мокапі): вкладені, необмежена глибина, drag&drop переміщення/вкладення,
+  // Дерево папок (UI redesign follow-up, специфіковано в мокапі): вкладені,
+  // необмежена глибина, drag&drop переміщення/вкладення папок ОДНА В ОДНУ,
   // localStorage-персистентність (пристрій-рівень, не IndexedDB/профіль --
   // та сама причина, що й `spirit.signalingNodes`, Секція multi-node-ui).
-  // Це перша, чисто клієнтська ітерація -- папки поки що не фільтрують
-  // список контактів і не синхронізуються між пристроями; повна модель
-  // (прив'язка контактів до папок, IndexedDB) -- окрема майбутня секція.
+  // Прив'язка КОНТАКТІВ до папок (drag контакту з #contacts-list на рядок
+  // папки, клік на папку фільтрує список) реалізована нижче -- модель
+  // "один контакт в одній папці одночасно" (перетягнення в іншу папку
+  // видаляє з попередньої), той самий ментальний принцип, що й звичайні
+  // файлові менеджери. Синхронізація між пристроями лишається майбутньою
+  // секцією (той самий локальний-лише статус, що й уся ця фіча).
   const FOLDER_STORAGE_KEY = "spirit.folders";
+  function normalizeFolderNodes(nodes) {
+    for (const n of nodes) {
+      if (!Array.isArray(n.contactFingerprints)) n.contactFingerprints = [];
+      normalizeFolderNodes(n.children);
+    }
+    return nodes;
+  }
   function loadFolders() {
     try {
       const raw = localStorage.getItem(FOLDER_STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
+      return normalizeFolderNodes(raw ? JSON.parse(raw) : []);
     } catch {
       return [];
     }
@@ -989,6 +1019,14 @@ export function initApp(doc, options) {
   const folders = loadFolders();
   const folderCollapsed = new Set();
   let folderDragId = null;
+  let contactDragFingerprint = null;
+
+  function removeFingerprintFromAllFolders(nodes, fingerprint) {
+    for (const n of nodes) {
+      n.contactFingerprints = n.contactFingerprints.filter((fp) => fp !== fingerprint);
+      removeFingerprintFromAllFolders(n.children, fingerprint);
+    }
+  }
 
   function findFolder(nodes, id) {
     for (const n of nodes) {
@@ -1018,10 +1056,12 @@ export function initApp(doc, options) {
       .map((n) => {
         const collapsed = folderCollapsed.has(n.id);
         const hasKids = n.children.length > 0;
+        const selected = selectedFolderId === n.id;
         return `
-          <div class="folder-row ${collapsed ? "collapsed" : ""}" data-folder-id="${n.id}" draggable="true">
+          <div class="folder-row ${collapsed ? "collapsed" : ""} ${selected ? "selected" : ""}" data-folder-id="${n.id}" draggable="true">
             <span class="chev">${hasKids ? "▾" : ""}</span>
             <span class="folder-name"></span>
+            ${n.contactFingerprints.length > 0 ? `<span class="folder-count">${n.contactFingerprints.length}</span>` : ""}
           </div>
           ${hasKids ? `<div class="folder-children ${collapsed ? "collapsed" : ""}">${renderFolderNodes(n.children)}</div>` : ""}
         `;
@@ -1055,15 +1095,42 @@ export function initApp(doc, options) {
       });
       rowEl.addEventListener("dragover", (event) => {
         event.preventDefault();
+        if (contactDragFingerprint) {
+          rowEl.classList.add("drag-over");
+          return;
+        }
         const dragged = folderDragId && findFolder(folders, folderDragId);
         if (dragged && folderDragId !== id && !isFolderDescendant(dragged, id)) {
           rowEl.classList.add("drag-over");
         }
       });
       rowEl.addEventListener("dragleave", () => rowEl.classList.remove("drag-over"));
+      rowEl.addEventListener("click", (event) => {
+        if (event.target.closest(".chev")) return;
+        selectedFolderId = selectedFolderId === id ? null : id;
+        renderFolderTree();
+        applyContactsFilter();
+      });
       rowEl.addEventListener("drop", (event) => {
         event.preventDefault();
         rowEl.classList.remove("drag-over");
+        // Dropping a contact assigns it to this folder (single-membership --
+        // it's first removed from every other folder, same mental model as
+        // an ordinary file manager), independent of the folder-onto-folder
+        // reorder/nest path below.
+        if (contactDragFingerprint) {
+          const fingerprint = contactDragFingerprint;
+          contactDragFingerprint = null;
+          removeFingerprintFromAllFolders(folders, fingerprint);
+          const target = findFolder(folders, id);
+          if (target && !target.contactFingerprints.includes(fingerprint)) {
+            target.contactFingerprints.push(fingerprint);
+          }
+          saveFolders(folders);
+          renderFolderTree();
+          applyContactsFilter();
+          return;
+        }
         if (!folderDragId || folderDragId === id) return;
         const dragged = findFolder(folders, folderDragId);
         if (!dragged || isFolderDescendant(dragged, id)) return;
@@ -1081,7 +1148,7 @@ export function initApp(doc, options) {
       });
     });
     treeEl.querySelector("[data-add-folder]")?.addEventListener("click", () => {
-      folders.push({ id: randomFolderId(), name: t("sidebar.newFolder"), children: [] });
+      folders.push({ id: randomFolderId(), name: t("sidebar.newFolder"), children: [], contactFingerprints: [] });
       saveFolders(folders);
       renderFolderTree();
     });
