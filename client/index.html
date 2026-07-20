@@ -408,6 +408,32 @@
         <div id="groups-list" class="list-area"></div>
         <p id="groups-empty" class="hint-text" data-i18n="groups.empty">Поки що немає жодної групи</p>
       </section>
+
+      <!-- Section I2 (specs/phase2b/import.md): optional contact import.
+           Format is chosen explicitly via the dropdown rather than sniffed
+           from the file extension -- WhatsApp's contacts export reuses the
+           vCard parser (per importParsers.js's documented assumption), so
+           extension-based auto-detection would be ambiguous between
+           "vcard" and "whatsapp" anyway. Matching a pending import to a
+           real contact is always a manual, explicit user action (never
+           automatic/fuzzy) -- see docs/migration.md. -->
+      <section id="import-card" class="card card-wide">
+        <h2 data-i18n="import.pick">Імпортувати контакти</h2>
+        <label class="field"><span data-i18n="import.formatLabel">Формат файлу:</span>
+          <select id="import-format">
+            <option value="telegram-json" data-i18n="import.formatTelegram">Telegram (JSON)</option>
+            <option value="vcard" data-i18n="import.formatVcard">vCard (.vcf)</option>
+            <option value="whatsapp" data-i18n="import.formatWhatsapp">WhatsApp</option>
+          </select>
+        </label>
+        <label for="import-file-input" class="btn-icon" data-i18n="import.pick">Імпортувати контакти</label>
+        <input id="import-file-input" type="file" accept=".json,.vcf,.txt" hidden>
+        <div id="import-status" class="status"></div>
+
+        <h3 data-i18n="import.pendingHeading">Очікують на зіставлення</h3>
+        <div id="import-pending-list" class="list-area"></div>
+        <p id="import-pending-empty" class="hint-text" data-i18n="import.pendingEmpty">Немає очікуючих імпортів</p>
+      </section>
     </section>
 
     <!-- ================= Історія ================= -->

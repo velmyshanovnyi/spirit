@@ -45,6 +45,8 @@ import { fetchProofPageText } from "./fetchProof.js";
 import { generateAnonymousNickname } from "./anonymousNickname.js";
 import { splitFileIntoChunks, chunkToBase64, base64ToChunk, computeFileHash, createFileAssembler } from "./fileTransfer.js";
 import { createGroup, getGroup, listGroups, updateGroupMembers } from "./groups.js";
+import { saveImportedContact, listImportedContacts, setMatchedFingerprint, deleteImportedContact } from "./importedContacts.js";
+import { parseContactList } from "./importParsers.js";
 
 import {
   startAsInitiator,
@@ -952,6 +954,123 @@ export function initApp(doc, options) {
     await renderGroupsCard();
   });
 
+  const setImportStatus = (text) => {
+    const status = el("import-status");
+    if (status) status.textContent = text;
+  };
+
+  /**
+   * Section I2 (specs/phase2b/import.md): renders the pending-import list on
+   * the Contacts screen. A pending import with no matchedFingerprint shows a
+   * <select> of every REAL Spirit contact (never a pre-filtered "likely
+   * match" -- matching is manual-only by design, see docs/migration.md) plus
+   * a Match button; once matched it shows the matched contact's identity
+   * instead. An unmatched import persists indefinitely -- there is no
+   * expiry/auto-delete path anywhere in this function.
+   */
+  async function renderImportedContactsScreen() {
+    const list = el("import-pending-list");
+    const empty = el("import-pending-empty");
+    if (!list) return; // screen not present in this document (e.g. older test fixture)
+    const [imports, contacts] = await Promise.all([listImportedContacts(), listContacts()]);
+    list.innerHTML = "";
+    if (empty) empty.hidden = imports.length > 0;
+    for (const record of imports) {
+      const row = doc.createElement("div");
+      row.className = "list-row";
+      row.dataset.importedId = record.id;
+
+      const label = doc.createElement("span");
+      label.textContent = `${record.displayName} (${record.sourceIdentifier})`;
+      row.appendChild(label);
+
+      if (record.matchedFingerprint) {
+        const matchedContact = contacts.find((c) => c.fingerprint === record.matchedFingerprint);
+        const matchedLabel = matchedContact?.nickname
+          ? `${matchedContact.nickname} (${formatSpiritId(record.matchedFingerprint)})`
+          : formatSpiritId(record.matchedFingerprint);
+        const matchedSpan = doc.createElement("span");
+        matchedSpan.textContent = ` ${t("import.matchedWith", { contact: matchedLabel })}`;
+        row.appendChild(matchedSpan);
+      } else {
+        const select = doc.createElement("select");
+        const placeholderOption = doc.createElement("option");
+        placeholderOption.value = "";
+        placeholderOption.textContent = t("import.matchPlaceholder");
+        select.appendChild(placeholderOption);
+        for (const contact of contacts) {
+          const option = doc.createElement("option");
+          option.value = contact.fingerprint;
+          option.textContent = contact.nickname
+            ? `${contact.nickname} (${formatSpiritId(contact.fingerprint)})`
+            : formatSpiritId(contact.fingerprint);
+          select.appendChild(option);
+        }
+        row.appendChild(select);
+
+        const matchButton = doc.createElement("button");
+        matchButton.type = "button";
+        matchButton.textContent = t("import.matchButton");
+        matchButton.dataset.matchBtn = record.id;
+        row.appendChild(matchButton);
+      }
+
+      const deleteButton = doc.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.textContent = t("import.delete");
+      deleteButton.dataset.deleteBtn = record.id;
+      row.appendChild(deleteButton);
+
+      list.appendChild(row);
+    }
+  }
+
+  const importFileInput = el("import-file-input");
+  if (importFileInput) {
+    importFileInput.addEventListener("change", async () => {
+      const file = importFileInput.files && importFileInput.files[0];
+      importFileInput.value = "";
+      if (!file) return;
+      const format = el("import-format")?.value || "vcard";
+      try {
+        const text = await file.text();
+        const parsed = parseContactList(text, format);
+        for (const entry of parsed) {
+          await saveImportedContact({
+            displayName: entry.displayName,
+            sourceIdentifier: entry.sourceIdentifier,
+            source: format
+          });
+        }
+        setImportStatus("");
+      } catch (e) {
+        setImportStatus(t("import.parseError", { detail: e.message }));
+      }
+      await renderImportedContactsScreen();
+    });
+  }
+
+  // Single delegated listener on the pending-import list container (rows
+  // are rebuilt on every renderImportedContactsScreen() call), same pattern
+  // as #contacts-list's message-button delegate above.
+  el("import-pending-list")?.addEventListener("click", async (event) => {
+    const matchButton = event.target.closest("[data-match-btn]");
+    if (matchButton) {
+      const row = matchButton.closest("[data-imported-id]");
+      const select = row?.querySelector("select");
+      const fingerprint = select?.value;
+      if (!fingerprint) return;
+      await setMatchedFingerprint(matchButton.dataset.matchBtn, fingerprint);
+      await renderImportedContactsScreen();
+      return;
+    }
+    const deleteButton = event.target.closest("[data-delete-btn]");
+    if (deleteButton) {
+      await deleteImportedContact(deleteButton.dataset.deleteBtn);
+      await renderImportedContactsScreen();
+    }
+  });
+
   /**
    * Re-checks every contact's held proofs against their live publication --
    * called on demand ("Перевірити зараз") and on the periodic timer below.
@@ -991,6 +1110,7 @@ export function initApp(doc, options) {
     if (route === "contacts") {
       await renderContactsScreen();
       await renderGroupsCard();
+      await renderImportedContactsScreen();
     }
   }
 
@@ -1265,6 +1385,7 @@ export function initApp(doc, options) {
     if (route === "contacts") {
       renderContactsScreen();
       renderGroupsCard();
+      renderImportedContactsScreen();
     }
     if (route === "history") renderHistoryScreen();
     if (route === "profile") renderOwnProofsList();

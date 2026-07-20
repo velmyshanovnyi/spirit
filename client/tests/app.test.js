@@ -85,6 +85,17 @@ vi.mock("../js/groups.js", () => ({
   listGroups: vi.fn().mockResolvedValue([]),
   updateGroupMembers: vi.fn()
 }));
+vi.mock("../js/importedContacts.js", () => ({
+  saveImportedContact: vi.fn(),
+  listImportedContacts: vi.fn().mockResolvedValue([]),
+  getImportedContact: vi.fn(),
+  setMatchedFingerprint: vi.fn(),
+  deleteImportedContact: vi.fn()
+}));
+vi.mock("../js/importParsers.js", () => ({
+  parseContactList: vi.fn(),
+  parseChatExport: vi.fn()
+}));
 vi.mock("../js/adminAuth.js", () => ({
   adminLogin: vi.fn(),
   getAdminConfig: vi.fn(),
@@ -181,6 +192,8 @@ import { fetchProofPageText } from "../js/fetchProof.js";
 import { get as dbGet, put as dbPut } from "../js/db.js";
 import { appendMessage, listMessages, listConversations } from "../js/historyStore.js";
 import { createGroup, getGroup, listGroups, updateGroupMembers } from "../js/groups.js";
+import { saveImportedContact, listImportedContacts, setMatchedFingerprint, deleteImportedContact } from "../js/importedContacts.js";
+import { parseContactList } from "../js/importParsers.js";
 import { adminLogin, getAdminConfig } from "../js/adminAuth.js";
 import { bytesToMnemonic } from "../js/mnemonic.js";
 import { createKeyfile } from "../js/keyfile.js";
@@ -366,6 +379,17 @@ const HTML = `
       <div id="group-invite-links" hidden></div>
       <div id="groups-list"></div>
       <p id="groups-empty"></p>
+    </div>
+    <div id="import-card">
+      <select id="import-format">
+        <option value="telegram-json">Telegram (JSON)</option>
+        <option value="vcard">vCard (.vcf)</option>
+        <option value="whatsapp">WhatsApp</option>
+      </select>
+      <input id="import-file-input" type="file">
+      <div id="import-status"></div>
+      <div id="import-pending-list"></div>
+      <p id="import-pending-empty"></p>
     </div>
   </section>
 
@@ -4899,6 +4923,123 @@ describe("contacts and history screens (Sections N3/N4)", () => {
 
     expect(document.getElementById("history-empty").hidden).toBe(false);
     expect(listConversations).not.toHaveBeenCalled();
+  });
+});
+
+describe("contact import UI (Section I2, specs/phase2b/import.md)", () => {
+  async function reachContacts() {
+    location.hash = "#/contacts";
+    window.dispatchEvent(new Event("hashchange"));
+    await vi.waitFor(() => expect(listContacts).toHaveBeenCalled());
+  }
+
+  function setImportFile(file) {
+    const input = document.getElementById("import-file-input");
+    Object.defineProperty(input, "files", { value: [file], configurable: true });
+    input.dispatchEvent(new Event("change"));
+  }
+
+  async function bootstrap() {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+    await reachContacts();
+  }
+
+  it("picking a file + format calls parseContactList and creates a pending record per parsed entry", async () => {
+    await bootstrap();
+    parseContactList.mockReturnValue([
+      { displayName: "Іван Петренко", sourceIdentifier: "+380501234567" },
+      { displayName: "Олена", sourceIdentifier: "+380671112233" }
+    ]);
+    const saved = [];
+    saveImportedContact.mockImplementation(async ({ displayName, sourceIdentifier, source }) => {
+      const record = { id: `id-${displayName}`, displayName, sourceIdentifier, source, importedAt: 1, matchedFingerprint: null };
+      saved.push(record);
+      return record;
+    });
+    listImportedContacts.mockImplementation(async () => saved);
+
+    document.getElementById("import-format").value = "vcard";
+    const file = new File(["BEGIN:VCARD..."], "contacts.vcf", { type: "text/vcard" });
+    file.text = vi.fn().mockResolvedValue("BEGIN:VCARD...");
+    setImportFile(file);
+
+    await vi.waitFor(() => expect(parseContactList).toHaveBeenCalledWith("BEGIN:VCARD...", "vcard"));
+    await vi.waitFor(() => expect(saveImportedContact).toHaveBeenCalledTimes(2));
+    expect(saveImportedContact).toHaveBeenCalledWith(
+      expect.objectContaining({ displayName: "Іван Петренко", sourceIdentifier: "+380501234567", source: "vcard" })
+    );
+
+    await vi.waitFor(() =>
+      expect(document.getElementById("import-pending-list").textContent).toContain("Іван Петренко")
+    );
+    expect(document.getElementById("import-pending-list").textContent).toContain("+380501234567");
+  });
+
+  it("selecting a match target and clicking Match calls setMatchedFingerprint with the right id/fingerprint", async () => {
+    await bootstrap();
+    listContacts.mockResolvedValue([
+      { fingerprint: "a".repeat(64), identityPubkeyWire: "W1", firstSeen: 1, deviceList: null, nickname: "Друг" }
+    ]);
+    listImportedContacts.mockResolvedValue([
+      { id: "pending-1", displayName: "Іван", sourceIdentifier: "+380501234567", source: "vcard", importedAt: 1, matchedFingerprint: null }
+    ]);
+
+    await reachContacts();
+
+    const row = document.querySelector("[data-imported-id='pending-1']");
+    expect(row).not.toBeNull();
+    const select = row.querySelector("select");
+    select.value = "a".repeat(64);
+    select.dispatchEvent(new Event("change"));
+    row.querySelector("[data-match-btn]").click();
+
+    await vi.waitFor(() => expect(setMatchedFingerprint).toHaveBeenCalledWith("pending-1", "a".repeat(64)));
+  });
+
+  it("a pending import with no match persists across a re-render", async () => {
+    await bootstrap();
+    listImportedContacts.mockResolvedValue([
+      { id: "pending-1", displayName: "Іван", sourceIdentifier: "+380501234567", source: "vcard", importedAt: 1, matchedFingerprint: null }
+    ]);
+
+    await reachContacts();
+    expect(document.querySelector("[data-imported-id='pending-1']")).not.toBeNull();
+
+    await reachContacts();
+    expect(document.querySelector("[data-imported-id='pending-1']")).not.toBeNull();
+  });
+
+  it("deleting a pending import removes it from both the list and the store", async () => {
+    await bootstrap();
+    listImportedContacts.mockResolvedValue([
+      { id: "pending-1", displayName: "Іван", sourceIdentifier: "+380501234567", source: "vcard", importedAt: 1, matchedFingerprint: null }
+    ]);
+
+    await reachContacts();
+    const row = document.querySelector("[data-imported-id='pending-1']");
+    row.querySelector("[data-delete-btn]").click();
+
+    await vi.waitFor(() => expect(deleteImportedContact).toHaveBeenCalledWith("pending-1"));
+  });
+
+  it("a matched pending import shows the matched contact instead of the match select", async () => {
+    await bootstrap();
+    listContacts.mockResolvedValue([
+      { fingerprint: "a".repeat(64), identityPubkeyWire: "W1", firstSeen: 1, deviceList: null, nickname: "Друг" }
+    ]);
+    listImportedContacts.mockResolvedValue([
+      { id: "pending-1", displayName: "Іван", sourceIdentifier: "+380501234567", source: "vcard", importedAt: 1, matchedFingerprint: "a".repeat(64) }
+    ]);
+
+    await reachContacts();
+    const row = document.querySelector("[data-imported-id='pending-1']");
+    expect(row.querySelector("select")).toBeNull();
+    expect(row.querySelector("[data-match-btn]")).toBeNull();
+    expect(row.textContent).toContain("Друг");
   });
 });
 

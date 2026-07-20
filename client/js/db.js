@@ -1,10 +1,11 @@
 const DB_NAME = "spirit";
-// Bumped to 3 for Section GC1 (specs/phase4/group-chats.md): adds the
-// groups store. onupgradeneeded is idempotent (guards each store with
+// Bumped to 4 for Section I2 (specs/phase2b/import.md): adds the
+// importedContacts store (pending contact imports awaiting manual match).
+// onupgradeneeded is idempotent (guards each store with
 // objectStoreNames.contains), so this is safe both for a brand-new database
-// and for an existing v1/v2 database being upgraded in place.
-const DB_VERSION = 3;
-const STORE_NAMES = ["profile", "contacts", "messages", "trustedShares", "groups"];
+// and for an existing v1/v2/v3 database being upgraded in place.
+const DB_VERSION = 4;
+const STORE_NAMES = ["profile", "contacts", "messages", "trustedShares", "groups", "importedContacts"];
 
 export function openDatabase() {
   return new Promise((resolve, reject) => {

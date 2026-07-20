@@ -27,9 +27,9 @@ parseChatExport(fileText: string, format: "telegram-json" | "whatsapp-txt"): { t
 
 ## Секція I2: Імпорт контактів — UI, pending-сховище, ручний матчинг
 
-- [ ] **Tests**: TBD — `client/tests/importedContacts.test.js` (CRUD pending-стору), `client/tests/app.test.js` (завантаження файлу → парсинг → рендер pending-списку; ручний вибір "зіставити з контактом X" встановлює `matchedFingerprint`; контакт без матчингу лишається "очікує" необмежено довго, не зникає).
-- [ ] **Impl**: TBD — `client/js/importedContacts.js` (новий стор, мірорить стиль `contacts.js`/`groups.js`), UI на екрані «Контакти» (кнопка імпорту файлу, pending-список, вибір матчингу зі списку наявних контактів).
-- [ ] **Exec review**: —
+- [x] **Tests**: `client/tests/importedContacts.test.js` (CRUD pending-стору, 8 тестів), `client/tests/app.test.js` (завантаження файлу → парсинг → рендер pending-списку; ручний вибір "зіставити з контактом X" встановлює `matchedFingerprint`; контакт без матчингу лишається "очікує" необмежено довго, не зникає; видалення; рендер матчед-запису — 5 тестів у describe "contact import UI (Section I2, specs/phase2b/import.md)").
+- [x] **Impl**: `client/js/importedContacts.js` (новий стор, мірорить стиль `contacts.js`/`groups.js`), `client/js/db.js` (DB_VERSION 3 -> 4, ідемпотентний upgrade), UI на екрані «Контакти» (`client/index.html` -- `#import-card`: вибір формату через `<select>` -- явний вибір користувача, бо WhatsApp-контакти повторно використовують vCard-парсер, тож sniffing за розширенням файлу був би неоднозначним; `client/js/app.js` -- `renderImportedContactsScreen`, файл-інпут-обробник, delegated click для Match/Delete).
+- [x] **Exec review**: `specs/reviews/import-I2-iter1.md` — converged iter1, no findings (anti-auto-match, unmatched-persistence, DB-version idempotency, XSS-safety all confirmed clean).
 
 ## Секція I3: Імпорт історії — прив'язка до матчингу, мітка "історичне"
 
