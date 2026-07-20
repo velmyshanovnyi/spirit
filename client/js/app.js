@@ -915,6 +915,41 @@ export function initApp(doc, options) {
       cSub.appendChild(messageButton);
       list.appendChild(row);
     }
+
+    // Секція RF3 (UI redesign follow-up, узгоджена концепція "Тінь"):
+    // групи тепер показуються в тому самому сайдбар-списку, що й контакти
+    // -- квадратна identicon-аватарка (shape-group, підготовлений клас,
+    // раніше не використовувався), клік відкриває групову розмову напряму,
+    // без переходу через екран "Керування". Групи НЕ мають proof/verified
+    // семантики й НЕ прив'язуються до папок у цій ітерації -- звичайні
+    // фільтри (пошук, "Верифіковані", вибір папки) просто приховують їх,
+    // як контакт без відповідної ознаки.
+    const groups = await listGroups();
+    for (const group of groups) {
+      const row = doc.createElement("div");
+      row.className = "list-row";
+      row.dataset.groupId = group.groupId;
+
+      const avatar = doc.createElement("div");
+      avatar.className = "avatar shape-group";
+      avatar.innerHTML = buildIdenticonSvg(group.groupId);
+      row.appendChild(avatar);
+
+      const cMain = doc.createElement("div");
+      cMain.className = "c-main";
+      const cTop = doc.createElement("div");
+      cTop.className = "c-top";
+      const nameEl = doc.createElement("span");
+      nameEl.className = "contact-name";
+      nameEl.textContent = group.name;
+      cTop.appendChild(nameEl);
+      cMain.appendChild(cTop);
+      row.appendChild(cMain);
+
+      row.addEventListener("click", () => openGroupConversation(group.groupId, group.name));
+      list.appendChild(row);
+    }
+
     applyContactsFilter();
   }
 

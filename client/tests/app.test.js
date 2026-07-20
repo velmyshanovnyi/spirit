@@ -5602,6 +5602,33 @@ describe("identity verification proofs (Section E)", () => {
     expect(document.querySelector("#folder-tree .folder-row").classList.contains("selected")).toBe(false);
   });
 
+  it("groups render in the same sidebar #contacts-list as contacts, with a square shape-group avatar, and clicking one opens its conversation directly", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    listContacts.mockResolvedValue([
+      { fingerprint: "a".repeat(64), nickname: "Іван", identityPubkeyWire: "W1", firstSeen: 1, deviceList: null }
+    ]);
+    listGroups.mockResolvedValue([{ groupId: "group-1", name: "Друзі", memberFingerprints: [], createdAt: 1 }]);
+    listMessages.mockResolvedValue([]);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+    await vi.waitFor(() => expect(document.querySelectorAll("#contacts-list .list-row").length).toBe(2));
+
+    const rows = document.querySelectorAll("#contacts-list .list-row");
+    const contactRow = [...rows].find((r) => r.dataset.contactFingerprint);
+    const groupRow = [...rows].find((r) => r.dataset.groupId);
+    expect(contactRow.querySelector(".avatar").classList.contains("shape-user")).toBe(true);
+    expect(groupRow.querySelector(".avatar").classList.contains("shape-group")).toBe(true);
+    expect(groupRow.textContent).toContain("Друзі");
+
+    groupRow.click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
+    expect(document.getElementById("group-chat-log").hidden).toBe(false);
+    expect(document.getElementById("group-conversation-heading").hidden).toBe(false);
+  });
+
   it("shows a distinct status after several consecutive verification failures, without the badge disappearing", async () => {
     generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
     fingerprint.mockResolvedValue("sender-fp");
