@@ -139,3 +139,46 @@ describe("listConversations", () => {
     expect(await listConversations(keyB, otherProfile)).toEqual([]);
   });
 });
+
+describe("group namespace (Section GC1 -- contactId is 'any string key', groups just reuse it)", () => {
+  // A groupId happens to look exactly like a contact fingerprint here on
+  // purpose: the namespace mechanism must not rely on format to tell them
+  // apart -- appendMessage/listMessages treat contactId as an opaque key.
+  const GROUP_ID = CONTACT_A;
+
+  it("keeps a group's history in listMessages, addressed by groupId like a contactId", async () => {
+    const vaultKey = await freshVaultKey();
+
+    await appendMessage(vaultKey, PROFILE, GROUP_ID, { direction: "out", text: "group hi", timestamp: 1000 });
+    await appendMessage(vaultKey, PROFILE, GROUP_ID, { direction: "in", text: "group hey", timestamp: 2000 });
+
+    const messages = await listMessages(vaultKey, PROFILE, GROUP_ID);
+    expect(messages.map((m) => m.text)).toEqual(["group hi", "group hey"]);
+  });
+
+  it("does not mix a group's messages with a 1:1 contact's messages even when the keys share the same string format", async () => {
+    const vaultKey = await freshVaultKey();
+    const REAL_CONTACT = CONTACT_B; // distinct string -- the actual collision case is covered below
+
+    await appendMessage(vaultKey, PROFILE, GROUP_ID, { direction: "out", text: "for the group", timestamp: 1000 });
+    await appendMessage(vaultKey, PROFILE, REAL_CONTACT, { direction: "out", text: "for the 1:1 contact", timestamp: 1000 });
+
+    expect((await listMessages(vaultKey, PROFILE, GROUP_ID)).map((m) => m.text)).toEqual(["for the group"]);
+    expect((await listMessages(vaultKey, PROFILE, REAL_CONTACT)).map((m) => m.text)).toEqual(["for the 1:1 contact"]);
+  });
+
+  it("lists a group as its own conversation entry in listConversations, alongside 1:1 contacts", async () => {
+    const vaultKey = await freshVaultKey();
+
+    await appendMessage(vaultKey, PROFILE, GROUP_ID, { direction: "out", text: "group msg 1", timestamp: 1000 });
+    await appendMessage(vaultKey, PROFILE, GROUP_ID, { direction: "in", text: "group msg 2", timestamp: 2000 });
+    await appendMessage(vaultKey, PROFILE, CONTACT_B, { direction: "out", text: "1:1 msg", timestamp: 1500 });
+
+    const conversations = await listConversations(vaultKey, PROFILE);
+
+    expect(conversations.map((c) => c.contactId).sort()).toEqual([GROUP_ID, CONTACT_B].sort());
+    const group = conversations.find((c) => c.contactId === GROUP_ID);
+    expect(group.messageCount).toBe(2);
+    expect(group.lastMessage).toEqual({ direction: "in", text: "group msg 2", timestamp: 2000 });
+  });
+});
