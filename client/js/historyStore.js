@@ -25,10 +25,15 @@ function messageKey(profileId, contactId, timestamp) {
  * and coarse ordering, which the db's existence already implies.
  * Ephemeral mode simply never calls this.
  */
-export async function appendMessage(vaultKey, profileId, contactId, { direction, text, timestamp }) {
-  const plaintext = new TextEncoder().encode(JSON.stringify({ direction, text, timestamp }));
+export async function appendMessage(vaultKey, profileId, contactId, payload) {
+  // The payload is serialized as-is (not re-assembled from just the
+  // { direction, text, timestamp } fields) so extra fields ride along in
+  // the same encrypted JSON without any storage-schema change -- e.g.
+  // `imported: true` for Section I3 (specs/phase2b/import.md) history
+  // messages.
+  const plaintext = new TextEncoder().encode(JSON.stringify(payload));
   const ciphertext = await encryptForVault(vaultKey, plaintext);
-  await put("messages", messageKey(profileId, contactId, timestamp), ciphertext);
+  await put("messages", messageKey(profileId, contactId, payload.timestamp), ciphertext);
 }
 
 /**

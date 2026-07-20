@@ -45,8 +45,15 @@ import { fetchProofPageText } from "./fetchProof.js";
 import { generateAnonymousNickname } from "./anonymousNickname.js";
 import { splitFileIntoChunks, chunkToBase64, base64ToChunk, computeFileHash, createFileAssembler } from "./fileTransfer.js";
 import { createGroup, getGroup, listGroups, updateGroupMembers } from "./groups.js";
-import { saveImportedContact, listImportedContacts, setMatchedFingerprint, deleteImportedContact } from "./importedContacts.js";
-import { parseContactList } from "./importParsers.js";
+import {
+  saveImportedContact,
+  listImportedContacts,
+  getImportedContact,
+  setMatchedFingerprint,
+  deleteImportedContact,
+  clearPendingMessages
+} from "./importedContacts.js";
+import { parseContactList, parseChatExport } from "./importParsers.js";
 
 import {
   startAsInitiator,
@@ -445,9 +452,14 @@ export function initApp(doc, options) {
     return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   };
   // direction: "out" (this device sent it) or "in" (received from the peer).
-  const appendChat = (text, direction, timestamp = Date.now()) => {
+  // imported (Section I3, specs/phase2b/import.md): true for a message that
+  // came from parseChatExport + a manual match rather than a live P2P
+  // handshake -- it never went through E2EE, so it gets a visible
+  // "історичне (імпортоване)" badge distinguishing it from native messages.
+  const appendChat = (text, direction, timestamp = Date.now(), imported = false) => {
     const arrow = direction === "out" ? "→" : "←";
-    el("chat-log").textContent += `[${formatClockTime(timestamp)}] ${arrow} ${text}\n`;
+    const badge = imported ? `[${t("import.historyBadge")}] ` : "";
+    el("chat-log").textContent += `[${formatClockTime(timestamp)}] ${arrow} ${badge}${text}\n`;
   };
 
   // Section GC3 (specs/phase4/group-chats.md): the group-conversation
@@ -982,6 +994,9 @@ export function initApp(doc, options) {
 
       const label = doc.createElement("span");
       label.textContent = `${record.displayName} (${record.sourceIdentifier})`;
+      if (record.pendingMessages?.length) {
+        label.textContent += ` ${t("import.pendingMessagesCount", { count: record.pendingMessages.length })}`;
+      }
       row.appendChild(label);
 
       if (record.matchedFingerprint) {
@@ -1025,6 +1040,37 @@ export function initApp(doc, options) {
     }
   }
 
+  /**
+   * Section I3 (specs/phase2b/import.md): picks a display name for a
+   * pending "imported history" record out of the parsed messages, since
+   * parseChatExport's return shape ({ timestamp, sender, text }[]) carries
+   * no separate chat/contact name. Heuristic (documented, not guaranteed
+   * accurate): the first sender that does NOT match the currently active
+   * profile's own nickname, so the label names "the other person" rather
+   * than "me" when that's determinable; falls back to the very first
+   * message's sender, then to a fixed placeholder for an empty batch.
+   */
+  function deriveImportedHistoryDisplayName(messages) {
+    const ownName = (state.nickname || "").trim().toLowerCase();
+    const other = messages.find((m) => (m.sender || "").trim().toLowerCase() !== ownName);
+    return (other || messages[0])?.sender || t("import.historyFallbackName");
+  }
+
+  /**
+   * Section I3: there is no cryptographic "sent by me via Spirit" vs
+   * "received via Spirit" distinction for historical import -- the message
+   * never went through this device's E2EE session. Best-effort heuristic:
+   * if the message's `sender` string matches the active profile's own
+   * nickname (case-insensitive, trimmed), treat it as "out"; otherwise (and
+   * whenever the own nickname isn't confidently known) default to "in".
+   * This is explicitly a heuristic, not a reliable authorship signal.
+   */
+  function inferImportedDirection(sender) {
+    const ownName = (state.nickname || "").trim().toLowerCase();
+    if (ownName && (sender || "").trim().toLowerCase() === ownName) return "out";
+    return "in";
+  }
+
   const importFileInput = el("import-file-input");
   if (importFileInput) {
     importFileInput.addEventListener("change", async () => {
@@ -1034,13 +1080,52 @@ export function initApp(doc, options) {
       const format = el("import-format")?.value || "vcard";
       try {
         const text = await file.text();
-        const parsed = parseContactList(text, format);
-        for (const entry of parsed) {
-          await saveImportedContact({
-            displayName: entry.displayName,
-            sourceIdentifier: entry.sourceIdentifier,
-            source: format
-          });
+        if (format === "whatsapp-txt") {
+          // History-only format (Section I3): WhatsApp .txt exports carry
+          // no structured contact list (see importParsers.js), so
+          // parseContactList is never attempted for this format -- only
+          // parseChatExport, with the parsed messages queued as a single
+          // pending "imported history" record awaiting manual match.
+          const messages = parseChatExport(text, format);
+          if (messages.length > 0) {
+            await saveImportedContact({
+              displayName: deriveImportedHistoryDisplayName(messages),
+              sourceIdentifier: t("import.historySourceIdentifier"),
+              source: format,
+              pendingMessages: messages
+            });
+          }
+        } else {
+          const parsed = parseContactList(text, format);
+          for (const entry of parsed) {
+            await saveImportedContact({
+              displayName: entry.displayName,
+              sourceIdentifier: entry.sourceIdentifier,
+              source: format
+            });
+          }
+          // The same Telegram-JSON export file commonly carries chat
+          // history alongside (or instead of) a contact list
+          // (docs/migration.md). Attempt parseChatExport on the SAME text
+          // too; a contacts-only export has no top-level `messages` array
+          // and parseChatExport throws -- that failure is EXPECTED and
+          // silently ignored here, it must not invalidate the successful
+          // contact import above.
+          if (format === "telegram-json") {
+            try {
+              const messages = parseChatExport(text, "telegram-json");
+              if (messages.length > 0) {
+                await saveImportedContact({
+                  displayName: deriveImportedHistoryDisplayName(messages),
+                  sourceIdentifier: t("import.historySourceIdentifier"),
+                  source: "telegram-json-history",
+                  pendingMessages: messages
+                });
+              }
+            } catch {
+              // Contacts-only Telegram export -- no messages array. Expected.
+            }
+          }
         }
         setImportStatus("");
       } catch (e) {
@@ -1060,7 +1145,33 @@ export function initApp(doc, options) {
       const select = row?.querySelector("select");
       const fingerprint = select?.value;
       if (!fingerprint) return;
-      await setMatchedFingerprint(matchButton.dataset.matchBtn, fingerprint);
+      const importedId = matchButton.dataset.matchBtn;
+      await setMatchedFingerprint(importedId, fingerprint);
+      // Section I3: this is the ONLY place parsed history messages get
+      // written into historyStore.js -- exclusively right after a manual
+      // match, never speculatively before one (docs/migration.md's
+      // manual-match invariant applies to imported history too).
+      const record = await getImportedContact(importedId);
+      if (record?.pendingMessages?.length) {
+        if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
+          for (const msg of record.pendingMessages) {
+            await appendMessage(state.identityKeyPair.vaultKey, state.senderKey, fingerprint, {
+              direction: inferImportedDirection(msg.sender),
+              text: msg.text,
+              timestamp: msg.timestamp,
+              imported: true
+            });
+          }
+          await clearPendingMessages(importedId);
+        } else {
+          // No persistent history without a vault key (ephemeral mode --
+          // historyStore.js is never written to there, docs/e2ee.md). Left
+          // unhandled, pendingMessages would be silently stranded once the
+          // record shows as matched (the Match UI disappears). Surface it
+          // instead of losing the imported history with no feedback.
+          setImportStatus(t("import.ephemeralHistorySkipped"));
+        }
+      }
       await renderImportedContactsScreen();
       return;
     }
@@ -1758,7 +1869,7 @@ export function initApp(doc, options) {
       if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
         const history = await listMessages(state.identityKeyPair.vaultKey, state.senderKey, verified.fingerprint);
         for (const entry of history) {
-          appendChat(entry.text, entry.direction, entry.timestamp);
+          appendChat(entry.text, entry.direction, entry.timestamp, entry.imported === true);
         }
       }
       // Section GC2 (specs/phase4/group-chats.md): if the connection that

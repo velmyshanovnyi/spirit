@@ -17,9 +17,21 @@ function randomImportedContactId() {
   return [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export async function saveImportedContact({ displayName, sourceIdentifier, source, now = Date.now() }) {
+export async function saveImportedContact({
+  displayName,
+  sourceIdentifier,
+  source,
+  pendingMessages = [],
+  now = Date.now()
+}) {
   const id = randomImportedContactId();
-  const record = { id, displayName, sourceIdentifier, source, importedAt: now, matchedFingerprint: null };
+  // pendingMessages (Section I3, specs/phase2b/import.md): parsed
+  // { timestamp, sender, text }[] chat-history entries from parseChatExport,
+  // held here -- NOT written to historyStore.js -- until this record is
+  // manually matched to a real Spirit contact (setMatchedFingerprint), same
+  // manual-only invariant docs/migration.md requires for the contact match
+  // itself. Empty for a contacts-only import.
+  const record = { id, displayName, sourceIdentifier, source, importedAt: now, matchedFingerprint: null, pendingMessages };
   await put("importedContacts", id, record);
   return record;
 }
@@ -44,6 +56,20 @@ export async function setMatchedFingerprint(id, fingerprint) {
     throw new Error(`Unknown imported contact: ${id}`);
   }
   await put("importedContacts", id, { ...existing, matchedFingerprint: fingerprint });
+}
+
+/**
+ * Clears the pending history batch after it has been written into
+ * historyStore.js (Section I3) -- called once, right after the match-time
+ * appendMessage loop, so a re-render/re-visit never re-writes the same
+ * messages again. Same orphan-record guard as setMatchedFingerprint.
+ */
+export async function clearPendingMessages(id) {
+  const existing = await get("importedContacts", id);
+  if (!existing) {
+    throw new Error(`Unknown imported contact: ${id}`);
+  }
+  await put("importedContacts", id, { ...existing, pendingMessages: [] });
 }
 
 export async function deleteImportedContact(id) {

@@ -29,6 +29,20 @@ describe("appendMessage", () => {
     expect(storedFlat).not.toContain("цілком таємно");
     expect(storedFlat).not.toContain("out");
   });
+
+  it("passes extra payload fields (e.g. imported: true, Section I3) through to storage without a schema change", async () => {
+    const vaultKey = await freshVaultKey();
+
+    await appendMessage(vaultKey, PROFILE, CONTACT_A, {
+      direction: "in",
+      text: "historical message",
+      timestamp: 1000,
+      imported: true
+    });
+
+    const messages = await listMessages(vaultKey, PROFILE, CONTACT_A);
+    expect(messages).toEqual([{ direction: "in", text: "historical message", timestamp: 1000, imported: true }]);
+  });
 });
 
 describe("listMessages", () => {

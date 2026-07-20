@@ -25,10 +25,13 @@
 - **Зашифрована історія повідомлень** (`historyStore.js`): AES-GCM під vault-ключем, per-profile/per-contact неймспейс, рендер історії при верифікації відомого контакта.
 - Онбординг-UX ([migration.md](migration.md)) — перенесено в наступні ітерації; латентне питання: per-profile scoping контактів (див. review Секції 15).
 
-### Фаза 2b — Опційний імпорт (не блокує Фазу 2)
+### Фаза 2b — Опційний імпорт (не блокує Фазу 2) ✅ ЗАВЕРШЕНО
 
-- Importer-модуль для контактів (Telegram/vCard/WhatsApp export) з ручною верифікацією збігів.
-- Importer-модуль для історії переписки (Telegram JSON / WhatsApp .txt), позначення імпортованих повідомлень як історичних.
+Специфікація та історія review — [specs/phase2b/import.md](../specs/phase2b/import.md) (Секції I1-I3).
+
+- Чисті парсери (`importParsers.js`): `parseContactList`/`parseChatExport` для Telegram JSON, vCard, WhatsApp (контакти й `.txt`-історія).
+- Importer-модуль для контактів: pending-стор `importedContacts.js` (окремий від `contacts.js`, без fingerprint до матчингу), UI на екрані «Контакти», ВИКЛЮЧНО ручна верифікація збігів (ніякого авто-матчингу за іменем/номером).
+- Importer-модуль для історії переписки: розпарсені повідомлення тримаються як `pendingMessages` того ж pending-запису до матчингу; після ручного підтвердження — запис у `historyStore.js` з `imported: true` (без зміни схеми стору), візуальна мітка "історичне (імпортоване)" в чат-лозі.
 - Деталі — [migration.md](migration.md).
 
 ### Фаза 2c — Опційна верифікація зовнішньої ідентичності ✅ ЗАВЕРШЕНО

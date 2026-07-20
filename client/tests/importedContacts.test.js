@@ -5,7 +5,8 @@ import {
   listImportedContacts,
   getImportedContact,
   setMatchedFingerprint,
-  deleteImportedContact
+  deleteImportedContact,
+  clearPendingMessages
 } from "../js/importedContacts.js";
 
 beforeEach(() => {
@@ -34,6 +35,20 @@ describe("saveImportedContact", () => {
     expect(record.importedAt).toBeLessThanOrEqual(after);
 
     expect(await getImportedContact(record.id)).toEqual(record);
+    expect(record.pendingMessages).toEqual([]);
+  });
+
+  it("stores pendingMessages (Section I3) alongside the record when provided", async () => {
+    const messages = [{ timestamp: 1000, sender: "Іван", text: "привіт" }];
+    const record = await saveImportedContact({
+      displayName: "Іван",
+      sourceIdentifier: "telegram chat export",
+      source: "telegram-json-history",
+      pendingMessages: messages
+    });
+
+    expect(record.pendingMessages).toEqual(messages);
+    expect((await getImportedContact(record.id)).pendingMessages).toEqual(messages);
   });
 
   it("generates a unique id per call even with identical fields", async () => {
@@ -83,6 +98,30 @@ describe("setMatchedFingerprint", () => {
 
   it("throws for an unknown id instead of creating an orphan record", async () => {
     await expect(setMatchedFingerprint("no-such-id", FP_A)).rejects.toThrow(/unknown imported contact/i);
+  });
+});
+
+describe("clearPendingMessages", () => {
+  it("empties pendingMessages while leaving every other field untouched", async () => {
+    const messages = [{ timestamp: 1000, sender: "Іван", text: "привіт" }];
+    const record = await saveImportedContact({
+      displayName: "Іван",
+      sourceIdentifier: "telegram chat export",
+      source: "telegram-json-history",
+      pendingMessages: messages
+    });
+    await setMatchedFingerprint(record.id, FP_A);
+
+    await clearPendingMessages(record.id);
+
+    const updated = await getImportedContact(record.id);
+    expect(updated.pendingMessages).toEqual([]);
+    expect(updated.matchedFingerprint).toBe(FP_A);
+    expect(updated.displayName).toBe("Іван");
+  });
+
+  it("throws for an unknown id instead of creating an orphan record", async () => {
+    await expect(clearPendingMessages("no-such-id")).rejects.toThrow(/unknown imported contact/i);
   });
 });
 

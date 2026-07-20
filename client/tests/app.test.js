@@ -90,7 +90,8 @@ vi.mock("../js/importedContacts.js", () => ({
   listImportedContacts: vi.fn().mockResolvedValue([]),
   getImportedContact: vi.fn(),
   setMatchedFingerprint: vi.fn(),
-  deleteImportedContact: vi.fn()
+  deleteImportedContact: vi.fn(),
+  clearPendingMessages: vi.fn()
 }));
 vi.mock("../js/importParsers.js", () => ({
   parseContactList: vi.fn(),
@@ -192,8 +193,8 @@ import { fetchProofPageText } from "../js/fetchProof.js";
 import { get as dbGet, put as dbPut } from "../js/db.js";
 import { appendMessage, listMessages, listConversations } from "../js/historyStore.js";
 import { createGroup, getGroup, listGroups, updateGroupMembers } from "../js/groups.js";
-import { saveImportedContact, listImportedContacts, setMatchedFingerprint, deleteImportedContact } from "../js/importedContacts.js";
-import { parseContactList } from "../js/importParsers.js";
+import { saveImportedContact, listImportedContacts, getImportedContact, setMatchedFingerprint, deleteImportedContact, clearPendingMessages } from "../js/importedContacts.js";
+import { parseContactList, parseChatExport } from "../js/importParsers.js";
 import { adminLogin, getAdminConfig } from "../js/adminAuth.js";
 import { bytesToMnemonic } from "../js/mnemonic.js";
 import { createKeyfile } from "../js/keyfile.js";
@@ -385,6 +386,7 @@ const HTML = `
         <option value="telegram-json">Telegram (JSON)</option>
         <option value="vcard">vCard (.vcf)</option>
         <option value="whatsapp">WhatsApp</option>
+        <option value="whatsapp-txt">WhatsApp (chat history)</option>
       </select>
       <input id="import-file-input" type="file">
       <div id="import-status"></div>
@@ -417,6 +419,7 @@ beforeEach(() => {
   listConversations.mockResolvedValue([]);
   listContacts.mockResolvedValue([]);
   listGroups.mockResolvedValue([]);
+  listImportedContacts.mockResolvedValue([]);
   generateAnonymousNickname.mockReturnValue("Тихий Привид");
   generateStrongPassword.mockReturnValue("alpha bravo charlie delta echo foxtrot");
   // Section F6/instant-lobby: entering the conversation screen fires a
@@ -3583,6 +3586,26 @@ describe("chat history wiring (Section 14)", () => {
     expect(listMessages).toHaveBeenCalledWith(VAULT_KEY, "profile-fp", "peer-fp");
   });
 
+  it("marks imported (Section I3) history with a visual badge, and leaves native messages unmarked", async () => {
+    listMessages.mockResolvedValue([
+      { direction: "in", text: "давнє імпортоване", timestamp: 1, imported: true },
+      { direction: "out", text: "нативне повідомлення", timestamp: 2 }
+    ]);
+
+    await verifiedProfileChat();
+
+    await vi.waitFor(() => {
+      const log = document.getElementById("chat-log").textContent;
+      expect(log).toContain("давнє імпортоване");
+      expect(log).toContain("нативне повідомлення");
+    });
+    const lines = document.getElementById("chat-log").textContent.trim().split("\n");
+    const importedLine = lines.find((line) => line.includes("давнє імпортоване"));
+    const nativeLine = lines.find((line) => line.includes("нативне повідомлення"));
+    expect(importedLine).toContain("імпортоване");
+    expect(nativeLine).not.toContain("імпортоване");
+  });
+
   it("writes nothing to history in ephemeral mode (send and receive)", async () => {
     generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("id-pub") });
     fingerprint.mockResolvedValue("sender-fp");
@@ -5040,6 +5063,191 @@ describe("contact import UI (Section I2, specs/phase2b/import.md)", () => {
     expect(row.querySelector("select")).toBeNull();
     expect(row.querySelector("[data-match-btn]")).toBeNull();
     expect(row.textContent).toContain("Друг");
+  });
+
+  it("selecting whatsapp-txt calls parseChatExport (not parseContactList) and creates a pending record carrying the parsed messages", async () => {
+    await bootstrap();
+    const messages = [
+      { timestamp: 1000, sender: "Оксана", text: "привіт" },
+      { timestamp: 2000, sender: "Оксана", text: "як справи" }
+    ];
+    parseChatExport.mockReturnValue(messages);
+    const saved = [];
+    saveImportedContact.mockImplementation(async (record) => {
+      const full = { id: "hist-1", matchedFingerprint: null, pendingMessages: [], ...record };
+      saved.push(full);
+      return full;
+    });
+    listImportedContacts.mockImplementation(async () => saved);
+
+    document.getElementById("import-format").value = "whatsapp-txt";
+    const file = new File(["chat export"], "chat.txt", { type: "text/plain" });
+    file.text = vi.fn().mockResolvedValue("chat export");
+    setImportFile(file);
+
+    await vi.waitFor(() => expect(parseChatExport).toHaveBeenCalledWith("chat export", "whatsapp-txt"));
+    expect(parseContactList).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(saveImportedContact).toHaveBeenCalledTimes(1));
+    expect(saveImportedContact).toHaveBeenCalledWith(
+      expect.objectContaining({ source: "whatsapp-txt", pendingMessages: messages, displayName: "Оксана" })
+    );
+  });
+
+  it("selecting telegram-json also attempts parseChatExport on the same file and creates a sibling history record when it succeeds", async () => {
+    await bootstrap();
+    parseContactList.mockReturnValue([{ displayName: "Іван", sourceIdentifier: "+380501234567" }]);
+    const historyMessages = [{ timestamp: 1000, sender: "Іван", text: "давнє" }];
+    parseChatExport.mockReturnValue(historyMessages);
+    const saved = [];
+    saveImportedContact.mockImplementation(async (record) => {
+      const full = { id: `id-${saved.length}`, matchedFingerprint: null, pendingMessages: [], ...record };
+      saved.push(full);
+      return full;
+    });
+    listImportedContacts.mockImplementation(async () => saved);
+
+    document.getElementById("import-format").value = "telegram-json";
+    const file = new File(["{}"], "export.json", { type: "application/json" });
+    file.text = vi.fn().mockResolvedValue("{}");
+    setImportFile(file);
+
+    await vi.waitFor(() => expect(parseContactList).toHaveBeenCalledWith("{}", "telegram-json"));
+    await vi.waitFor(() => expect(parseChatExport).toHaveBeenCalledWith("{}", "telegram-json"));
+    await vi.waitFor(() => expect(saveImportedContact).toHaveBeenCalledTimes(2));
+    expect(saveImportedContact).toHaveBeenCalledWith(
+      expect.objectContaining({ displayName: "Іван", sourceIdentifier: "+380501234567", source: "telegram-json" })
+    );
+    expect(saveImportedContact).toHaveBeenCalledWith(
+      expect.objectContaining({ pendingMessages: historyMessages, source: "telegram-json-history" })
+    );
+  });
+
+  it("a contacts-only telegram-json export (parseChatExport throws) still imports contacts successfully, with no extra history record", async () => {
+    await bootstrap();
+    parseContactList.mockReturnValue([{ displayName: "Іван", sourceIdentifier: "+380501234567" }]);
+    parseChatExport.mockImplementation(() => {
+      throw new Error("importParsers: Telegram chat export is missing the expected { messages: [...] } shape");
+    });
+    saveImportedContact.mockResolvedValue({ id: "id-0", matchedFingerprint: null, pendingMessages: [] });
+
+    document.getElementById("import-format").value = "telegram-json";
+    const file = new File(["{}"], "export.json", { type: "application/json" });
+    file.text = vi.fn().mockResolvedValue("{}");
+    setImportFile(file);
+
+    await vi.waitFor(() => expect(saveImportedContact).toHaveBeenCalledTimes(1));
+    expect(document.getElementById("import-status").textContent).toBe("");
+  });
+});
+
+describe("imported history (Section I3, specs/phase2b/import.md)", () => {
+  async function reachContactsAsProfile() {
+    createPermanentProfile.mockResolvedValue({
+      privateKey: { __tag: "profile-priv" },
+      publicKey: fakePublicKey("profile-pub"),
+      vaultKey: { __tag: "vault-key" }
+    });
+    fingerprint.mockResolvedValue("profile-fp");
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "pass";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("backup-step").hidden).toBe(false));
+    document.getElementById("btn-backup-skip").click();
+    location.hash = "#/contacts";
+    window.dispatchEvent(new Event("hashchange"));
+    await vi.waitFor(() => expect(listContacts).toHaveBeenCalled());
+  }
+
+  it("does NOT write to historyStore.js while a pending import is unmatched", async () => {
+    listImportedContacts.mockResolvedValue([
+      {
+        id: "pending-1",
+        displayName: "Іван",
+        sourceIdentifier: "telegram chat export",
+        source: "telegram-json-history",
+        importedAt: 1,
+        matchedFingerprint: null,
+        pendingMessages: [{ timestamp: 1000, sender: "Іван", text: "давнє" }]
+      }
+    ]);
+
+    await reachContactsAsProfile();
+
+    expect(appendMessage).not.toHaveBeenCalled();
+  });
+
+  it("writes pendingMessages into historyStore.js as imported:true under the matched fingerprint once the match completes", async () => {
+    const FP = "a".repeat(64);
+    listContacts.mockResolvedValue([{ fingerprint: FP, identityPubkeyWire: "W1", firstSeen: 1, deviceList: null, nickname: "Друг" }]);
+    const record = {
+      id: "pending-1",
+      displayName: "Іван",
+      sourceIdentifier: "telegram chat export",
+      source: "telegram-json-history",
+      importedAt: 1,
+      matchedFingerprint: null,
+      pendingMessages: [
+        { timestamp: 1000, sender: "Іван", text: "давнє повідомлення" }
+      ]
+    };
+    listImportedContacts.mockResolvedValue([record]);
+    getImportedContact.mockResolvedValue({ ...record, matchedFingerprint: FP });
+
+    await reachContactsAsProfile();
+
+    const row = document.querySelector("[data-imported-id='pending-1']");
+    const select = row.querySelector("select");
+    select.value = FP;
+    select.dispatchEvent(new Event("change"));
+    row.querySelector("[data-match-btn]").click();
+
+    await vi.waitFor(() => expect(setMatchedFingerprint).toHaveBeenCalledWith("pending-1", FP));
+    await vi.waitFor(() => expect(appendMessage).toHaveBeenCalled());
+    expect(appendMessage).toHaveBeenCalledWith(
+      { __tag: "vault-key" },
+      "profile-fp",
+      FP,
+      expect.objectContaining({ text: "давнє повідомлення", timestamp: 1000, imported: true })
+    );
+    expect(clearPendingMessages).toHaveBeenCalledWith("pending-1");
+  });
+
+  it("warns instead of silently dropping pendingMessages when matched with no vault key (ephemeral mode)", async () => {
+    const FP = "a".repeat(64);
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    listContacts.mockResolvedValue([{ fingerprint: FP, identityPubkeyWire: "W1", firstSeen: 1, deviceList: null, nickname: "Друг" }]);
+    const record = {
+      id: "pending-1",
+      displayName: "Іван",
+      sourceIdentifier: "telegram chat export",
+      source: "telegram-json-history",
+      importedAt: 1,
+      matchedFingerprint: null,
+      pendingMessages: [{ timestamp: 1000, sender: "Іван", text: "давнє" }]
+    };
+    listImportedContacts.mockResolvedValue([record]);
+    getImportedContact.mockResolvedValue({ ...record, matchedFingerprint: FP });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+    location.hash = "#/contacts";
+    window.dispatchEvent(new Event("hashchange"));
+    await vi.waitFor(() => expect(listContacts).toHaveBeenCalled());
+
+    await vi.waitFor(() => expect(document.querySelector("[data-imported-id='pending-1']")).not.toBeNull());
+    const row = document.querySelector("[data-imported-id='pending-1']");
+    const select = row.querySelector("select");
+    select.value = FP;
+    select.dispatchEvent(new Event("change"));
+    row.querySelector("[data-match-btn]").click();
+
+    await vi.waitFor(() => expect(setMatchedFingerprint).toHaveBeenCalledWith("pending-1", FP));
+    await vi.waitFor(() => expect(document.getElementById("import-status").textContent).not.toBe(""));
+    expect(appendMessage).not.toHaveBeenCalled();
+    expect(clearPendingMessages).not.toHaveBeenCalled();
   });
 });
 
