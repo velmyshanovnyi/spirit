@@ -370,6 +370,25 @@
         <div id="contacts-list" class="list-area"></div>
         <p id="contacts-empty" class="hint-text" data-i18n="contacts.empty">Поки що немає жодного контакту</p>
       </section>
+
+      <!-- Section GC2 (specs/phase4/group-chats.md): star/tree invite
+           topology -- selecting contacts here mints one 1:1 invite per
+           selected member, tagged with a shared groupId. Mirrors
+           #recovery-card's checkbox-list pattern (Section S2). -->
+      <section id="groups-card" class="card card-wide">
+        <h2 data-i18n="groups.heading">Групи</h2>
+        <label class="field"><span data-i18n="label.groupName">Назва групи:</span>
+          <input id="group-name" type="text">
+        </label>
+        <div id="group-contacts-list" class="list-area"></div>
+        <div class="btn-row"><button id="btn-create-group" type="button" class="btn-primary" data-i18n="btn.createGroup">Створити групу</button></div>
+        <div id="group-status" class="status"></div>
+        <div id="group-invite-links" class="secret-output" hidden></div>
+
+        <h3 data-i18n="groups.existing">Мої групи</h3>
+        <div id="groups-list" class="list-area"></div>
+        <p id="groups-empty" class="hint-text" data-i18n="groups.empty">Поки що немає жодної групи</p>
+      </section>
     </section>
 
     <!-- ================= Історія ================= -->

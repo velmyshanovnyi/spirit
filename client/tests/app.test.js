@@ -79,6 +79,12 @@ vi.mock("../js/historyStore.js", () => ({
   listMessages: vi.fn().mockResolvedValue([]),
   listConversations: vi.fn().mockResolvedValue([])
 }));
+vi.mock("../js/groups.js", () => ({
+  createGroup: vi.fn(),
+  getGroup: vi.fn(),
+  listGroups: vi.fn().mockResolvedValue([]),
+  updateGroupMembers: vi.fn()
+}));
 vi.mock("../js/adminAuth.js", () => ({
   adminLogin: vi.fn(),
   getAdminConfig: vi.fn(),
@@ -174,6 +180,7 @@ import { generateAnonymousNickname } from "../js/anonymousNickname.js";
 import { fetchProofPageText } from "../js/fetchProof.js";
 import { get as dbGet, put as dbPut } from "../js/db.js";
 import { appendMessage, listMessages, listConversations } from "../js/historyStore.js";
+import { createGroup, getGroup, listGroups, updateGroupMembers } from "../js/groups.js";
 import { adminLogin, getAdminConfig } from "../js/adminAuth.js";
 import { bytesToMnemonic } from "../js/mnemonic.js";
 import { createKeyfile } from "../js/keyfile.js";
@@ -345,6 +352,15 @@ const HTML = `
     <p id="contacts-empty"></p>
     <button id="btn-check-proofs-now" type="button">Перевірити зараз</button>
     <div id="proofs-check-status"></div>
+    <div id="groups-card">
+      <input id="group-name" type="text">
+      <div id="group-contacts-list"></div>
+      <button id="btn-create-group" type="button">Створити групу</button>
+      <div id="group-status"></div>
+      <div id="group-invite-links" hidden></div>
+      <div id="groups-list"></div>
+      <p id="groups-empty"></p>
+    </div>
   </section>
 
   <section data-screen="history">
@@ -370,6 +386,7 @@ beforeEach(() => {
   listMessages.mockResolvedValue([]);
   listConversations.mockResolvedValue([]);
   listContacts.mockResolvedValue([]);
+  listGroups.mockResolvedValue([]);
   generateAnonymousNickname.mockReturnValue("Тихий Привид");
   generateStrongPassword.mockReturnValue("alpha bravo charlie delta echo foxtrot");
   // Section F6/instant-lobby: entering the conversation screen fires a
@@ -5509,5 +5526,253 @@ describe("GC0: state.peers multi-connection refactor (specs/phase4/group-chats.m
     expect(state.sessionKey).toBeNull();
     expect(state.peerFingerprint).toBeNull();
     expect(state.isInviteOwner).toBe(false);
+  });
+});
+
+describe("GC2: group invite orchestration (specs/phase4/group-chats.md)", () => {
+  // Establishes a permanent-profile 1:1 chat exactly like the third test in
+  // "device-list transport" above (btn-create-profile, not the ephemeral
+  // btn-generate) -- group persistence (groups.js) is gated on vaultKey the
+  // same way contacts.js persistence is, so GC2's identity-announce-time
+  // group logic only runs in profile mode.
+  async function establishedProfileChat() {
+    createPermanentProfile.mockResolvedValue({
+      privateKey: { __tag: "profile-priv" },
+      publicKey: fakePublicKey("profile-pub"),
+      vaultKey: { __tag: "vault-key" }
+    });
+    fingerprint.mockResolvedValue("profile-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockImplementation(async (_key, text) => `ENC(${text})`);
+    dbGet.mockResolvedValue(undefined);
+    rememberContact.mockResolvedValue({ status: "new", contact: { deviceList: null } });
+
+    const channel = fakeChannel();
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    const api = initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "pass";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001profile-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(channel);
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+    return { ...api, captured, channel };
+  }
+
+  it("creating a group with N selected contacts mints one distinct invite flow per contact", async () => {
+    listContacts.mockResolvedValue([
+      { fingerprint: "fp-a", nickname: "Іван" },
+      { fingerprint: "fp-b", nickname: "Марія" }
+    ]);
+    getContact.mockImplementation(async (fp) => ({ fingerprint: fp, nickname: fp === "fp-a" ? "Іван" : "Марія" }));
+    createGroup.mockResolvedValue({ groupId: "group-1", name: "Друзі", memberFingerprints: ["fp-a", "fp-b"], createdAt: 1 });
+    createInvite
+      .mockResolvedValueOnce({ roomId: "room-a", inviteToken: "tok-a" })
+      .mockResolvedValueOnce({ roomId: "room-b", inviteToken: "tok-b" });
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: { __tag: "id-priv" }, publicKey: fakePublicKey("id-pub") });
+
+    const { state } = initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+
+    location.hash = "#/contacts";
+    window.dispatchEvent(new Event("hashchange"));
+    await vi.waitFor(() => expect(document.querySelectorAll("[data-group-contact-fingerprint]").length).toBe(2));
+
+    document.getElementById("group-name").value = "Друзі";
+    for (const checkbox of document.querySelectorAll("[data-group-contact-fingerprint]")) checkbox.checked = true;
+    document.getElementById("btn-create-group").click();
+
+    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledTimes(2));
+    expect(createGroup).toHaveBeenCalledWith({ name: "Друзі", memberFingerprints: ["fp-a", "fp-b"] });
+
+    // Only the FIRST selected contact gets a real, live, tagged
+    // state.peers entry -- running two concurrent initiator handshakes at
+    // once would corrupt each other's session completion (GC2 exec-review
+    // iter1 finding). The second contact's invite link was still minted
+    // (createInvite above was called twice), just without starting a
+    // session for it yet.
+    await vi.waitFor(() => expect(state.peers.size).toBe(1));
+    for (const entry of state.peers.values()) {
+      expect(entry.groupId).toBe("group-1");
+    }
+    // Exactly one real WebRTC handshake was started, not one per contact.
+    expect(startAsInitiator).toHaveBeenCalledTimes(1);
+
+    await vi.waitFor(() =>
+      expect(document.getElementById("group-invite-links").textContent).toContain("Іван")
+    );
+    expect(document.getElementById("group-invite-links").textContent).toContain("Марія");
+  });
+
+  it("a verified identity-announce on a groupId-tagged connection adds the member to the group and broadcasts to other same-group peers only", async () => {
+    const { state, captured, channel } = await establishedProfileChat();
+
+    // Tag the just-established connection with a group, as
+    // startTaggedGroupInvite would have done before the handshake began.
+    state.peers.get(state.activeConnectionId).groupId = "group-1";
+
+    getGroup.mockResolvedValue({ groupId: "group-1", name: "Друзі", memberFingerprints: [] });
+
+    // Another peer connected right now, tagged with the SAME group --
+    // should receive the broadcast.
+    const sameGroupChannel = { send: vi.fn() };
+    state.peers.set("other-same-group", {
+      pc: {}, channel: sameGroupChannel, sessionKey: "other-session-key", groupId: "group-1"
+    });
+    // A peer tagged with a DIFFERENT group -- must NOT receive it.
+    const differentGroupChannel = { send: vi.fn() };
+    state.peers.set("other-different-group", {
+      pc: {}, channel: differentGroupChannel, sessionKey: "other-session-key-2", groupId: "group-2"
+    });
+    // A plain 1:1 connection (groupId: null) -- must NOT receive it either.
+    const plainChannel = { send: vi.fn() };
+    state.peers.set("plain-1to1", { pc: {}, channel: plainChannel, sessionKey: "plain-session-key", groupId: null });
+    // A same-group entry with no live channel yet (half-open) -- must be
+    // skipped without throwing.
+    state.peers.set("half-open-same-group", { pc: {}, channel: null, sessionKey: null, groupId: "group-1" });
+
+    verifyIdentityAnnounce.mockResolvedValue({
+      identityPublicKey: {},
+      identityPubkeyWire: "PEER",
+      fingerprint: "peer-fp",
+      nickname: "Оксана"
+    });
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+
+    await vi.waitFor(() => expect(updateGroupMembers).toHaveBeenCalledWith("group-1", ["peer-fp"]));
+
+    await vi.waitFor(() =>
+      expect(sameGroupChannel.send).toHaveBeenCalledWith(
+        `ENC(${JSON.stringify({
+          type: "group-member-joined",
+          groupId: "group-1",
+          memberFingerprint: "peer-fp",
+          memberNickname: "Оксана"
+        })})`
+      )
+    );
+    expect(differentGroupChannel.send).not.toHaveBeenCalled();
+    expect(plainChannel.send).not.toHaveBeenCalled();
+    // half-open-same-group's null channel never threw and was simply skipped.
+  });
+
+  it("does not throw and still updates the group when there are zero other connected same-group peers", async () => {
+    const { state, captured } = await establishedProfileChat();
+    state.peers.get(state.activeConnectionId).groupId = "group-solo";
+    getGroup.mockResolvedValue({ groupId: "group-solo", name: "Solo", memberFingerprints: [] });
+    verifyIdentityAnnounce.mockResolvedValue({
+      identityPublicKey: {},
+      identityPubkeyWire: "PEER",
+      fingerprint: "peer-fp"
+    });
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+
+    await expect(captured.onMessage("ENCRYPTED_ANNOUNCE")).resolves.not.toThrow();
+    await vi.waitFor(() => expect(updateGroupMembers).toHaveBeenCalledWith("group-solo", ["peer-fp"]));
+  });
+
+  it("a plain (non-group) connection's identity-announce never touches group storage", async () => {
+    const { captured } = await establishedProfileChat();
+    // state.activeConnectionId's entry.groupId stays at its default null --
+    // no tagging performed for this test.
+    verifyIdentityAnnounce.mockResolvedValue({
+      identityPublicKey: {},
+      identityPubkeyWire: "PEER",
+      fingerprint: "peer-fp"
+    });
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+
+    expect(getGroup).not.toHaveBeenCalled();
+    expect(updateGroupMembers).not.toHaveBeenCalled();
+  });
+
+  describe("receiving an incoming group-member-joined control message", () => {
+    async function verifiedChatTaggedWith(groupId) {
+      const chat = await establishedProfileChat();
+      chat.state.peers.get(chat.state.activeConnectionId).groupId = groupId;
+      chat.verifiedFingerprint = "peer-fp";
+      verifyIdentityAnnounce.mockResolvedValue({
+        identityPublicKey: {},
+        identityPubkeyWire: "PEER",
+        fingerprint: chat.verifiedFingerprint
+      });
+      decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+      await chat.captured.onMessage("ENCRYPTED_ANNOUNCE");
+      getGroup.mockClear();
+      updateGroupMembers.mockClear();
+      return chat;
+    }
+
+    it("adds the new member to the local group record without a direct connection to them", async () => {
+      const { captured } = await verifiedChatTaggedWith("group-1");
+      getGroup.mockResolvedValue({ groupId: "group-1", name: "Друзі", memberFingerprints: ["peer-fp"] });
+
+      decryptMessage.mockResolvedValueOnce(
+        JSON.stringify({ type: "group-member-joined", groupId: "group-1", memberFingerprint: "new-fp", memberNickname: "Тарас" })
+      );
+      await captured.onMessage("ENCRYPTED_JOINED");
+
+      await vi.waitFor(() =>
+        expect(updateGroupMembers).toHaveBeenCalledWith("group-1", ["peer-fp", "new-fp"])
+      );
+    });
+
+    it("ignores a group-member-joined claiming a groupId this connection was never tagged with (spoofing gate)", async () => {
+      const { captured } = await verifiedChatTaggedWith("group-1");
+
+      decryptMessage.mockResolvedValueOnce(
+        JSON.stringify({ type: "group-member-joined", groupId: "some-other-group", memberFingerprint: "new-fp" })
+      );
+      await captured.onMessage("ENCRYPTED_JOINED");
+
+      expect(getGroup).not.toHaveBeenCalled();
+      expect(updateGroupMembers).not.toHaveBeenCalled();
+    });
+
+    it("silently ignores a group-member-joined for a group this device doesn't track locally", async () => {
+      const { captured } = await verifiedChatTaggedWith("group-unknown");
+      getGroup.mockResolvedValue(undefined);
+
+      decryptMessage.mockResolvedValueOnce(
+        JSON.stringify({ type: "group-member-joined", groupId: "group-unknown", memberFingerprint: "new-fp" })
+      );
+      await expect(captured.onMessage("ENCRYPTED_JOINED")).resolves.not.toThrow();
+
+      expect(updateGroupMembers).not.toHaveBeenCalled();
+    });
+
+    it("ignores a group-member-joined arriving before this connection's own peer identity is verified", async () => {
+      const { captured, channel } = await establishedProfileChat();
+      decryptMessage.mockResolvedValueOnce(
+        JSON.stringify({ type: "group-member-joined", groupId: "group-1", memberFingerprint: "new-fp" })
+      );
+      await captured.onMessage("ENCRYPTED_JOINED");
+
+      expect(getGroup).not.toHaveBeenCalled();
+      expect(updateGroupMembers).not.toHaveBeenCalled();
+      void channel; // unused, kept for symmetry with sibling tests
+    });
   });
 });

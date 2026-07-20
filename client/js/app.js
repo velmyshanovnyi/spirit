@@ -44,6 +44,7 @@ import { createProofBlock, parseProofBlock, verifyProofBlock } from "./proofs.js
 import { fetchProofPageText } from "./fetchProof.js";
 import { generateAnonymousNickname } from "./anonymousNickname.js";
 import { splitFileIntoChunks, chunkToBase64, base64ToChunk, computeFileHash, createFileAssembler } from "./fileTransfer.js";
+import { createGroup, getGroup, listGroups, updateGroupMembers } from "./groups.js";
 
 import {
   startAsInitiator,
@@ -438,6 +439,16 @@ export function initApp(doc, options) {
     el("invite-status").textContent = text;
   };
 
+  // Factored out of copyInviteLink so the GC2 group-invite flow (which
+  // never touches #room-id/#invite-token, since it may mint several
+  // invites in one action) can build the same link text.
+  function buildInviteLinkText(roomId, inviteToken) {
+    const link = new URL(doc.defaultView.location.pathname, doc.defaultView.location.origin);
+    link.search = `?room=${encodeURIComponent(roomId)}&token=${encodeURIComponent(inviteToken)}`;
+    link.hash = "#/room";
+    return link.toString();
+  }
+
   function copyInviteLink() {
     const roomId = el("room-id").value;
     const inviteToken = el("invite-token").value;
@@ -445,10 +456,7 @@ export function initApp(doc, options) {
       setInviteStatus(t("room.inviteMissing"));
       return;
     }
-    const link = new URL(doc.defaultView.location.pathname, doc.defaultView.location.origin);
-    link.search = `?room=${encodeURIComponent(roomId)}&token=${encodeURIComponent(inviteToken)}`;
-    link.hash = "#/room";
-    const linkText = link.toString();
+    const linkText = buildInviteLinkText(roomId, inviteToken);
 
     el("invite-link-display").textContent = linkText;
     setInviteStatus(t("room.inviteCopied"));
@@ -765,6 +773,132 @@ export function initApp(doc, options) {
     await initiateChatSession({ pushToContact: contact ?? null });
   });
 
+  const setGroupStatus = (text) => {
+    const status = el("group-status");
+    if (status) status.textContent = text;
+  };
+
+  /**
+   * Section GC2: renders the "create group" contact checkboxes (mirrors
+   * #recovery-contacts-list's pattern exactly, Section S2) plus the list of
+   * already-created groups, each with a per-group "add member" contact
+   * picker for contacts not already in that group's roster.
+   */
+  async function renderGroupsCard() {
+    const card = el("groups-card");
+    if (!card) return;
+    const contacts = await listContacts();
+
+    const createList = el("group-contacts-list");
+    if (createList) {
+      createList.innerHTML = "";
+      for (const contact of contacts) {
+        const row = doc.createElement("label");
+        row.className = "field checkbox-field";
+        const checkbox = doc.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.dataset.groupContactFingerprint = contact.fingerprint;
+        const span = doc.createElement("span");
+        span.textContent = contact.nickname ? `${contact.nickname} (${formatSpiritId(contact.fingerprint)})` : formatSpiritId(contact.fingerprint);
+        row.appendChild(checkbox);
+        row.appendChild(span);
+        createList.appendChild(row);
+      }
+    }
+
+    const groupsList = el("groups-list");
+    const groupsEmpty = el("groups-empty");
+    if (groupsList) {
+      const groups = await listGroups();
+      groupsList.innerHTML = "";
+      if (groupsEmpty) groupsEmpty.hidden = groups.length > 0;
+      for (const group of groups) {
+        const row = doc.createElement("div");
+        row.className = "list-row";
+        const label = doc.createElement("span");
+        label.textContent = `${group.name} (${group.memberFingerprints.length})`;
+        row.appendChild(label);
+
+        const addable = contacts.filter((c) => !group.memberFingerprints.includes(c.fingerprint));
+        if (addable.length > 0) {
+          const select = doc.createElement("select");
+          select.dataset.addMemberSelect = group.groupId;
+          for (const contact of addable) {
+            const option = doc.createElement("option");
+            option.value = contact.fingerprint;
+            option.textContent = contact.nickname ? `${contact.nickname} (${formatSpiritId(contact.fingerprint)})` : formatSpiritId(contact.fingerprint);
+            select.appendChild(option);
+          }
+          row.appendChild(select);
+          const addButton = doc.createElement("button");
+          addButton.type = "button";
+          addButton.textContent = t("btn.addMember");
+          addButton.dataset.addMemberBtn = group.groupId;
+          row.appendChild(addButton);
+        }
+        groupsList.appendChild(row);
+      }
+    }
+  }
+
+  if (el("btn-create-group")) withBusyButton(el("btn-create-group"), async () => {
+    const name = el("group-name").value.trim();
+    const selected = [...doc.querySelectorAll("[data-group-contact-fingerprint]:checked")].map(
+      (checkbox) => checkbox.dataset.groupContactFingerprint
+    );
+    if (!name || selected.length === 0) {
+      setGroupStatus(t("groups.needNameAndMembers"));
+      return;
+    }
+    if (!state.senderKey) {
+      setGroupStatus(t("status.createAccountFirst"));
+      return;
+    }
+    const group = await createGroup({ name, memberFingerprints: selected });
+    const lines = [];
+    // GC2 exec-review iter1 finding: only the FIRST selected contact gets a
+    // real, live, listening session right now (startLiveSession: true) --
+    // see startTaggedGroupInvite's doc comment for why running several
+    // concurrent initiator handshakes would corrupt each other's session
+    // state. Every other selected contact's invite link is minted
+    // (createInvite only) for the owner to share out-of-band and connect
+    // to individually later, one at a time.
+    for (let i = 0; i < selected.length; i++) {
+      const fingerprint = selected[i];
+      const contact = await getContact(fingerprint);
+      const memberLabel = contact?.nickname || formatSpiritId(fingerprint);
+      const { roomId, inviteToken } = await startTaggedGroupInvite({ groupId: group.groupId, startLiveSession: i === 0 });
+      lines.push(t("groups.inviteLine", { name: memberLabel, link: buildInviteLinkText(roomId, inviteToken) }));
+    }
+    const linksEl = el("group-invite-links");
+    if (linksEl) {
+      linksEl.hidden = false;
+      linksEl.textContent = lines.join("\n");
+    }
+    el("group-name").value = "";
+    setGroupStatus(t("groups.created", { name }));
+    await renderGroupsCard();
+  });
+
+  el("groups-list")?.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-add-member-btn]");
+    if (!button) return;
+    const groupId = button.dataset.addMemberBtn;
+    const select = doc.querySelector(`[data-add-member-select="${groupId}"]`);
+    const fingerprint = select?.value;
+    if (!fingerprint) return;
+    const contact = await getContact(fingerprint);
+    const memberLabel = contact?.nickname || formatSpiritId(fingerprint);
+    const { roomId, inviteToken } = await startTaggedGroupInvite({ groupId });
+    const linksEl = el("group-invite-links");
+    if (linksEl) {
+      linksEl.hidden = false;
+      linksEl.textContent = t("groups.inviteLine", { name: memberLabel, link: buildInviteLinkText(roomId, inviteToken) });
+    }
+    setGroupStatus(t("groups.memberAdded", { name: memberLabel }));
+    await renderGroupsCard();
+  });
+
   /**
    * Re-checks every contact's held proofs against their live publication --
    * called on demand ("Перевірити зараз") and on the periodic timer below.
@@ -801,7 +935,10 @@ export function initApp(doc, options) {
       }
     }
     const route = win.location.hash.replace(/^#\/?/, "");
-    if (route === "contacts") await renderContactsScreen();
+    if (route === "contacts") {
+      await renderContactsScreen();
+      await renderGroupsCard();
+    }
   }
 
   async function renderHistoryScreen() {
@@ -962,7 +1099,10 @@ export function initApp(doc, options) {
   const win = doc.defaultView;
   const onScreenChange = () => {
     const route = win.location.hash.replace(/^#\/?/, "");
-    if (route === "contacts") renderContactsScreen();
+    if (route === "contacts") {
+      renderContactsScreen();
+      renderGroupsCard();
+    }
     if (route === "history") renderHistoryScreen();
     if (route === "profile") renderOwnProofsList();
     if (route === "conversation") renderEphemeralBanner();
@@ -995,7 +1135,8 @@ export function initApp(doc, options) {
     "file-offer",
     "file-accept",
     "file-reject",
-    "file-chunk"
+    "file-chunk",
+    "group-member-joined"
   ]);
 
   // Section FT2 (specs/phase4/file-transfer.md), architectural decisions:
@@ -1160,6 +1301,38 @@ export function initApp(doc, options) {
     }
   }
 
+  // Section GC2: best-effort fan-out of "a new member joined group X" to
+  // every OTHER state.peers entry tagged with the same groupId that
+  // currently has a live channel + sessionKey. Star/tree invite topology
+  // (spec's own scope-narrowing, 2026-07-18): this does NOT reach every
+  // group member, only whoever this device happens to be directly
+  // connected to right now -- consistent with the existing device-list/
+  // recovery-share "announce to whoever is there" philosophy. Never
+  // throws: a send failure on one peer must not stop the others from
+  // being notified, and having zero other same-group peers connected
+  // (the common case for a freshly created group) is not an error.
+  async function broadcastGroupMemberJoined(groupId, memberFingerprint, memberNickname) {
+    const joinedConnectionId = state.activeConnectionId;
+    for (const [connectionId, peer] of state.peers) {
+      if (connectionId === joinedConnectionId) continue; // skip the connection that just joined
+      if (peer.groupId !== groupId) continue;
+      if (!peer.channel || !peer.sessionKey) continue; // half-open/half-torn-down -- nothing to send on
+      try {
+        peer.channel.send(
+          await encryptMessage(peer.sessionKey, JSON.stringify({
+            type: "group-member-joined",
+            groupId,
+            memberFingerprint,
+            memberNickname
+          }))
+        );
+      } catch {
+        // Best-effort broadcast -- one peer's send failure must not block
+        // notifying the rest.
+      }
+    }
+  }
+
   async function drainRecoveryShareOutboxForPeer(peerFingerprint) {
     if (!state.identityKeyPair || !state.identityKeyPair.vaultKey || !state.channel || !state.sessionKey) return;
     const key = recoveryShareOutboxKey(state.senderKey);
@@ -1303,6 +1476,23 @@ export function initApp(doc, options) {
           appendChat(entry.text, entry.direction, entry.timestamp);
         }
       }
+      // Section GC2 (specs/phase4/group-chats.md): if the connection that
+      // just verified this peer's identity was tagged with a groupId (a
+      // group-invite session, see startTaggedGroupInvite below), record the
+      // new member in that group's local roster and best-effort notify any
+      // OTHER currently-connected members of the same group. Gated on
+      // permanent-profile mode, same as rememberContact just above -- there
+      // is no group storage to update in ephemeral mode.
+      if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
+        const joinedGroupId = getActivePeer()?.groupId;
+        if (joinedGroupId) {
+          const group = await getGroup(joinedGroupId);
+          if (group && !group.memberFingerprints.includes(verified.fingerprint)) {
+            await updateGroupMembers(joinedGroupId, [...group.memberFingerprints, verified.fingerprint]);
+          }
+          await broadcastGroupMemberJoined(joinedGroupId, verified.fingerprint, verified.nickname || null);
+        }
+      }
       // Section S2: this peer may be owed a still-pending recovery-share
       // announce from an earlier setup where they weren't connected yet.
       await drainRecoveryShareOutboxForPeer(verified.fingerprint);
@@ -1355,6 +1545,30 @@ export function initApp(doc, options) {
       const parsed = parseRecoveryShareAnnounce(control);
       if (!parsed) return;
       await saveTrustedShare({ ownerFingerprint: state.peerFingerprint, ...parsed, receivedAt: Date.now() });
+      return;
+    }
+
+    if (control.type === "group-member-joined") {
+      // Section GC2 trust gate -- same shape as every other *-announce:
+      // meaningless before THIS connection's own peer identity is verified,
+      // pointless in ephemeral mode (nothing persists). On top of that,
+      // this control message makes a claim about a THIRD party (not the
+      // sender itself), so two more checks are required before trusting it:
+      // (1) the connection it arrived on must actually be tagged with the
+      // groupId being claimed -- a peer cannot inject membership for a
+      // group it was never invited into via a mismatched/forged groupId;
+      // (2) the group must already exist locally -- learning about a group
+      // this device isn't tracking is silently ignored, since there is
+      // nothing sensible to attach an unknown member to.
+      if (!state.peerFingerprint || !state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
+      if (typeof control.groupId !== "string" || typeof control.memberFingerprint !== "string") return;
+      const activePeerEntry = getActivePeer();
+      if (!activePeerEntry || activePeerEntry.groupId !== control.groupId) return;
+      const group = await getGroup(control.groupId);
+      if (!group) return;
+      if (!group.memberFingerprints.includes(control.memberFingerprint)) {
+        await updateGroupMembers(control.groupId, [...group.memberFingerprints, control.memberFingerprint]);
+      }
       return;
     }
 
@@ -2353,6 +2567,79 @@ export function initApp(doc, options) {
       },
       onSessionReady: announce
     });
+  }
+
+  /**
+   * Section GC2 (specs/phase4/group-chats.md): mints one 1:1 invite tagged
+   * with `groupId`, used both by group creation (once per initial member)
+   * and by "add member to an existing group" (once, for a single new
+   * contact). Deliberately does NOT call enterConversationLobby/navigate
+   * anywhere -- per the spec's own scope-narrowing (2026-07-18, star/tree
+   * invite topology, no presence detection), inviting several people to a
+   * group is NOT "connect to N people at once from one UI action"; it's
+   * "mint N one-shot invite links, shown as copyable text, joined
+   * asynchronously whenever convenient". Unlike initiateChatSession, this
+   * ALWAYS creates a brand-new state.peers entry (never reuses whatever is
+   * currently active) so it never clobbers an unrelated 1:1 conversation
+   * the user might already be in.
+   *
+   * `startLiveSession` (GC2 exec-review iter1 finding): the app's
+   * PEER_PROXY_FIELDS/wireChannelCallbacks machinery (Section GC0) reads
+   * and writes every per-connection field through "whichever entry is
+   * CURRENTLY active" -- correct and race-free as long as at most one
+   * initiator handshake is ever pending at a time (true for every existing
+   * 1:1 flow). Starting a SECOND real startInitiatorSession while the first
+   * is still awaiting pollForAnswer would move activeConnectionId out from
+   * under it, so the first handshake's eventual completion (sessionKey,
+   * chain keys, even which pc gets the remote answer applied) would land on
+   * the SECOND entry instead -- silent session corruption. Rather than
+   * rebuild the whole active-connection model into a per-connectionId
+   * router (a GC3-scale change, out of scope here), GC2 keeps this
+   * invariant intact: only ONE contact per group-invite action gets a real,
+   * live, listening WebRTC session (`startLiveSession: true`, tagged and
+   * wired exactly like a normal 1:1 invite); every other selected contact
+   * only gets its invite link MINTED (a plain createInvite() call, no
+   * session, no state.peers entry) for the owner to share out-of-band --
+   * consistent with the spec's own note that group-invite joining happens
+   * "sequentially/asynchronously", not simultaneously.
+   */
+  async function startTaggedGroupInvite({ groupId, startLiveSession = true }) {
+    const serverUrl = el("server-url").value;
+    const senderKey = state.senderKey;
+
+    if (!startLiveSession) {
+      return createInvite(serverUrl, senderKey, { onPowStart: () => setGroupStatus(t("status.solvingPow")) });
+    }
+
+    const rtcConfig = buildRtcConfig(el("stun-url").value, { forceTurnRelay: el("force-turn-relay").checked });
+    const ecdhKeyPair = await generateEcdhKeyPair();
+    const { roomId, inviteToken } = await createInvite(serverUrl, senderKey, {
+      onPowStart: () => setGroupStatus(t("status.solvingPow"))
+    });
+
+    const connectionId = randomConnectionId();
+    const entry = createPeerEntry();
+    entry.groupId = groupId;
+    state.peers.set(connectionId, entry);
+    state.activeConnectionId = connectionId;
+
+    const announce = makeIdentityAnnouncer();
+    startInitiatorSession({
+      senderKey,
+      ecdhKeyPair,
+      roomId,
+      inviteToken,
+      serverUrl,
+      rtcConfig,
+      channelOptions: {
+        afterChannelOpen: () => {
+          announce();
+        }
+      },
+      onSessionReady: announce
+    });
+
+    return { roomId, inviteToken };
   }
 
   withBusyButton(el("btn-initiate"), async () => {
