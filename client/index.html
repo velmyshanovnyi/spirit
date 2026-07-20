@@ -351,6 +351,13 @@
         </div>
         <div id="video-status" class="status"></div>
 
+        <!-- Section GC3 (specs/phase4/group-chats.md), design point 5: a
+             group conversation is routed into this SAME screen (state.activeGroupId)
+             rather than a separate one -- #group-conversation-heading/#group-chat-log
+             are shown instead of the plain 1:1 #chat-log while a group is open,
+             toggled by openGroupConversation()/enterConversationLobby(). -->
+        <h3 id="group-conversation-heading" hidden></h3>
+        <div id="group-chat-log" class="chat-log" hidden></div>
         <div id="chat-log" class="chat-log"></div>
         <div class="chat-input-row">
           <input id="message-input" type="text" data-i18n-placeholder="chat.placeholder">

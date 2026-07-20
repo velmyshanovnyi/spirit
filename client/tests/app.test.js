@@ -341,6 +341,8 @@ const HTML = `
     <button id="btn-toggle-camera" type="button"></button>
     <button id="btn-toggle-mic" type="button"></button>
     <div id="video-status"></div>
+    <h3 id="group-conversation-heading" hidden></h3>
+    <div id="group-chat-log" hidden></div>
     <div id="chat-log"></div>
     <input id="message-input" type="text">
     <button id="btn-send" type="button">Надіслати</button>
@@ -5774,5 +5776,246 @@ describe("GC2: group invite orchestration (specs/phase4/group-chats.md)", () => 
       expect(updateGroupMembers).not.toHaveBeenCalled();
       void channel; // unused, kept for symmetry with sibling tests
     });
+  });
+});
+
+describe("GC3: fan-out send + group UI (specs/phase4/group-chats.md)", () => {
+  // Same establishedProfileChat helper as the GC2 describe block above --
+  // duplicated locally (each describe block is self-contained in this file's
+  // existing style) rather than shared across describes.
+  async function establishedProfileChat() {
+    createPermanentProfile.mockResolvedValue({
+      privateKey: { __tag: "profile-priv" },
+      publicKey: fakePublicKey("profile-pub"),
+      vaultKey: { __tag: "vault-key" }
+    });
+    fingerprint.mockResolvedValue("profile-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockImplementation(async (_key, text) => `ENC(${text})`);
+    dbGet.mockResolvedValue(undefined);
+    rememberContact.mockResolvedValue({ status: "new", contact: { deviceList: null } });
+
+    const channel = fakeChannel();
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    const api = initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "pass";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001profile-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(channel);
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+    return { ...api, captured, channel };
+  }
+
+  it("a joiner arriving via an invite link with a group param tags its OWN connection with that groupId (closes the GC2 review gap)", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    generateAnonymousNickname.mockReturnValue("Спритна Тінь");
+    getOffer.mockResolvedValue({ offer: JSON.stringify({ type: "offer", sdp: "OFFER_SDP" }), ecdhPubkey: "peer-ecdh-b64" });
+
+    let captured;
+    startAsJoiner.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    const { state } = initApp(document, {
+      locale: "uk",
+      locationSearch: "?room=room-from-link&token=token-from-link&group=group-xyz"
+    });
+
+    await vi.waitFor(() => expect(startAsJoiner).toHaveBeenCalled());
+    expect(state.activeConnectionId).toBeTruthy();
+    expect(state.peers.get(state.activeConnectionId).groupId).toBe("group-xyz");
+    void captured;
+  });
+
+  it("does not tag the joiner's connection when the invite link carries no group param (plain 1:1, unaffected)", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    generateAnonymousNickname.mockReturnValue("Тихий Привид");
+    getOffer.mockResolvedValue({ offer: JSON.stringify({ type: "offer", sdp: "OFFER_SDP" }), ecdhPubkey: "peer-ecdh-b64" });
+    startAsJoiner.mockImplementation(() => ({ __fakePc: true }));
+
+    const { state } = initApp(document, { locale: "uk", locationSearch: "?room=room-from-link&token=token-from-link" });
+
+    await vi.waitFor(() => expect(startAsJoiner).toHaveBeenCalled());
+    expect(state.peers.get(state.activeConnectionId).groupId).toBeNull();
+  });
+
+  describe("sendGroupMessage fan-out (via the groups-list open + btn-send UI flow)", () => {
+    async function openedGroupConversationWithPeers() {
+      const chat = await establishedProfileChat();
+      chat.state.peers.get(chat.state.activeConnectionId).groupId = "group-1";
+
+      const sameGroupChannel2 = { send: vi.fn() };
+      chat.state.peers.set("same-group-2", {
+        pc: {}, channel: sameGroupChannel2, sessionKey: "session-key-2", groupId: "group-1"
+      });
+      const differentGroupChannel = { send: vi.fn() };
+      chat.state.peers.set("different-group", {
+        pc: {}, channel: differentGroupChannel, sessionKey: "session-key-3", groupId: "group-2"
+      });
+      const halfOpenSameGroup = { send: vi.fn() };
+      chat.state.peers.set("half-open-same-group", {
+        pc: {}, channel: null, sessionKey: null, groupId: "group-1"
+      });
+      void halfOpenSameGroup;
+
+      listGroups.mockResolvedValue([{ groupId: "group-1", name: "Друзі", memberFingerprints: [] }]);
+
+      location.hash = "#/contacts";
+      window.dispatchEvent(new Event("hashchange"));
+      await vi.waitFor(() => expect(document.querySelector('[data-open-group-btn="group-1"]')).toBeTruthy());
+      document.querySelector('[data-open-group-btn="group-1"]').click();
+      await vi.waitFor(() => expect(document.getElementById("group-chat-log").hidden).toBe(false));
+
+      return { ...chat, sameGroupChannel2, differentGroupChannel };
+    }
+
+    it("encrypts and sends the IDENTICAL plaintext to every matching-groupId connected peer, and makes exactly ONE local append/render call", async () => {
+      const { channel: firstChannel, sameGroupChannel2, differentGroupChannel } = await openedGroupConversationWithPeers();
+
+      document.getElementById("message-input").value = "Привіт усім";
+      document.getElementById("btn-send").click();
+
+      await vi.waitFor(() => expect(firstChannel.send).toHaveBeenCalledWith(
+        `ENC(${JSON.stringify({ type: "group-message", groupId: "group-1", text: "Привіт усім" })})`
+      ));
+      expect(sameGroupChannel2.send).toHaveBeenCalledWith(
+        `ENC(${JSON.stringify({ type: "group-message", groupId: "group-1", text: "Привіт усім" })})`
+      );
+      // A peer tagged with a DIFFERENT group never receives it.
+      expect(differentGroupChannel.send).not.toHaveBeenCalled();
+
+      // Exactly one local append -- not one per recipient (2 live recipients above).
+      await vi.waitFor(() => expect(appendMessage).toHaveBeenCalledTimes(1));
+      expect(appendMessage).toHaveBeenCalledWith({ __tag: "vault-key" }, "profile-fp", "group-1", {
+        direction: "out",
+        text: "Привіт усім",
+        timestamp: expect.any(Number)
+      });
+      expect(document.getElementById("group-chat-log").textContent).toContain("Привіт усім");
+      // Not leaked into the 1:1 chat log.
+      expect(document.getElementById("chat-log").textContent).not.toContain("Привіт усім");
+    });
+  });
+
+  describe("receiving an incoming group-message control message", () => {
+    async function verifiedChatTaggedWith(groupId) {
+      const chat = await establishedProfileChat();
+      chat.state.peers.get(chat.state.activeConnectionId).groupId = groupId;
+      verifyIdentityAnnounce.mockResolvedValue({
+        identityPublicKey: {},
+        identityPubkeyWire: "PEER",
+        fingerprint: "peer-fp",
+        nickname: "Оксана"
+      });
+      decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+      await chat.captured.onMessage("ENCRYPTED_ANNOUNCE");
+      appendMessage.mockClear();
+      return chat;
+    }
+
+    it("renders into the group UI container (not the 1:1 chat-log) and stores it under the group's history namespace", async () => {
+      const { captured } = await verifiedChatTaggedWith("group-1");
+      getGroup.mockResolvedValue({ groupId: "group-1", name: "Друзі", memberFingerprints: ["peer-fp"] });
+      getContact.mockResolvedValue({ fingerprint: "peer-fp", nickname: "Оксана" });
+      decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "group-message", groupId: "group-1", text: "Всім привіт" }));
+
+      await captured.onMessage("ENCRYPTED_GROUP_MSG");
+
+      await vi.waitFor(() => expect(document.getElementById("group-chat-log").textContent).toContain("Всім привіт"));
+      expect(document.getElementById("group-chat-log").textContent).toContain("Оксана");
+      expect(document.getElementById("chat-log").textContent).not.toContain("Всім привіт");
+      expect(appendMessage).toHaveBeenCalledWith({ __tag: "vault-key" }, "profile-fp", "group-1", {
+        direction: "in",
+        text: JSON.stringify({ senderFingerprint: "peer-fp", senderNickname: "Оксана", body: "Всім привіт" }),
+        timestamp: expect.any(Number)
+      });
+    });
+
+    it("ignores a group-message arriving before this connection's own peer identity is verified", async () => {
+      const { captured } = await establishedProfileChat();
+      decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "group-message", groupId: "group-1", text: "spoofed" }));
+
+      await captured.onMessage("ENCRYPTED_GROUP_MSG");
+
+      expect(document.getElementById("group-chat-log").textContent).not.toContain("spoofed");
+      expect(appendMessage).not.toHaveBeenCalled();
+    });
+
+    it("ignores a group-message claiming a groupId this connection was never tagged with (anti-spoofing gate)", async () => {
+      const { captured } = await verifiedChatTaggedWith("group-1");
+      decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "group-message", groupId: "some-other-group", text: "spoofed" }));
+
+      await captured.onMessage("ENCRYPTED_GROUP_MSG");
+
+      expect(document.getElementById("group-chat-log").textContent).not.toContain("spoofed");
+      expect(appendMessage).not.toHaveBeenCalled();
+    });
+
+    it("ignores a group-message on a plain (non-group) connection", async () => {
+      const { captured } = await verifiedChatTaggedWith(null);
+      decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "group-message", groupId: "group-1", text: "spoofed" }));
+
+      await captured.onMessage("ENCRYPTED_GROUP_MSG");
+
+      expect(document.getElementById("group-chat-log").textContent).not.toContain("spoofed");
+      expect(appendMessage).not.toHaveBeenCalled();
+    });
+
+    it("silently ignores a group-message for a group this device doesn't track locally (GC3 exec-review iter1 finding, consistent with group-member-joined's own guard)", async () => {
+      const { captured } = await verifiedChatTaggedWith("group-unknown");
+      getGroup.mockResolvedValue(undefined);
+      decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "group-message", groupId: "group-unknown", text: "hello" }));
+
+      await expect(captured.onMessage("ENCRYPTED_GROUP_MSG")).resolves.not.toThrow();
+
+      expect(document.getElementById("group-chat-log").textContent).not.toContain("hello");
+      expect(appendMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  it("renders listGroups()'s contents in the groups list UI and opens the right conversation on click", async () => {
+    listContacts.mockResolvedValue([]);
+    listGroups.mockResolvedValue([
+      { groupId: "group-a", name: "Робота", memberFingerprints: ["fp-1", "fp-2"] },
+      { groupId: "group-b", name: "Друзі", memberFingerprints: [] }
+    ]);
+    fingerprint.mockResolvedValue("sender-fp");
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: { __tag: "id-priv" }, publicKey: fakePublicKey("id-pub") });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+
+    location.hash = "#/contacts";
+    window.dispatchEvent(new Event("hashchange"));
+    await vi.waitFor(() => expect(document.getElementById("groups-list").textContent).toContain("Робота"));
+    expect(document.getElementById("groups-list").textContent).toContain("Друзі");
+
+    document.querySelector('[data-open-group-btn="group-b"]').click();
+    await vi.waitFor(() => expect(document.getElementById("group-conversation-heading").hidden).toBe(false));
+    expect(document.getElementById("group-conversation-heading").textContent).toContain("Друзі");
+    expect(document.getElementById("group-chat-log").hidden).toBe(false);
+    expect(document.getElementById("chat-log").hidden).toBe(true);
   });
 });

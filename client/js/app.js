@@ -161,6 +161,12 @@ export function initApp(doc, options) {
   const joinParams = new URLSearchParams(locationSearch);
   const invitedRoomId = joinParams.get("room");
   const invitedToken = joinParams.get("token");
+  // Section GC3 (specs/phase4/group-chats.md): closes the GC2 review gap
+  // (specs/reviews/group-chats-GC2-iter1.md) -- an invite link minted by
+  // startTaggedGroupInvite (GC2) now carries this alongside room/token, so
+  // the JOINER's own state.peers entry can be tagged with the same groupId
+  // the inviter tagged their side with, symmetrically.
+  const invitedGroupId = joinParams.get("group");
   const cameFromInviteLink = !!(invitedRoomId && invitedToken);
   if (cameFromInviteLink) {
     el("room-id").value = invitedRoomId;
@@ -264,7 +270,18 @@ export function initApp(doc, options) {
     // Inbound file-offers awaiting the user's accept/reject decision, keyed
     // by fileId -- distinct from incomingFileTransfers so an unaccepted
     // offer never has an assembler (and therefore can never accept chunks).
-    pendingFileOffers: {}
+    pendingFileOffers: {},
+    // Section GC3 (specs/phase4/group-chats.md): which group's conversation
+    // (if any) the shared conversation-screen UI is currently routed to --
+    // null means "ordinary 1:1 chat" (the pre-GC3 default). Set by
+    // openGroupConversation(), cleared by enterConversationLobby() (every
+    // 1:1 session-entry path routes through there).
+    activeGroupId: null,
+    // Section GC3 exec-review iter1 finding: serializes wireChannelCallbacks'
+    // onMessage across EVERY connection (see its own comment below) so
+    // activeConnectionId is never rebound by two overlapping in-flight
+    // message dispatches at once.
+    messageDispatchLock: Promise.resolve()
   };
 
   // Section GC0 (specs/phase4/group-chats.md): connectionId generator --
@@ -431,6 +448,18 @@ export function initApp(doc, options) {
     el("chat-log").textContent += `[${formatClockTime(timestamp)}] ${arrow} ${text}\n`;
   };
 
+  // Section GC3 (specs/phase4/group-chats.md): the group-conversation
+  // equivalent of appendChat -- rendered into its own container (#group-chat-log,
+  // separate from #chat-log) since a group conversation shows WHO said what,
+  // unlike 1:1 chat where the peer is implicit. `senderLabel` is ignored for
+  // outbound messages (always "you").
+  const appendGroupChat = (text, direction, senderLabel, timestamp = Date.now()) => {
+    const container = el("group-chat-log");
+    if (!container) return;
+    const label = direction === "out" ? t("groups.you") : senderLabel;
+    container.textContent += `[${formatClockTime(timestamp)}] ${label}: ${text}\n`;
+  };
+
   // Once identity is established, an invite-link visitor should land where
   // they can immediately join (room), not the usual profile-admin screen.
   const postIdentityRoute = () => (cameFromInviteLink ? "room" : "profile");
@@ -442,9 +471,15 @@ export function initApp(doc, options) {
   // Factored out of copyInviteLink so the GC2 group-invite flow (which
   // never touches #room-id/#invite-token, since it may mint several
   // invites in one action) can build the same link text.
-  function buildInviteLinkText(roomId, inviteToken) {
+  // Section GC3: `groupId` optional third arg appends `&group=` so a
+  // group-invite link (GC2's startTaggedGroupInvite) can be tagged the same
+  // way room/token already are -- 1:1 invites (copyInviteLink) never pass
+  // it, so their link shape is byte-for-byte unchanged.
+  function buildInviteLinkText(roomId, inviteToken, groupId) {
     const link = new URL(doc.defaultView.location.pathname, doc.defaultView.location.origin);
-    link.search = `?room=${encodeURIComponent(roomId)}&token=${encodeURIComponent(inviteToken)}`;
+    let search = `?room=${encodeURIComponent(roomId)}&token=${encodeURIComponent(inviteToken)}`;
+    if (groupId) search += `&group=${encodeURIComponent(groupId)}`;
+    link.search = search;
     link.hash = "#/room";
     return link.toString();
   }
@@ -819,6 +854,16 @@ export function initApp(doc, options) {
         label.textContent = `${group.name} (${group.memberFingerprints.length})`;
         row.appendChild(label);
 
+        // Section GC3 design point 5: opens this group's conversation in
+        // the shared conversation-screen UI (openGroupConversation, wired
+        // via the groups-list click delegate below).
+        const openButton = doc.createElement("button");
+        openButton.type = "button";
+        openButton.textContent = t("btn.openGroup");
+        openButton.dataset.openGroupBtn = group.groupId;
+        openButton.dataset.openGroupName = group.name;
+        row.appendChild(openButton);
+
         const addable = contacts.filter((c) => !group.memberFingerprints.includes(c.fingerprint));
         if (addable.length > 0) {
           const select = doc.createElement("select");
@@ -868,7 +913,7 @@ export function initApp(doc, options) {
       const contact = await getContact(fingerprint);
       const memberLabel = contact?.nickname || formatSpiritId(fingerprint);
       const { roomId, inviteToken } = await startTaggedGroupInvite({ groupId: group.groupId, startLiveSession: i === 0 });
-      lines.push(t("groups.inviteLine", { name: memberLabel, link: buildInviteLinkText(roomId, inviteToken) }));
+      lines.push(t("groups.inviteLine", { name: memberLabel, link: buildInviteLinkText(roomId, inviteToken, group.groupId) }));
     }
     const linksEl = el("group-invite-links");
     if (linksEl) {
@@ -878,6 +923,14 @@ export function initApp(doc, options) {
     el("group-name").value = "";
     setGroupStatus(t("groups.created", { name }));
     await renderGroupsCard();
+  });
+
+  // Section GC3: separate delegate for "open group conversation", checked
+  // first -- a row can have BOTH an open button and an add-member button.
+  el("groups-list")?.addEventListener("click", async (event) => {
+    const openButton = event.target.closest("[data-open-group-btn]");
+    if (!openButton) return;
+    await openGroupConversation(openButton.dataset.openGroupBtn, openButton.dataset.openGroupName);
   });
 
   el("groups-list")?.addEventListener("click", async (event) => {
@@ -893,7 +946,7 @@ export function initApp(doc, options) {
     const linksEl = el("group-invite-links");
     if (linksEl) {
       linksEl.hidden = false;
-      linksEl.textContent = t("groups.inviteLine", { name: memberLabel, link: buildInviteLinkText(roomId, inviteToken) });
+      linksEl.textContent = t("groups.inviteLine", { name: memberLabel, link: buildInviteLinkText(roomId, inviteToken, groupId) });
     }
     setGroupStatus(t("groups.memberAdded", { name: memberLabel }));
     await renderGroupsCard();
@@ -1136,7 +1189,8 @@ export function initApp(doc, options) {
     "file-accept",
     "file-reject",
     "file-chunk",
-    "group-member-joined"
+    "group-member-joined",
+    "group-message"
   ]);
 
   // Section FT2 (specs/phase4/file-transfer.md), architectural decisions:
@@ -1572,6 +1626,56 @@ export function initApp(doc, options) {
       return;
     }
 
+    if (control.type === "group-message") {
+      // Section GC3 design point 4: unlike plain 1:1 chat text (which isn't
+      // wrapped in JSON at all), group messages are explicitly typed so
+      // they can be told apart from 1:1 text arriving on the SAME
+      // connection (a groupId-tagged connection can still technically
+      // receive any control type). Same trust gate as every other
+      // control-type: this connection's own peer identity must already be
+      // verified. On top of that -- same anti-spoofing principle as
+      // group-member-joined above -- the claimed groupId must match what
+      // THIS connection was actually tagged with, never trusted from the
+      // message body alone; a peer on a DIFFERENT (or untagged) connection
+      // cannot inject messages into a group it wasn't invited into via that
+      // connection.
+      if (!state.peerFingerprint) return;
+      if (typeof control.groupId !== "string" || typeof control.text !== "string") return;
+      const activeGroupPeerEntry = getActivePeer();
+      if (!activeGroupPeerEntry || activeGroupPeerEntry.groupId !== control.groupId) return;
+      let senderLabel = formatSpiritId(state.peerFingerprint);
+      // GC3 exec-review iter1 finding: profile mode only (ephemeral mode has
+      // no group storage at all -- GC1's groups.js is only ever populated
+      // via the profile-mode UI paths), same existence check as
+      // group-member-joined above -- a message for a group this device
+      // isn't locally tracking is silently ignored rather than rendered/
+      // persisted under an unknown groupId.
+      if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
+        const group = await getGroup(control.groupId);
+        if (!group) return;
+        const senderContact = await getContact(state.peerFingerprint);
+        if (senderContact?.nickname) senderLabel = senderContact.nickname;
+      }
+      const receivedAt = Date.now();
+      // Rendered into the GROUP-specific container (#group-chat-log), never
+      // the 1:1 #chat-log -- tagged with the sender's identity, since a
+      // group conversation shows who said what (unlike 1:1 chat where the
+      // peer is implicit).
+      appendGroupChat(control.text, "in", senderLabel, receivedAt);
+      // Profile mode only (ephemeral has no vault). Sender attribution is
+      // embedded in the stored `text` itself (JSON-encoded) since
+      // historyStore.js's schema is deliberately unchanged (GC1) -- it only
+      // ever stored direction/text/timestamp.
+      if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
+        await appendMessage(state.identityKeyPair.vaultKey, state.senderKey, control.groupId, {
+          direction: "in",
+          text: JSON.stringify({ senderFingerprint: state.peerFingerprint, senderNickname: senderLabel, body: control.text }),
+          timestamp: receivedAt
+        });
+      }
+      return;
+    }
+
     if (control.type === "webrtc-call-offer") {
       // Same trust gate as plain chat text (line ~309 above): don't turn on
       // the camera/mic for a peer whose identity hasn't been verified yet.
@@ -1729,20 +1833,69 @@ export function initApp(doc, options) {
         }
         if (afterChannelOpen) afterChannelOpen();
       },
-      onMessage: async (payload) => {
-        if (!state.sessionKey) return; // message arrived before session key derived; drop rather than throw
-        const isRatcheted = payload.startsWith(RATCHET_WIRE_PREFIX);
-        if (isRatcheted && !state.receiveChainKey) return; // arrived in the brief window before the chain was derived; drop rather than throw
-        try {
-          const text = isRatcheted
-            ? await decryptMessage(await nextReceiveMessageKey(), payload.slice(RATCHET_WIRE_PREFIX.length))
-            : await decryptMessage(state.sessionKey, payload);
-          await onDecryptedMessage(text);
-        } catch (err) {
-          // This callback runs detached from any button handler, so nothing
-          // upstream can catch a rejection here.
-          setStatus(t("status.error", { msg: err.message }));
-        }
+      onMessage: (payload) => {
+        // Section GC3 (specs/phase4/group-chats.md): once multiple
+        // connections can be simultaneously open (group chats -- this
+        // section is what first makes that real, GC0-GC2 kept at most one
+        // live session at a time), a message arriving on a BACKGROUND
+        // connection's channel must still decrypt/dispatch using THAT
+        // connection's own sessionKey/chain keys/peerFingerprint, not
+        // whichever connection happens to be "active" right now (the
+        // PEER_PROXY_FIELDS/getActivePeer() machinery otherwise always
+        // resolves against activeConnectionId). Temporarily point
+        // activeConnectionId at this callback's OWN connection for the
+        // duration of processing, restoring whatever it was before
+        // afterward -- transparent to every existing 1:1 caller, where
+        // there is only ever one connection and this is a same-value no-op.
+        //
+        // GC3 exec-review iter1 finding: mutating the shared
+        // activeConnectionId across `await` points is only race-free if two
+        // different connections' onMessage bodies never interleave -- two
+        // messages arriving on DIFFERENT channels back-to-back could
+        // otherwise both be "in flight" at once, with the second one's
+        // activeConnectionId write landing while the first is still
+        // mid-await, corrupting the first's dispatch (mis-routes it to the
+        // second connection's peer entry). Fixed the same way the ratchet
+        // chain steps already serialize concurrent callers (state.sendChainLock/
+        // receiveChainLock, see serializedChainStep above): every onMessage
+        // call, regardless of which connection it belongs to, is chained
+        // onto ONE shared queue (state.messageDispatchLock) so at most one
+        // message is ever being processed -- and activeConnectionId ever
+        // rebound -- at a time app-wide.
+        const task = state.messageDispatchLock.then(async () => {
+          // Skips silently (same guard style as onChannelOpen above) if this
+          // connection was already torn down by the time its turn in the
+          // queue arrived.
+          if (ownerConnectionIdAtWireTime !== null && !state.peers.has(ownerConnectionIdAtWireTime)) return;
+          const previousActiveConnectionId = state.activeConnectionId;
+          if (ownerConnectionIdAtWireTime !== null) state.activeConnectionId = ownerConnectionIdAtWireTime;
+          try {
+            if (!state.sessionKey) return; // message arrived before session key derived; drop rather than throw
+            const isRatcheted = payload.startsWith(RATCHET_WIRE_PREFIX);
+            if (isRatcheted && !state.receiveChainKey) return; // arrived in the brief window before the chain was derived; drop rather than throw
+            try {
+              const text = isRatcheted
+                ? await decryptMessage(await nextReceiveMessageKey(), payload.slice(RATCHET_WIRE_PREFIX.length))
+                : await decryptMessage(state.sessionKey, payload);
+              await onDecryptedMessage(text);
+            } catch (err) {
+              // This callback runs detached from any button handler, so nothing
+              // upstream can catch a rejection here.
+              setStatus(t("status.error", { msg: err.message }));
+            }
+          } finally {
+            state.activeConnectionId = previousActiveConnectionId;
+          }
+        });
+        // Keep the queue alive even if this message's processing rejects --
+        // one connection's failure must not wedge dispatch for every other
+        // connection's subsequent messages (same pattern as serializedChainStep's
+        // lock-chain below).
+        state.messageDispatchLock = task.then(
+          () => {},
+          () => {}
+        );
+        return task;
       },
       onChannelClose: () => {
         setStatus(t("status.closed"));
@@ -2494,6 +2647,16 @@ export function initApp(doc, options) {
    */
   function enterConversationLobby({ ownsInvite }) {
     state.isInviteOwner = ownsInvite;
+    // Section GC3: entering an ordinary 1:1 session always routes the
+    // shared conversation screen back to 1:1 mode, even if a group
+    // conversation was open moments ago.
+    state.activeGroupId = null;
+    const groupHeading = el("group-conversation-heading");
+    if (groupHeading) groupHeading.hidden = true;
+    const groupLog = el("group-chat-log");
+    if (groupLog) groupLog.hidden = true;
+    const oneToOneLog = el("chat-log");
+    if (oneToOneLog) oneToOneLog.hidden = false;
     router.navigate("conversation");
     renderEphemeralBanner();
     renderInviteBar();
@@ -2674,6 +2837,11 @@ export function initApp(doc, options) {
     state.peerFingerprint = null;
     hideSafetyNumberHint();
     state.sessionEcdhWires = null;
+    // Section GC3: the peerFingerprint write above already lazily created
+    // this connection's state.peers entry (PEER_PROXY_FIELDS/ensureActivePeer)
+    // -- tag it with the group carried by the invite link, mirroring how
+    // startTaggedGroupInvite (GC2) tags the INVITER's side.
+    if (invitedGroupId) ensureActivePeer().groupId = invitedGroupId;
     const announce = makeIdentityAnnouncer();
     await startJoinerSession({
       senderKey: state.senderKey,
@@ -2867,7 +3035,108 @@ export function initApp(doc, options) {
     }
   }
 
-  el("btn-send").addEventListener("click", sendChatMessage);
+  /**
+   * Section GC3 (specs/phase4/group-chats.md), design point 3: fan-out send
+   * -- the SAME plaintext is independently encrypted (existing encryptMessage,
+   * static sessionKey, NOT the ratchet chain -- same precedent as file
+   * transfer's control-message-style encryption, FT2) and sent to EVERY
+   * state.peers entry tagged with this groupId that currently has a live
+   * channel + sessionKey. Star/tree invite topology (GC2's own scope
+   * decision): this reaches only whichever group members this device
+   * happens to be directly connected to right now, not the full group.
+   * Exactly ONE local append/UI-render call happens here, regardless of how
+   * many recipients were sent to -- the user sees "sent" once, not once per
+   * peer.
+   */
+  async function sendGroupMessage(groupId, text) {
+    const recipients = [...state.peers.values()].filter((peer) => peer.groupId === groupId && peer.channel && peer.sessionKey);
+    for (const peer of recipients) {
+      try {
+        peer.channel.send(await encryptMessage(peer.sessionKey, JSON.stringify({ type: "group-message", groupId, text })));
+      } catch {
+        // Best-effort fan-out, same philosophy as broadcastGroupMemberJoined
+        // (GC2) -- one recipient's send failure must not block the others.
+      }
+    }
+    const sentAt = Date.now();
+    appendGroupChat(text, "out", null, sentAt);
+    // Profile mode only (Section 14 precedent) -- ephemeral mode has no
+    // vault to persist into. Stored under groupId as the "contactId"
+    // namespace -- historyStore.js accepts any string key unchanged (GC1).
+    if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
+      await appendMessage(state.identityKeyPair.vaultKey, state.senderKey, groupId, {
+        direction: "out",
+        text,
+        timestamp: sentAt
+      });
+    }
+  }
+
+  /**
+   * Section GC3 design point 5: opens a group's conversation in the SAME
+   * conversation screen 1:1 chat uses, routed by state.activeGroupId rather
+   * than a dedicated screen -- reuses existing chat-log/input/send
+   * infrastructure per this project's usual preference. Replays this
+   * group's stored history first (mirrors the identity-announce history
+   * replay for 1:1 chat). Received messages were stored with sender
+   * attribution embedded in the `text` field itself (JSON-encoded) since
+   * historyStore.js's schema (direction/text/timestamp only) is
+   * deliberately unchanged (GC1) -- outbound messages need no such
+   * encoding, the sender is always "you".
+   */
+  async function openGroupConversation(groupId, groupName) {
+    state.activeGroupId = groupId;
+    const heading = el("group-conversation-heading");
+    if (heading) {
+      setDynamicText(heading, t("groups.chatHeading", { name: groupName }));
+      heading.hidden = false;
+    }
+    const container = el("group-chat-log");
+    if (container) {
+      container.textContent = "";
+      container.hidden = false;
+    }
+    const oneToOneLog = el("chat-log");
+    if (oneToOneLog) oneToOneLog.hidden = true;
+    if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
+      const history = await listMessages(state.identityKeyPair.vaultKey, state.senderKey, groupId);
+      for (const entry of history) {
+        if (entry.direction === "out") {
+          appendGroupChat(entry.text, "out", null, entry.timestamp);
+          continue;
+        }
+        let body = entry.text;
+        let label = t("groups.unknownMember");
+        try {
+          const parsed = JSON.parse(entry.text);
+          if (parsed && typeof parsed === "object" && typeof parsed.body === "string") {
+            body = parsed.body;
+            label = parsed.senderNickname || formatSpiritId(parsed.senderFingerprint || "");
+          }
+        } catch {
+          // Pre-GC3/malformed row -- fall back to rendering the raw text
+          // with an "unknown member" label rather than throwing.
+        }
+        appendGroupChat(body, "in", label, entry.timestamp);
+      }
+    }
+    router.navigate("conversation");
+  }
+
+  el("btn-send").addEventListener("click", () => {
+    // Section GC3: routes to the group fan-out send when a group
+    // conversation is currently open, otherwise the existing 1:1 path --
+    // unchanged behavior for every pre-GC3 caller (state.activeGroupId is
+    // null until openGroupConversation sets it).
+    const text = el("message-input").value;
+    if (!text) return;
+    if (state.activeGroupId) {
+      el("message-input").value = "";
+      void sendGroupMessage(state.activeGroupId, text);
+    } else {
+      void sendChatMessage();
+    }
+  });
 
   // Section FT2 (specs/phase4/file-transfer.md): selecting a file only ever
   // computes its hash/chunks and sends a file-offer -- chunks are NEVER
@@ -2993,6 +3262,9 @@ export function initApp(doc, options) {
         state.peerFingerprint = null;
         hideSafetyNumberHint();
         state.sessionEcdhWires = null;
+        // Section GC3: same joiner-side group tagging as btn-join above, for
+        // the zero-click auto-join path (Section F4).
+        if (invitedGroupId) ensureActivePeer().groupId = invitedGroupId;
         const announce = makeIdentityAnnouncer();
         await startJoinerSession({
         senderKey: state.senderKey,
