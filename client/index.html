@@ -269,14 +269,15 @@
         </label>
         <div class="btn-row"><button id="btn-setup-recovery" type="button" data-i18n="btn.setupRecovery">Налаштувати відновлення</button></div>
         <div id="recovery-status" class="status"></div>
-        <div id="recovery-text-export" class="secret-output" hidden></div>
-        <p class="hint" data-i18n="recovery.qrDeferred">
-          QR-код наразі не підтримується (жодна QR-бібліотека ще не вендорена в цьому проєкті) --
-          використайте текстовий рядок вище й передайте його довіреній особі будь-яким іншим каналом.
+        <div id="recovery-text-export" hidden></div>
+        <p class="hint" data-i18n="recovery.qrHint">
+          Кожен рядок вище -- окремий QR-код лише з часткою для ЦЬОГО контакту. Показуйте (або
+          передавайте текст) кожному довіреному контакту окремо, ніколи весь список одразу.
         </p>
         <h3 data-i18n="recovery.heldShares">Частки, які я зберігаю для інших</h3>
         <div id="recovery-held-list" class="list-area"></div>
         <div id="recovery-held-share-text" class="secret-output" hidden></div>
+        <div id="recovery-held-share-qr" class="recovery-share-qr" hidden></div>
       </section>
 
       <section class="card">

@@ -8,7 +8,8 @@ vi.mock("../js/identity.js", () => ({
   exportEcdhPublicKeyForWire: vi.fn().mockResolvedValue("ECDH_PUB_WIRE"),
   importEcdhPublicKeyFromWire: vi.fn().mockResolvedValue({ __tag: "restored-peer-ecdh-pub" }),
   exportPrivateKeyScalar: vi.fn(),
-  exportPrivateKeyRaw: vi.fn()
+  exportPrivateKeyRaw: vi.fn(),
+  importPrivateKeyRaw: vi.fn()
 }));
 vi.mock("../js/profile.js", () => ({
   createPermanentProfile: vi.fn(),
@@ -161,7 +162,8 @@ import {
   generateEcdhKeyPair,
   fingerprint,
   exportPrivateKeyScalar,
-  exportPrivateKeyRaw
+  exportPrivateKeyRaw,
+  importPrivateKeyRaw
 } from "../js/identity.js";
 import { createPermanentProfile, exportRawIdentity, listProfiles, loadPermanentProfile, setNickname, getNickname, adoptScalarIdentity } from "../js/profile.js";
 import { deriveAccountMaterial, generateAccountName } from "../js/deterministicIdentity.js";
@@ -186,6 +188,7 @@ import {
 import { saveTrustedShare, listTrustedShares, getTrustedShare } from "../js/trustedShares.js";
 import { buildRecoveryShareAnnounce, encodeShareAsText } from "../js/recoveryShare.js";
 import { splitSecret } from "../js/shamir.js";
+import { formatSpiritId } from "../js/spiritId.js";
 import { acceptNewerProofSet, signProofSet, addProofToSet, revokeProofFromSet } from "../js/proofSet.js";
 import { createProofBlock, parseProofBlock, verifyProofBlock } from "../js/proofs.js";
 import { generateAnonymousNickname } from "../js/anonymousNickname.js";
@@ -327,6 +330,7 @@ const HTML = `
       <div id="recovery-text-export" hidden></div>
       <div id="recovery-held-list"></div>
       <div id="recovery-held-share-text" hidden></div>
+      <div id="recovery-held-share-qr" hidden></div>
     </div>
   </section>
 
@@ -1654,6 +1658,52 @@ describe("social recovery S3: trustee-side held-shares view (specs/phase5/social
     await vi.waitFor(() => expect(getTrustedShare).toHaveBeenCalledWith("owner-fp"));
     expect(document.getElementById("recovery-held-share-text").hidden).toBe(false);
     expect(document.getElementById("recovery-held-share-text").textContent).toBe(encodeShareAsText(heldShare));
+    // Section S4 (QR follow-up): a scannable QR of the exact same share
+    // text, not just a copyable string.
+    const qrEl = document.getElementById("recovery-held-share-qr");
+    expect(qrEl.hidden).toBe(false);
+    expect(qrEl.querySelector("svg")).not.toBeNull();
+  });
+});
+
+describe("social recovery S2/S4: owner-side setup export renders one QR per share (specs/phase5/social-recovery.md)", () => {
+  it("renders exactly one .recovery-share-export-row with an SVG QR per selected contact, each labeled with that contact's own id", async () => {
+    const keyPair = { privateKey: { __tag: "profile-priv" }, publicKey: fakePublicKey("profile-pub"), vaultKey: { __tag: "vault-key" } };
+    createPermanentProfile.mockResolvedValue(keyPair);
+    fingerprint.mockResolvedValue("profile-fp");
+    listContacts.mockResolvedValue([
+      { fingerprint: "a".repeat(64), nickname: null, identityPubkeyWire: "W1", firstSeen: 1, deviceList: null },
+      { fingerprint: "b".repeat(64), nickname: null, identityPubkeyWire: "W2", firstSeen: 2, deviceList: null }
+    ]);
+    exportRawIdentity.mockResolvedValue(new Uint8Array(32).fill(7));
+    importPrivateKeyRaw.mockResolvedValue({ __tag: "extractable-priv" });
+    exportPrivateKeyScalar.mockResolvedValue(new Uint8Array(32).fill(9));
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "my local passphrase";
+    document.getElementById("btn-profile-confirm").click();
+
+    await vi.waitFor(() => expect(document.querySelectorAll("[data-recovery-contact-fingerprint]").length).toBe(2));
+    const checkboxes = document.querySelectorAll("[data-recovery-contact-fingerprint]");
+    checkboxes.forEach((checkbox) => checkbox.click());
+
+    document.getElementById("recovery-setup-passphrase").value = "my local passphrase";
+    document.getElementById("btn-setup-recovery").click();
+
+    await vi.waitFor(() => expect(exportRawIdentity).toHaveBeenCalled());
+    await vi.waitFor(() =>
+      expect(document.querySelectorAll("#recovery-text-export .recovery-share-export-row").length).toBe(2)
+    );
+    const rows = document.querySelectorAll("#recovery-text-export .recovery-share-export-row");
+    for (const row of rows) {
+      expect(row.querySelector("svg")).not.toBeNull();
+    }
+    expect(rows[0].textContent).toContain(formatSpiritId("a".repeat(64)));
+    expect(rows[1].textContent).toContain(formatSpiritId("b".repeat(64)));
+    // Not a single combined QR of the whole export list -- that would leak
+    // every other contact's share to whoever scans it.
+    expect(rows[0].textContent).not.toContain(formatSpiritId("b".repeat(64)));
   });
 });
 

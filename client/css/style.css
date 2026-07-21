@@ -470,6 +470,29 @@ button:disabled {
   padding: 10px 12px;
 }
 
+.recovery-share-export-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.recovery-share-export-row:last-child {
+  border-bottom: none;
+}
+
+.recovery-share-qr {
+  display: flex;
+  justify-content: center;
+}
+
+.recovery-share-qr svg {
+  max-width: 160px;
+  height: auto;
+}
+
 /* ---------- Chat ---------- */
 
 .chat-log {

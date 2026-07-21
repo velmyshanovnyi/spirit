@@ -39,6 +39,7 @@ import { appendMessage, listMessages, listConversations } from "./historyStore.j
 import { splitSecret } from "./shamir.js";
 import { buildRecoveryShareAnnounce, parseRecoveryShareAnnounce, encodeShareAsText } from "./recoveryShare.js";
 import { saveTrustedShare, listTrustedShares, getTrustedShare } from "./trustedShares.js";
+import { qrSvgMarkup } from "./qr.js";
 import { recoverFromShares } from "./socialRecovery.js";
 import { acceptNewerProofSet, addProofToSet, revokeProofFromSet } from "./proofSet.js";
 import { createProofBlock, parseProofBlock, verifyProofBlock } from "./proofs.js";
@@ -690,7 +691,13 @@ export function initApp(doc, options) {
     const textEl = el("recovery-held-share-text");
     if (!textEl || !share) return;
     textEl.hidden = false;
-    textEl.textContent = encodeShareAsText(share);
+    const shareText = encodeShareAsText(share);
+    textEl.textContent = shareText;
+    const qrEl = el("recovery-held-share-qr");
+    if (qrEl) {
+      qrEl.hidden = false;
+      qrEl.innerHTML = qrSvgMarkup(shareText);
+    }
   });
 
   /**
@@ -763,11 +770,11 @@ export function initApp(doc, options) {
     const scalar = await exportPrivateKeyScalar(extractableKey);
 
     const shares = splitSecret(scalar, { threshold, shares: selected.length });
-    const textExportParts = [];
+    const exportRows = [];
     for (let i = 0; i < selected.length; i++) {
       const contactFingerprint = selected[i];
       const share = shares[i];
-      textExportParts.push(`${formatSpiritId(contactFingerprint)}: ${encodeShareAsText(share)}`);
+      exportRows.push({ contactFingerprint, shareText: encodeShareAsText(share) });
       if (contactFingerprint === state.peerFingerprint && state.channel && state.sessionKey) {
         // Currently connected to this contact right now -- send immediately,
         // no need to queue. Also drop any STALE entry left over from an
@@ -789,7 +796,27 @@ export function initApp(doc, options) {
     const exportEl = el("recovery-text-export");
     if (exportEl) {
       exportEl.hidden = false;
-      exportEl.textContent = textExportParts.join("\n");
+      exportEl.innerHTML = "";
+      // Один QR-код на рядок -- саме на ТОЙ shareText, що показаний поруч,
+      // не на весь список одразу. Показувати комусь QR усього списку
+      // означало б розкрити чужі частки поряд зі своєю -- кожен довірений
+      // контакт має сканувати лише свій власний рядок.
+      for (const { contactFingerprint, shareText } of exportRows) {
+        const row = doc.createElement("div");
+        row.className = "recovery-share-export-row";
+        const label = doc.createElement("div");
+        label.textContent = formatSpiritId(contactFingerprint);
+        row.appendChild(label);
+        const text = doc.createElement("div");
+        text.className = "secret-output";
+        text.textContent = shareText;
+        row.appendChild(text);
+        const qr = doc.createElement("div");
+        qr.className = "recovery-share-qr";
+        qr.innerHTML = qrSvgMarkup(shareText);
+        row.appendChild(qr);
+        exportEl.appendChild(row);
+      }
     }
     setRecoveryStatus(t("recovery.setupDone", { n: selected.length, k: threshold }));
     await renderRecoveryCard();
@@ -856,10 +883,10 @@ export function initApp(doc, options) {
       });
 
       // Секція RF2 (specs/ui/redesign-foundation.md): identicon-аватар,
-      // детермінований з fingerprint. Кожен контакт у цьому списку сьогодні
-      // -- TOFU-контакт із постійним профілем, тож форма завжди "shape-user"
-      // (коло); "shape-group"/"shape-ghost" -- підготовлені класи для
-      // майбутніх секцій (групи, ефемерні сесії), не використовуються тут.
+      // детермінований з fingerprint. Кожен контакт у цьому списку -- TOFU-
+      // контакт із постійним профілем, тож форма завжди "shape-user" (коло);
+      // "shape-group"/"shape-ghost" -- ті самі квадрат/привид-класи, що
+      // тепер рендеряться нижче для груп і для активної ефемерної сесії.
       const avatar = doc.createElement("div");
       avatar.className = "avatar shape-user";
       avatar.innerHTML = buildIdenticonSvg(contact.fingerprint);
