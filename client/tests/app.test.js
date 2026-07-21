@@ -5613,6 +5613,7 @@ describe("identity verification proofs (Section E)", () => {
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
     await vi.waitFor(() => expect(document.querySelectorAll("#contacts-list .list-row").length).toBe(2));
 
+    document.querySelector("#folder-tree [data-folder-edit-toggle]").click();
     document.querySelector("#folder-tree [data-add-folder]").click();
     const folderRow = document.querySelector("#folder-tree .folder-row");
     expect(folderRow).not.toBeNull();
@@ -5648,6 +5649,7 @@ describe("identity verification proofs (Section E)", () => {
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
 
+    document.querySelector("#folder-tree [data-folder-edit-toggle]").click();
     document.querySelector("#folder-tree [data-add-folder]").click();
     document.querySelector("#folder-tree [data-folder-rename]").click();
 
@@ -5670,6 +5672,7 @@ describe("identity verification proofs (Section E)", () => {
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
 
+    document.querySelector("#folder-tree [data-folder-edit-toggle]").click();
     document.querySelector("#folder-tree [data-add-folder]").click();
     const originalName = document.querySelector("#folder-tree .folder-name").textContent;
     document.querySelector("#folder-tree [data-folder-rename]").click();
@@ -5689,6 +5692,7 @@ describe("identity verification proofs (Section E)", () => {
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
 
+    document.querySelector("#folder-tree [data-folder-edit-toggle]").click();
     document.querySelector("#folder-tree [data-add-folder]").click();
     document.querySelector("#folder-tree [data-folder-add-child]").click();
 
@@ -5706,6 +5710,7 @@ describe("identity verification proofs (Section E)", () => {
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
 
+    document.querySelector("#folder-tree [data-folder-edit-toggle]").click();
     document.querySelector("#folder-tree [data-add-folder]").click();
     document.querySelector("#folder-tree [data-folder-add-child]").click();
     expect(document.querySelectorAll("#folder-tree .folder-row").length).toBe(2);
@@ -5723,6 +5728,59 @@ describe("identity verification proofs (Section E)", () => {
     expect(stored.length).toBe(1);
     expect(stored[0].name).toBe("Нова папка");
     expect(document.querySelectorAll("#folder-tree .folder-row").length).toBe(1);
+  });
+
+  it("folders start in read-only mode: no add-folder/per-row-action buttons, folders aren't draggable, but collapse/expand still works", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    listContacts.mockResolvedValue([]);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+
+    // Build a folder with a subfolder while edit mode is on, then turn it
+    // back off -- this is the steady state most users will actually see.
+    document.querySelector("#folder-tree [data-folder-edit-toggle]").click();
+    document.querySelector("#folder-tree [data-add-folder]").click();
+    document.querySelector("#folder-tree [data-folder-add-child]").click();
+    document.querySelector("#folder-tree [data-folder-edit-toggle]").click();
+
+    expect(document.querySelector("#folder-tree [data-add-folder]")).toBeNull();
+    expect(document.querySelector("#folder-tree .folder-actions")).toBeNull();
+    const parentRow = document.querySelector("#folder-tree .folder-row");
+    expect(parentRow.draggable).toBe(false);
+
+    // Collapse/expand (the chev) is not a structural change and stays live.
+    expect(parentRow.classList.contains("collapsed")).toBe(false);
+    parentRow.querySelector(".chev").click();
+    expect(document.querySelector("#folder-tree .folder-row").classList.contains("collapsed")).toBe(true);
+  });
+
+  it("dropping a contact onto a folder while edit mode is off does not assign it (structural changes require edit mode)", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    listContacts.mockResolvedValue([
+      { fingerprint: "a".repeat(64), nickname: "Іван", identityPubkeyWire: "W1", firstSeen: 1, deviceList: null }
+    ]);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+    await vi.waitFor(() => expect(document.querySelectorAll("#contacts-list .list-row").length).toBe(1));
+
+    document.querySelector("#folder-tree [data-folder-edit-toggle]").click();
+    document.querySelector("#folder-tree [data-add-folder]").click();
+    document.querySelector("#folder-tree [data-folder-edit-toggle]").click();
+
+    const folderRow = document.querySelector("#folder-tree .folder-row");
+    const contactRow = document.querySelector("#contacts-list .list-row");
+    contactRow.dispatchEvent(new Event("dragstart"));
+    folderRow.dispatchEvent(new Event("dragover", { cancelable: true }));
+    folderRow.dispatchEvent(new Event("drop", { cancelable: true }));
+
+    const stored = JSON.parse(localStorage.getItem("spirit.folders"));
+    expect(stored[0].contactFingerprints).toEqual([]);
   });
 
   it("groups render in the same sidebar #contacts-list as contacts, with a square shape-group avatar, and clicking one opens its conversation directly", async () => {

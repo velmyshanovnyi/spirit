@@ -1090,6 +1090,14 @@ export function initApp(doc, options) {
   let contactDragFingerprint = null;
   let folderRenamingId = null;
   let folderPendingDeleteId = null;
+  // Один перемикач "олівець" на рівні заголовка "Мої папки" вмикає/вимикає
+  // ВСІ структурні зміни (перейменування, видалення, додавання підпапки,
+  // перетягування папок одна в одну, перетягування контакту на папку).
+  // У вимкненому стані (типовий, за замовчуванням) папки працюють лише як
+  // навігація -- згорнути/розгорнути (chev) і клік для фільтрації списку
+  // контактів лишаються завжди активними незалежно від цього перемикача,
+  // оскільки це не зміна структури, а звичайний перегляд.
+  let folderEditMode = false;
 
   function removeFingerprintFromAllFolders(nodes, fingerprint) {
     for (const n of nodes) {
@@ -1141,24 +1149,26 @@ export function initApp(doc, options) {
         const collapsed = folderCollapsed.has(n.id);
         const hasKids = n.children.length > 0;
         const selected = selectedFolderId === n.id;
-        const renaming = folderRenamingId === n.id;
-        const pendingDelete = folderPendingDeleteId === n.id;
+        const renaming = folderEditMode && folderRenamingId === n.id;
+        const pendingDelete = folderEditMode && folderPendingDeleteId === n.id;
         const nameMarkup = renaming
           ? `<input type="text" class="folder-rename-input" data-folder-rename-input>`
           : `<span class="folder-name"></span>` +
             (n.contactFingerprints.length > 0 ? `<span class="folder-count">${n.contactFingerprints.length}</span>` : "");
-        const actionsMarkup = renaming
-          ? `<span class="folder-actions">
-              <button type="button" class="folder-action" data-folder-rename-save title="${t("sidebar.folderRenameSave")}">✓</button>
-              <button type="button" class="folder-action" data-folder-rename-cancel title="${t("sidebar.folderRenameCancel")}">✕</button>
-            </span>`
-          : `<span class="folder-actions">
-              <button type="button" class="folder-action" data-folder-rename title="${t("sidebar.folderRename")}">✎</button>
-              <button type="button" class="folder-action" data-folder-add-child title="${t("sidebar.folderAddChild")}">+</button>
-              <button type="button" class="folder-action folder-action-delete ${pendingDelete ? "confirming" : ""}" data-folder-delete title="${t(pendingDelete ? "sidebar.folderDeleteConfirm" : "sidebar.folderDelete")}">${pendingDelete ? "✓" : "×"}</button>
-            </span>`;
+        const actionsMarkup = !folderEditMode
+          ? ""
+          : renaming
+            ? `<span class="folder-actions">
+                <button type="button" class="folder-action" data-folder-rename-save title="${t("sidebar.folderRenameSave")}">✓</button>
+                <button type="button" class="folder-action" data-folder-rename-cancel title="${t("sidebar.folderRenameCancel")}">✕</button>
+              </span>`
+            : `<span class="folder-actions">
+                <button type="button" class="folder-action" data-folder-rename title="${t("sidebar.folderRename")}">✎</button>
+                <button type="button" class="folder-action" data-folder-add-child title="${t("sidebar.folderAddChild")}">+</button>
+                <button type="button" class="folder-action folder-action-delete ${pendingDelete ? "confirming" : ""}" data-folder-delete title="${t(pendingDelete ? "sidebar.folderDeleteConfirm" : "sidebar.folderDelete")}">${pendingDelete ? "✓" : "×"}</button>
+              </span>`;
         return `
-          <div class="folder-row ${collapsed ? "collapsed" : ""} ${selected ? "selected" : ""}" data-folder-id="${n.id}" draggable="${!renaming}">
+          <div class="folder-row ${collapsed ? "collapsed" : ""} ${selected ? "selected" : ""}" data-folder-id="${n.id}" draggable="${folderEditMode && !renaming}">
             <span class="chev">${hasKids ? "▾" : ""}</span>
             ${nameMarkup}
             ${actionsMarkup}
@@ -1173,8 +1183,18 @@ export function initApp(doc, options) {
     if (!treeEl) return;
     treeEl.innerHTML =
       `<div class="folder-tree-label"><span>${t("sidebar.foldersHeading")}</span>` +
-      `<button type="button" data-add-folder title="${t("sidebar.addFolder")}">+</button></div>` +
+      `<button type="button" class="folder-action ${folderEditMode ? "active" : ""}" data-folder-edit-toggle title="${t("sidebar.folderEditToggle")}">✎</button>` +
+      (folderEditMode ? `<button type="button" data-add-folder title="${t("sidebar.addFolder")}">+</button>` : "") +
+      `</div>` +
       renderFolderNodes(folders);
+    treeEl.querySelector("[data-folder-edit-toggle]")?.addEventListener("click", () => {
+      folderEditMode = !folderEditMode;
+      if (!folderEditMode) {
+        folderRenamingId = null;
+        folderPendingDeleteId = null;
+      }
+      renderFolderTree();
+    });
     treeEl.querySelectorAll("[data-folder-id]").forEach((rowEl) => {
       const id = rowEl.dataset.folderId;
       const node = findFolder(folders, id);
@@ -1191,9 +1211,11 @@ export function initApp(doc, options) {
       }
 
       rowEl.addEventListener("dragstart", () => {
+        if (!folderEditMode) return;
         folderDragId = id;
       });
       rowEl.addEventListener("dragover", (event) => {
+        if (!folderEditMode) return;
         event.preventDefault();
         if (contactDragFingerprint) {
           rowEl.classList.add("drag-over");
@@ -1265,6 +1287,7 @@ export function initApp(doc, options) {
         applyContactsFilter();
       });
       rowEl.addEventListener("drop", (event) => {
+        if (!folderEditMode) return;
         event.preventDefault();
         rowEl.classList.remove("drag-over");
         // Dropping a contact assigns it to this folder (single-membership --

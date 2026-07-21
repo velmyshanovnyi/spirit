@@ -961,6 +961,12 @@ button:disabled {
   opacity: 1;
 }
 
+.folder-tree-label .folder-action.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+}
+
 .folder-children {
   margin-left: 16px;
   border-left: 1px dashed var(--border);
