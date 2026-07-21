@@ -1088,6 +1088,8 @@ export function initApp(doc, options) {
   const folderCollapsed = new Set();
   let folderDragId = null;
   let contactDragFingerprint = null;
+  let folderRenamingId = null;
+  let folderPendingDeleteId = null;
 
   function removeFingerprintFromAllFolders(nodes, fingerprint) {
     for (const n of nodes) {
@@ -1119,17 +1121,47 @@ export function initApp(doc, options) {
   function randomFolderId() {
     return "fd" + Math.random().toString(36).slice(2, 10);
   }
+  // Видалення папки НЕ каскадно видаляє дочірні -- вони підіймаються на
+  // рівень видаленої (той самий принцип, що й видалення папки у звичайному
+  // файловому менеджері: втрачається сама папка й прив'язка ЇЇ ВЛАСНИХ
+  // контактів, але не вкладений вміст). Повертає true, якщо щось видалено.
+  function deleteFolder(nodes, id) {
+    for (let i = 0; i < nodes.length; i++) {
+      if (nodes[i].id === id) {
+        nodes.splice(i, 1, ...nodes[i].children);
+        return true;
+      }
+      if (deleteFolder(nodes[i].children, id)) return true;
+    }
+    return false;
+  }
   function renderFolderNodes(nodes) {
     return nodes
       .map((n) => {
         const collapsed = folderCollapsed.has(n.id);
         const hasKids = n.children.length > 0;
         const selected = selectedFolderId === n.id;
+        const renaming = folderRenamingId === n.id;
+        const pendingDelete = folderPendingDeleteId === n.id;
+        const nameMarkup = renaming
+          ? `<input type="text" class="folder-rename-input" data-folder-rename-input>`
+          : `<span class="folder-name"></span>` +
+            (n.contactFingerprints.length > 0 ? `<span class="folder-count">${n.contactFingerprints.length}</span>` : "");
+        const actionsMarkup = renaming
+          ? `<span class="folder-actions">
+              <button type="button" class="folder-action" data-folder-rename-save title="${t("sidebar.folderRenameSave")}">✓</button>
+              <button type="button" class="folder-action" data-folder-rename-cancel title="${t("sidebar.folderRenameCancel")}">✕</button>
+            </span>`
+          : `<span class="folder-actions">
+              <button type="button" class="folder-action" data-folder-rename title="${t("sidebar.folderRename")}">✎</button>
+              <button type="button" class="folder-action" data-folder-add-child title="${t("sidebar.folderAddChild")}">+</button>
+              <button type="button" class="folder-action folder-action-delete ${pendingDelete ? "confirming" : ""}" data-folder-delete title="${t(pendingDelete ? "sidebar.folderDeleteConfirm" : "sidebar.folderDelete")}">${pendingDelete ? "✓" : "×"}</button>
+            </span>`;
         return `
-          <div class="folder-row ${collapsed ? "collapsed" : ""} ${selected ? "selected" : ""}" data-folder-id="${n.id}" draggable="true">
+          <div class="folder-row ${collapsed ? "collapsed" : ""} ${selected ? "selected" : ""}" data-folder-id="${n.id}" draggable="${!renaming}">
             <span class="chev">${hasKids ? "▾" : ""}</span>
-            <span class="folder-name"></span>
-            ${n.contactFingerprints.length > 0 ? `<span class="folder-count">${n.contactFingerprints.length}</span>` : ""}
+            ${nameMarkup}
+            ${actionsMarkup}
           </div>
           ${hasKids ? `<div class="folder-children ${collapsed ? "collapsed" : ""}">${renderFolderNodes(n.children)}</div>` : ""}
         `;
@@ -1143,21 +1175,21 @@ export function initApp(doc, options) {
       `<div class="folder-tree-label"><span>${t("sidebar.foldersHeading")}</span>` +
       `<button type="button" data-add-folder title="${t("sidebar.addFolder")}">+</button></div>` +
       renderFolderNodes(folders);
-    // Folder names go through textContent, not the innerHTML template above,
-    // so a user-chosen folder name can never inject markup.
-    const nameEls = [...treeEl.querySelectorAll("[data-folder-id] .folder-name")];
-    const flatNodes = [];
-    (function collect(nodes) {
-      for (const n of nodes) {
-        flatNodes.push(n);
-        collect(n.children);
-      }
-    })(folders);
-    nameEls.forEach((elNode, i) => {
-      elNode.textContent = flatNodes[i]?.name ?? "";
-    });
     treeEl.querySelectorAll("[data-folder-id]").forEach((rowEl) => {
       const id = rowEl.dataset.folderId;
+      const node = findFolder(folders, id);
+      if (!node) return;
+      // Ім'я йде через textContent, а не в innerHTML-шаблон вище, тож
+      // користувацька назва папки ніколи не зможе інʼєктнути розмітку.
+      const nameEl = rowEl.querySelector(".folder-name");
+      if (nameEl) nameEl.textContent = node.name;
+      const renameInput = rowEl.querySelector("[data-folder-rename-input]");
+      if (renameInput) {
+        renameInput.value = node.name;
+        renameInput.focus();
+        renameInput.select();
+      }
+
       rowEl.addEventListener("dragstart", () => {
         folderDragId = id;
       });
@@ -1174,8 +1206,61 @@ export function initApp(doc, options) {
       });
       rowEl.addEventListener("dragleave", () => rowEl.classList.remove("drag-over"));
       rowEl.addEventListener("click", (event) => {
-        if (event.target.closest(".chev")) return;
+        if (event.target.closest(".chev") || event.target.closest(".folder-actions") || event.target.closest("[data-folder-rename-input]")) return;
         selectedFolderId = selectedFolderId === id ? null : id;
+        folderPendingDeleteId = null;
+        renderFolderTree();
+        applyContactsFilter();
+      });
+
+      function commitRename() {
+        const input = rowEl.querySelector("[data-folder-rename-input]");
+        const value = input?.value.trim();
+        if (value) node.name = value;
+        folderRenamingId = null;
+        saveFolders(folders);
+        renderFolderTree();
+      }
+      renameInput?.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") commitRename();
+        if (event.key === "Escape") {
+          folderRenamingId = null;
+          renderFolderTree();
+        }
+      });
+      rowEl.querySelector("[data-folder-rename-save]")?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        commitRename();
+      });
+      rowEl.querySelector("[data-folder-rename-cancel]")?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        folderRenamingId = null;
+        renderFolderTree();
+      });
+      rowEl.querySelector("[data-folder-rename]")?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        folderRenamingId = id;
+        folderPendingDeleteId = null;
+        renderFolderTree();
+      });
+      rowEl.querySelector("[data-folder-add-child]")?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        node.children.push({ id: randomFolderId(), name: t("sidebar.newFolder"), children: [], contactFingerprints: [] });
+        folderCollapsed.delete(id);
+        saveFolders(folders);
+        renderFolderTree();
+      });
+      rowEl.querySelector("[data-folder-delete]")?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (folderPendingDeleteId !== id) {
+          folderPendingDeleteId = id;
+          renderFolderTree();
+          return;
+        }
+        folderPendingDeleteId = null;
+        if (selectedFolderId === id) selectedFolderId = null;
+        deleteFolder(folders, id);
+        saveFolders(folders);
         renderFolderTree();
         applyContactsFilter();
       });

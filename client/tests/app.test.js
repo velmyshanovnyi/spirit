@@ -5639,6 +5639,92 @@ describe("identity verification proofs (Section E)", () => {
     expect(document.querySelector("#folder-tree .folder-row").classList.contains("selected")).toBe(false);
   });
 
+  it("renames a folder via the inline rename control", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    listContacts.mockResolvedValue([]);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+
+    document.querySelector("#folder-tree [data-add-folder]").click();
+    document.querySelector("#folder-tree [data-folder-rename]").click();
+
+    const input = document.querySelector("#folder-tree [data-folder-rename-input]");
+    expect(input).not.toBeNull();
+    input.value = "Робота";
+    document.querySelector("#folder-tree [data-folder-rename-save]").click();
+
+    expect(document.querySelector("#folder-tree .folder-name").textContent).toBe("Робота");
+    const stored = JSON.parse(localStorage.getItem("spirit.folders"));
+    expect(stored[0].name).toBe("Робота");
+  });
+
+  it("cancelling rename (Escape) leaves the folder's name unchanged", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    listContacts.mockResolvedValue([]);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+
+    document.querySelector("#folder-tree [data-add-folder]").click();
+    const originalName = document.querySelector("#folder-tree .folder-name").textContent;
+    document.querySelector("#folder-tree [data-folder-rename]").click();
+    const input = document.querySelector("#folder-tree [data-folder-rename-input]");
+    input.value = "Мала бути іншою";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+
+    expect(document.querySelector("#folder-tree .folder-name").textContent).toBe(originalName);
+  });
+
+  it("adds a subfolder directly under a given folder via its per-row control", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    listContacts.mockResolvedValue([]);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+
+    document.querySelector("#folder-tree [data-add-folder]").click();
+    document.querySelector("#folder-tree [data-folder-add-child]").click();
+
+    const stored = JSON.parse(localStorage.getItem("spirit.folders"));
+    expect(stored[0].children.length).toBe(1);
+    expect(document.querySelectorAll("#folder-tree .folder-row").length).toBe(2);
+  });
+
+  it("deleting a folder requires a second confirming click, and reparents its children to where the folder was instead of deleting them", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    listContacts.mockResolvedValue([]);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+
+    document.querySelector("#folder-tree [data-add-folder]").click();
+    document.querySelector("#folder-tree [data-folder-add-child]").click();
+    expect(document.querySelectorAll("#folder-tree .folder-row").length).toBe(2);
+
+    // First click on the parent's delete button just arms the confirm state.
+    document.querySelector("#folder-tree [data-folder-delete]").click();
+    let stored = JSON.parse(localStorage.getItem("spirit.folders"));
+    expect(stored.length).toBe(1);
+    expect(document.querySelector("#folder-tree [data-folder-delete]").classList.contains("confirming")).toBe(true);
+
+    // Second click actually deletes the parent, but its child survives,
+    // promoted to where the parent used to be.
+    document.querySelector("#folder-tree [data-folder-delete]").click();
+    stored = JSON.parse(localStorage.getItem("spirit.folders"));
+    expect(stored.length).toBe(1);
+    expect(stored[0].name).toBe("Нова папка");
+    expect(document.querySelectorAll("#folder-tree .folder-row").length).toBe(1);
+  });
+
   it("groups render in the same sidebar #contacts-list as contacts, with a square shape-group avatar, and clicking one opens its conversation directly", async () => {
     generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
     fingerprint.mockResolvedValue("sender-fp");

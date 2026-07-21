@@ -916,6 +916,51 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
+.folder-row .folder-rename-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 1px 4px;
+  background: var(--bg);
+  color: inherit;
+}
+
+.folder-actions {
+  display: flex;
+  gap: 2px;
+  flex: none;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.folder-row:hover .folder-actions,
+.folder-row:focus-within .folder-actions {
+  opacity: 1;
+}
+
+.folder-action {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+}
+
+.folder-action:hover {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.folder-action-delete.confirming {
+  color: var(--danger, #d33);
+  opacity: 1;
+}
+
 .folder-children {
   margin-left: 16px;
   border-left: 1px dashed var(--border);
