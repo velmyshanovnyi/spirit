@@ -374,7 +374,7 @@ const HTML = `
   </div>
   <div id="floating-video" hidden>
     <div id="floating-video-handle"></div>
-    <video id="video-remote"></video>
+    <video id="video-remote" hidden></video>
     <video id="video-local"></video>
   </div>
 
@@ -4652,11 +4652,18 @@ describe("video call (Section V2)", () => {
     await vi.waitFor(() => expect(applyRenegotiationAnswer).toHaveBeenCalledWith(pc, answerMsg.sdp));
   });
 
-  it("sets the remote video's srcObject when a media track arrives", async () => {
+  it("sets the remote video's srcObject and unhides it when a media track arrives, then hides it again once the channel closes", async () => {
     const { captured } = await establishedInitiatorChat();
+    expect(document.getElementById("video-remote").hidden).toBe(true);
+
     const remoteStream = fakeStream([fakeTrack("video")]);
     captured.onRemoteTrack(remoteStream);
     expect(document.getElementById("video-remote").srcObject).toBe(remoteStream);
+    expect(document.getElementById("video-remote").hidden).toBe(false);
+
+    captured.onChannelClose();
+    expect(document.getElementById("video-remote").hidden).toBe(true);
+    expect(document.getElementById("video-remote").srcObject).toBeFalsy();
   });
 
   it("toggles the camera/mic tracks without requesting getUserMedia again", async () => {

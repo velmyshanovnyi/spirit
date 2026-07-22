@@ -2041,6 +2041,8 @@ export function initApp(doc, options) {
     state.nickname = null;
     state.localStream = null;
     updateCallButtonStates();
+    el("video-remote").hidden = true;
+    el("video-remote").srcObject = null;
     hideSafetyNumberHint();
     // Section GC0: deletes the active state.peers entry outright (pc,
     // channel, sessionKey, sessionEcdhWires, sendChainKey, receiveChainKey,
@@ -3002,6 +3004,11 @@ export function initApp(doc, options) {
         }
         state.localTracksAddedToPeer = false;
         updateCallButtonStates();
+        // Section RF5: hides the small remote-video corner overlay again --
+        // otherwise it'd sit there as an empty dark box once the stream
+        // that was filling it is gone.
+        el("video-remote").hidden = true;
+        el("video-remote").srcObject = null;
       },
       onError: (err) => {
         disarmIceTimeout(); // the local-description IIFE failed before onLocalOfferReady/onLocalAnswerReady
@@ -3087,7 +3094,9 @@ export function initApp(doc, options) {
       rtcConfig,
       ...wireChannelCallbacks(disarmIceTimeout, channelOptions),
       onRemoteTrack: (stream) => {
-        el("video-remote").srcObject = stream;
+        const remoteVideo = el("video-remote");
+        remoteVideo.srcObject = stream;
+        remoteVideo.hidden = false;
       },
       onLocalOfferReady: async (offerSdp) => {
         disarmIceTimeout();
@@ -3145,7 +3154,9 @@ export function initApp(doc, options) {
       offerSdp: JSON.parse(offer),
       ...wireChannelCallbacks(disarmIceTimeout, channelOptions),
       onRemoteTrack: (stream) => {
-        el("video-remote").srcObject = stream;
+        const remoteVideo = el("video-remote");
+        remoteVideo.srcObject = stream;
+        remoteVideo.hidden = false;
       },
       onLocalAnswerReady: async (answerSdp) => {
         disarmIceTimeout();
