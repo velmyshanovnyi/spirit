@@ -73,14 +73,33 @@ body {
   position: sticky;
   top: 0;
   z-index: 10;
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   padding: 10px 16px;
   background: color-mix(in srgb, var(--card-bg) 85%, transparent);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
+}
+
+/* Logo centered in the header (per the agreed mockup) instead of flush
+   left -- a 3-column grid keeps the guest quick-actions and lang/theme/
+   settings controls pinned to their own edges regardless of the brand's
+   width. */
+.app-header .brand {
+  grid-column: 2;
+  justify-self: center;
+}
+
+.app-header #guest-quick-actions {
+  grid-column: 1;
+  justify-self: start;
+}
+
+.app-header > .header-controls:not(#guest-quick-actions) {
+  grid-column: 3;
+  justify-self: end;
 }
 
 .brand {
@@ -755,8 +774,9 @@ button:disabled {
   z-index: 90;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px;
-  padding: 6px 12px;
+  padding: 6px 16px;
   background: var(--card-bg);
   border-bottom: 1px solid var(--border);
 }
@@ -802,18 +822,19 @@ button:disabled {
   z-index: 4;
 }
 
-.floating-video .video-tile-remote {
+/* Self-view fills the ENTIRE floating window (per follow-up mockup
+   feedback) -- there's usually no remote peer stream yet the moment the
+   window appears, so a tiny self-view corner box was mostly wasted
+   space. The remote peer's video becomes the small corner overlay
+   instead, appearing once someone actually joins. */
+.floating-video .video-tile-local {
   width: 100%;
   height: 100%;
   background: var(--code-bg);
   object-fit: cover;
 }
 
-/* Self-view as a floating-within-the-floating overlay (picture-in-picture
-   style) instead of a same-size tile sitting side-by-side with the remote
-   video -- standard video-call convention, and much less space when
-   there's no remote peer video to show yet. */
-.floating-video .video-tile-local {
+.floating-video .video-tile-remote {
   position: absolute;
   bottom: 8px;
   right: 8px;
