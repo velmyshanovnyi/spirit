@@ -248,6 +248,11 @@ export function initApp(doc, options) {
     // the Map outright rather than left behind as stale all-null data.
     peers: new Map(),
     activeConnectionId: null,
+    // Section RF9: 1:1 chat messages typed before a peer has connected yet
+    // (or after an unstable connection drops mid-session) queue here
+    // instead of being blocked outright -- drained the moment a channel +
+    // session key are both available again (flushPendingOutgoingMessages).
+    pendingOutgoingMessages: [],
     // Own camera/mic MediaStream, acquired for local preview as soon as the
     // conversation lobby opens (Section F6) -- null before then and used by
     // the camera/mic toggle buttons.
@@ -466,9 +471,14 @@ export function initApp(doc, options) {
   // (e.g. the imported-history-badge test) keep working unchanged --
   // `textContent` concatenates all descendant text with no added
   // whitespace between elements, so that separator has to be explicit.
-  const appendChat = (text, direction, timestamp = Date.now(), imported = false) => {
+  // `pending` (Section RF9): renders a queued-not-yet-sent outgoing message
+  // (no active connection when the user sent it) with a small badge, and
+  // returns the row so the caller can strip that badge off once the
+  // message actually goes out -- same badge-then-clear shape as the
+  // existing imported-history badge above it.
+  const appendChat = (text, direction, timestamp = Date.now(), imported = false, pending = false) => {
     const log = el("chat-log");
-    if (!log) return;
+    if (!log) return null;
     const row = doc.createElement("div");
     row.className = direction === "out" ? "row-out" : "row-in";
     const bubble = doc.createElement("div");
@@ -484,12 +494,28 @@ export function initApp(doc, options) {
     const meta = doc.createElement("span");
     meta.className = "bubble-meta";
     meta.textContent = formatClockTime(timestamp);
+    if (pending) {
+      const pendingWrap = doc.createElement("span");
+      pendingWrap.className = "pending-badge-wrap";
+      const pendingBadge = doc.createElement("span");
+      pendingBadge.className = "pending-badge";
+      pendingBadge.textContent = t("chat.queuedBadge");
+      pendingWrap.appendChild(pendingBadge);
+      pendingWrap.appendChild(doc.createElement("br"));
+      bubble.appendChild(pendingWrap);
+    }
     bubble.appendChild(meta);
     row.appendChild(bubble);
     log.appendChild(row);
     log.appendChild(doc.createTextNode("\n"));
     log.scrollTop = log.scrollHeight;
+    return row;
   };
+  // Clears a row's pending badge once its message actually goes out --
+  // no-op if the row was never marked pending (or is gone/undefined).
+  function clearPendingBadge(row) {
+    row?.querySelector(".pending-badge-wrap")?.remove();
+  }
 
   // Section GC3 (specs/phase4/group-chats.md): the group-conversation
   // equivalent of appendChat -- rendered into its own container (#group-chat-log,
@@ -2945,6 +2971,11 @@ export function initApp(doc, options) {
         for (const id of ["btn-start-call", "btn-toggle-camera", "btn-toggle-mic"]) {
           el(id).disabled = false;
         }
+        // Section RF9: the session key may already have been derived before
+        // the channel finished opening (or may not be -- see the other
+        // flush call site after onSessionReady below); only actually sends
+        // anything once BOTH are true.
+        void flushPendingOutgoingMessages();
         if (afterChannelOpen) afterChannelOpen();
       },
       onMessage: (payload) => {
@@ -3013,6 +3044,13 @@ export function initApp(doc, options) {
       },
       onChannelClose: () => {
         setStatus(t("status.closed"));
+        // Section RF9: without this, sendChatMessage's "is there a live
+        // connection" check would keep seeing a truthy (but dead) channel
+        // reference after a drop, and try to .send() on a closed
+        // RTCDataChannel instead of queuing -- this is what makes
+        // reconnect-and-resync share the exact same queuing path as
+        // "never connected yet".
+        state.channel = null;
         for (const id of ["btn-start-call", "btn-toggle-camera", "btn-toggle-mic"]) {
           el(id).disabled = true;
         }
@@ -3154,6 +3192,7 @@ export function initApp(doc, options) {
           ({ sendChainKey: state.sendChainKey, receiveChainKey: state.receiveChainKey } =
             await deriveInitialChainKeys(rootKey, ecdhPubkey, peerEcdhPubkeyWire));
           if (onSessionReady) await onSessionReady();
+          void flushPendingOutgoingMessages(); // Section RF9: session key just landed -- channel may already be open
         } catch (err) {
           setStatus(t("status.error", { msg: err.message }));
         }
@@ -3198,6 +3237,7 @@ export function initApp(doc, options) {
           ({ sendChainKey: state.sendChainKey, receiveChainKey: state.receiveChainKey } =
             await deriveInitialChainKeys(rootKey, ecdhPubkey, peerEcdhPubkeyWire));
           if (onSessionReady) await onSessionReady();
+          void flushPendingOutgoingMessages(); // Section RF9: session key just landed -- channel may already be open
         } catch (err) {
           setStatus(t("status.error", { msg: err.message }));
         }
@@ -4138,31 +4178,17 @@ export function initApp(doc, options) {
     updateCallButtonStates();
   });
 
-  async function sendChatMessage() {
-    if (!state.channel || !state.sessionKey) {
-      setStatus(t("status.noActiveConnection"));
-      // Section RF8: connection-status lives in the fixed top toolbar now,
-      // far from the input -- also surface it right next to the input
-      // itself so a blocked send isn't mistaken for the message quietly
-      // vanishing.
-      const sendStatus = el("chat-send-status");
-      if (sendStatus) {
-        setDynamicText(sendStatus, t("status.noActiveConnection"));
-        sendStatus.hidden = false;
-      }
-      return;
-    }
-    el("chat-send-status")?.setAttribute("hidden", "");
-    const text = el("message-input").value;
+  // Section RF9: actually encrypts+transmits ONE message over the current
+  // channel and persists it to history -- shared by the immediate-send
+  // path and the queue drain, so both go through the exact same ratchet
+  // (nextSendMessageKey) and history-write sequence. `row` (if given) is
+  // the already-rendered bubble from when the message was first queued;
+  // its pending badge is cleared once the send actually succeeds.
+  async function sendSingleChatMessage(text, sentAt, row) {
     const messageKey = await nextSendMessageKey();
     const payload = RATCHET_WIRE_PREFIX + (await encryptMessage(messageKey, text));
     state.channel.send(payload);
-    el("message-input").value = "";
-    const sentAt = Date.now();
-    appendChat(text, "out", sentAt);
-    // Profile mode + verified peer: keep the encrypted history (Section 14).
-    // Ephemeral mode has no vaultKey; an unverified peer has no fingerprint
-    // to file the message under -- both skip silently.
+    clearPendingBadge(row);
     if (state.identityKeyPair && state.identityKeyPair.vaultKey && state.peerFingerprint) {
       await appendMessage(state.identityKeyPair.vaultKey, state.senderKey, state.peerFingerprint, {
         direction: "out",
@@ -4170,6 +4196,54 @@ export function initApp(doc, options) {
         timestamp: sentAt
       });
     }
+  }
+
+  // Drains state.pendingOutgoingMessages in order (FIFO -- ratchet key
+  // derivation is sequential/stateful, so these cannot send out of order
+  // or in parallel) the moment a channel + session key are both available
+  // again -- called from onChannelOpen (Section RF9) and after session-key
+  // derivation completes, since either can finish before the other.
+  async function flushPendingOutgoingMessages() {
+    if (!state.channel || !state.sessionKey) return;
+    while (state.pendingOutgoingMessages.length > 0) {
+      const item = state.pendingOutgoingMessages[0];
+      try {
+        await sendSingleChatMessage(item.text, item.timestamp, item.row);
+        state.pendingOutgoingMessages.shift();
+      } catch (err) {
+        // Leaves this item (and everything behind it) queued -- a transient
+        // failure here must not silently drop a message the user already
+        // saw appear in their own chat log.
+        setVideoStatus(t("status.error", { msg: err.message }));
+        return;
+      }
+    }
+    const sendStatus = el("chat-send-status");
+    if (sendStatus) sendStatus.hidden = true;
+  }
+
+  async function sendChatMessage() {
+    const text = el("message-input").value;
+    el("message-input").value = "";
+    const sentAt = Date.now();
+    const hasConnection = !!(state.channel && state.sessionKey);
+    const row = appendChat(text, "out", sentAt, false, !hasConnection);
+    if (!hasConnection) {
+      // Section RF9 (bug report follow-up): queue instead of dropping --
+      // sent the moment a peer connects (or reconnects after an unstable
+      // drop; onChannelClose nulls state.channel so this same path covers
+      // both "never connected yet" and "was connected, then wasn't").
+      state.pendingOutgoingMessages.push({ text, timestamp: sentAt, row });
+      setStatus(t("status.noActiveConnection"));
+      const sendStatus = el("chat-send-status");
+      if (sendStatus) {
+        setDynamicText(sendStatus, t("chat.queuedStatus"));
+        sendStatus.hidden = false;
+      }
+      return;
+    }
+    el("chat-send-status")?.setAttribute("hidden", "");
+    await sendSingleChatMessage(text, sentAt, row);
   }
 
   /**

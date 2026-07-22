@@ -2210,7 +2210,7 @@ describe("btn-join", () => {
 });
 
 describe("btn-send", () => {
-  it("refuses to send before a session key exists, instead of throwing", async () => {
+  it("queues (rather than drops) a message sent before a session key exists, instead of throwing", async () => {
     initApp(document, { locale: "uk" });
     document.getElementById("message-input").value = "привіт";
     document.getElementById("btn-send").click();
@@ -2218,13 +2218,14 @@ describe("btn-send", () => {
       expect(document.getElementById("connection-status").textContent).toMatch(/немає активного з'єднання/)
     );
     expect(encryptMessage).not.toHaveBeenCalled();
-    // Section RF8 (bug report): connection-status lives in the fixed top
-    // toolbar, far from the input -- a blocked send must ALSO be surfaced
-    // right next to the input itself, or it just looks like the message
-    // silently vanished instead of never having been sent.
+    // Section RF9 (bug report follow-up): a message sent with no active
+    // connection yet renders immediately (optimistic, with a "queued"
+    // badge) instead of silently vanishing -- it's actually transmitted
+    // later, once a peer connects (see the flush tests below).
     expect(document.getElementById("chat-send-status").hidden).toBe(false);
-    expect(document.getElementById("chat-send-status").textContent).toMatch(/немає активного з'єднання/);
-    expect(document.getElementById("chat-log").textContent).toBe("");
+    expect(document.getElementById("chat-send-status").textContent).toMatch(/черзі/);
+    expect(document.getElementById("chat-log").textContent).toContain("привіт");
+    expect(document.getElementById("message-input").value).toBe("");
   });
 
   it("encrypts the message before sending it on the data channel; never sends raw plaintext", async () => {
@@ -2268,6 +2269,110 @@ describe("btn-send", () => {
     expect(encryptMessage).not.toHaveBeenCalledWith({ __tag: "session-key" }, "привіт");
     expect(channel.send).toHaveBeenCalledWith("R1:ENCRYPTED_PAYLOAD");
     expect(channel.send).not.toHaveBeenCalledWith("привіт");
+  });
+
+  it("Section RF9: sends a message queued before any connection existed, in order, the moment a peer connects", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    encryptMessage.mockResolvedValue("ENCRYPTED_PAYLOAD");
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+
+    const channel = fakeChannel();
+    let capturedOnLocalOfferReady;
+    startAsInitiator.mockImplementation((opts) => {
+      capturedOnLocalOfferReady = opts.onLocalOfferReady;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+
+    // No channel, no session key yet -- sending here must queue, not throw
+    // or silently drop.
+    document.getElementById("message-input").value = "привіт до з'єднання";
+    document.getElementById("btn-send").click();
+    expect(encryptMessage).not.toHaveBeenCalled();
+    expect(document.getElementById("chat-log").textContent).toContain("привіт до з'єднання");
+    const queuedRow = document.querySelector("#chat-log .row-out");
+    expect(queuedRow.querySelector(".pending-badge")).not.toBeNull();
+    expect(document.getElementById("chat-send-status").hidden).toBe(false);
+
+    // Now the channel opens AND the handshake completes (either order is
+    // possible in real usage -- both call sites try to flush).
+    const { onChannelOpen } = startAsInitiator.mock.calls[0][0];
+    onChannelOpen(channel);
+    await capturedOnLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith("R1:ENCRYPTED_PAYLOAD"));
+    expect(encryptMessage).toHaveBeenCalledWith({ __tag: "ratchet-message-key" }, "привіт до з'єднання");
+    expect(queuedRow.querySelector(".pending-badge")).toBeNull();
+    expect(document.getElementById("chat-send-status").hidden).toBe(true);
+  });
+
+  it("Section RF9: re-queues a message typed after an unstable channel drops, and resends it once reconnected", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    encryptMessage.mockResolvedValue("ENCRYPTED_PAYLOAD");
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+
+    const channel = fakeChannel();
+    let capturedOnLocalOfferReady;
+    let capturedOnChannelClose;
+    startAsInitiator.mockImplementation((opts) => {
+      capturedOnLocalOfferReady = opts.onLocalOfferReady;
+      capturedOnChannelClose = opts.onChannelClose;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+
+    const { onChannelOpen } = startAsInitiator.mock.calls[0][0];
+    onChannelOpen(channel);
+    await capturedOnLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    document.getElementById("message-input").value = "перше";
+    document.getElementById("btn-send").click();
+    await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith("R1:ENCRYPTED_PAYLOAD"));
+    // Baseline instead of an exact count -- the handshake's own
+    // identity-announce also goes over this channel and isn't this test's
+    // concern; only the DELTA from here on matters.
+    const sendCountAfterFirstMessage = channel.send.mock.calls.length;
+
+    // The connection drops mid-session (unstable network) -- a message
+    // typed now must queue exactly like the never-connected-yet case,
+    // not throw trying to .send() on the dead channel.
+    capturedOnChannelClose();
+    document.getElementById("message-input").value = "друге, під час обриву";
+    document.getElementById("btn-send").click();
+    expect(channel.send.mock.calls.length).toBe(sendCountAfterFirstMessage); // unchanged -- queued, not sent
+    expect(document.getElementById("chat-log").textContent).toContain("друге, під час обриву");
+
+    // Reconnects (same session key survives -- only the channel is new).
+    const newChannel = fakeChannel();
+    onChannelOpen(newChannel);
+    await vi.waitFor(() => expect(newChannel.send).toHaveBeenCalledWith("R1:ENCRYPTED_PAYLOAD"));
+    expect(encryptMessage).toHaveBeenCalledWith({ __tag: "ratchet-message-key" }, "друге, під час обриву");
   });
 
   it("sends the message on Enter, same as clicking Надіслати (bug report 2026-07-17)", async () => {
