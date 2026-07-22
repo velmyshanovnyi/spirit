@@ -397,6 +397,7 @@ const HTML = `
     <h3 id="group-conversation-heading" hidden></h3>
     <div id="group-chat-log" hidden></div>
     <div id="chat-log"></div>
+    <div id="chat-send-status" hidden></div>
     <input id="message-input" type="text">
     <button id="btn-send" type="button">Надіслати</button>
     <input id="file-input" type="file">
@@ -2217,6 +2218,13 @@ describe("btn-send", () => {
       expect(document.getElementById("connection-status").textContent).toMatch(/немає активного з'єднання/)
     );
     expect(encryptMessage).not.toHaveBeenCalled();
+    // Section RF8 (bug report): connection-status lives in the fixed top
+    // toolbar, far from the input -- a blocked send must ALSO be surfaced
+    // right next to the input itself, or it just looks like the message
+    // silently vanished instead of never having been sent.
+    expect(document.getElementById("chat-send-status").hidden).toBe(false);
+    expect(document.getElementById("chat-send-status").textContent).toMatch(/немає активного з'єднання/);
+    expect(document.getElementById("chat-log").textContent).toBe("");
   });
 
   it("encrypts the message before sending it on the data channel; never sends raw plaintext", async () => {

@@ -4141,8 +4141,18 @@ export function initApp(doc, options) {
   async function sendChatMessage() {
     if (!state.channel || !state.sessionKey) {
       setStatus(t("status.noActiveConnection"));
+      // Section RF8: connection-status lives in the fixed top toolbar now,
+      // far from the input -- also surface it right next to the input
+      // itself so a blocked send isn't mistaken for the message quietly
+      // vanishing.
+      const sendStatus = el("chat-send-status");
+      if (sendStatus) {
+        setDynamicText(sendStatus, t("status.noActiveConnection"));
+        sendStatus.hidden = false;
+      }
       return;
     }
+    el("chat-send-status")?.setAttribute("hidden", "");
     const text = el("message-input").value;
     const messageKey = await nextSendMessageKey();
     const payload = RATCHET_WIRE_PREFIX + (await encryptMessage(messageKey, text));

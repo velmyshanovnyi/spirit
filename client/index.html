@@ -423,6 +423,13 @@
         <h3 id="group-conversation-heading" hidden></h3>
         <div id="group-chat-log" class="chat-log" hidden></div>
         <div id="chat-log" class="chat-log"></div>
+        <!-- Section RF8 (bug report): connection-status moved into the
+             fixed top toolbar (Section RF6), far from the input a failed
+             send actually happens in -- a send blocked by "no active
+             connection" was easy to miss up there while the typed message
+             just silently didn't appear below. This mirrors that same
+             failure right next to the input itself. -->
+        <div id="chat-send-status" class="status" hidden></div>
         <div class="chat-input-row">
           <label for="file-input" class="btn-icon" aria-label="Надіслати файл" data-i18n-title="fileTransfer.pick" title="Надіслати файл">📎</label>
           <input id="file-input" type="file" hidden>
