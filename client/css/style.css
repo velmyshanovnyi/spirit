@@ -82,7 +82,13 @@ body {
   top: 0;
   z-index: 10;
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  /* First column matches #app-sidebar's own width (300px) exactly, so
+     centering the brand within it centers the logo over the SIDEBAR
+     specifically (per follow-up feedback) rather than across the whole
+     header/page -- not the same thing once the header's content padding
+     already lines up with the sidebar's left edge (see the padding rule
+     below). */
+  grid-template-columns: 300px 1fr auto;
   align-items: center;
   gap: 12px;
   padding: 10px max(16px, calc((100% - 1400px) / 2 + 16px));
@@ -91,17 +97,14 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-/* Logo centered in the header (per the agreed mockup) instead of flush
-   left -- a 3-column grid keeps the guest quick-actions and lang/theme/
-   settings controls pinned to their own edges regardless of the brand's
-   width. */
+/* Logo centered over the sidebar's own width (not the whole header). */
 .app-header .brand {
-  grid-column: 2;
+  grid-column: 1;
   justify-self: center;
 }
 
 .app-header #guest-quick-actions {
-  grid-column: 1;
+  grid-column: 2;
   justify-self: start;
 }
 
