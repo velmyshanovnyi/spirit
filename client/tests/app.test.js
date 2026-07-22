@@ -4751,6 +4751,26 @@ describe("Section RF4: fixed conversation toolbar + floating, draggable video wi
     expect(document.body.classList.contains("conversation-toolbar-visible")).toBe(false);
   });
 
+  it("publishes the toolbar's real rendered height as a CSS variable so .app-body's push-down margin matches it exactly, not a hardcoded guess", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+
+    const toolbar = document.getElementById("conversation-toolbar");
+    // jsdom has no real layout engine (offsetHeight is always 0) -- stub a
+    // realistic rendered height to prove the CSS variable actually tracks
+    // the element's OWN height rather than a fixed constant.
+    Object.defineProperty(toolbar, "offsetHeight", { value: 64, configurable: true });
+
+    location.hash = "#/conversation";
+    window.dispatchEvent(new Event("hashchange"));
+
+    expect(document.documentElement.style.getPropertyValue("--conversation-toolbar-height")).toBe("64px");
+  });
+
   it("applies a default position/size to the floating video panel when nothing is saved yet", () => {
     initApp(document, { locale: "uk" });
     const panel = document.getElementById("floating-video");

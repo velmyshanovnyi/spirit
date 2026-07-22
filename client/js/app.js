@@ -1847,6 +1847,24 @@ export function initApp(doc, options) {
   // a `function` declaration (hoisted) so it can be called here, before its
   // own definition further down, exactly like main-active's manual mirror
   // above needs to run before onScreenChange's hashchange listener exists.
+  // .conversation-toolbar sits right under the global header, but as fixed
+  // chrome outside normal flow it can't just rely on being next in the DOM
+  // -- its `top` has to match the header's real rendered height (which
+  // varies with locale/font/zoom), recomputed on resize too. Its OWN
+  // rendered height (which varies with content -- the ephemeral "Ви
+  // зараз" banner, connection-status text length, etc.) is published as a
+  // CSS variable so .app-body's push-down margin can match it exactly
+  // instead of a guessed fixed pixel value (exec-review-caught bug: a
+  // hardcoded 40px left a visible gap/overlap once the toolbar grew
+  // taller than that guess).
+  function positionConversationToolbar() {
+    const header = doc.querySelector(".app-header");
+    const toolbar = el("conversation-toolbar");
+    if (header && toolbar) toolbar.style.top = `${header.getBoundingClientRect().height}px`;
+    if (toolbar) {
+      doc.documentElement.style.setProperty("--conversation-toolbar-height", `${toolbar.offsetHeight}px`);
+    }
+  }
   function setConversationChromeVisible(visible) {
     const toolbar = el("conversation-toolbar");
     if (toolbar) toolbar.hidden = !visible;
@@ -1857,23 +1875,23 @@ export function initApp(doc, options) {
     const headerCallControls = el("header-call-controls");
     if (headerCallControls) headerCallControls.hidden = !visible;
     doc.body.classList.toggle("conversation-toolbar-visible", visible);
+    // Re-measure now that .hidden just changed -- a hidden element reports
+    // offsetHeight 0, so this only produces a meaningful value once shown.
+    positionConversationToolbar();
   }
   // Mirrors main-active above: a direct #/conversation load (or the
   // zero-click quick-chat flow, which navigates before any hashchange
   // listener is attached) must not leave this chrome stuck hidden.
   setConversationChromeVisible(doc.defaultView.location.hash.replace(/^#\/?/, "") === "conversation");
-
-  // .conversation-toolbar sits right under the global header, but as fixed
-  // chrome outside normal flow it can't just rely on being next in the DOM
-  // -- its `top` has to match the header's real rendered height (which
-  // varies with locale/font/zoom), recomputed on resize too.
-  function positionConversationToolbar() {
-    const header = doc.querySelector(".app-header");
-    const toolbar = el("conversation-toolbar");
-    if (header && toolbar) toolbar.style.top = `${header.getBoundingClientRect().height}px`;
-  }
-  positionConversationToolbar();
   doc.defaultView.addEventListener("resize", positionConversationToolbar);
+  // The toolbar's content can change height on its own (the ephemeral "Ви
+  // зараз" banner appearing, a longer connection-status message wrapping
+  // to a second line, ...) without any of the above call sites firing --
+  // ResizeObserver catches every case uniformly. Guarded for jsdom, same
+  // as the floating-video panel's observer below.
+  if (doc.defaultView.ResizeObserver && el("conversation-toolbar")) {
+    new doc.defaultView.ResizeObserver(positionConversationToolbar).observe(el("conversation-toolbar"));
+  }
 
   // Section RF4: floating video window -- draggable via its handle bar,
   // resizable via the native CSS `resize` on .floating-video itself (no

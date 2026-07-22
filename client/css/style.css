@@ -144,9 +144,13 @@ body {
 
 /* Reserves space for the fixed .conversation-toolbar (Section RF4) so it
    doesn't sit on top of the sidebar/main content underneath it -- toggled
-   by app.js alongside the toolbar's own .hidden (see onScreenChange). */
+   by app.js alongside the toolbar's own .hidden (see onScreenChange).
+   --conversation-toolbar-height is set from JS (positionConversationToolbar)
+   to the toolbar's REAL rendered height -- a hardcoded guess here left a
+   visible gap/overlap once the toolbar's content (title + "Ви зараз" +
+   status + invite icon) made it taller than the guess. */
 body.conversation-toolbar-visible .app-body {
-  margin-top: 40px;
+  margin-top: var(--conversation-toolbar-height, 40px);
 }
 
 #app-sidebar {
