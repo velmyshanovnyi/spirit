@@ -97,10 +97,12 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-/* Logo centered over the sidebar's own width (not the whole header). */
+/* Logo flush against the far left edge (matching the sidebar's own left
+   edge), per follow-up feedback -- not centered over the sidebar's width
+   either, just anchored at its start. */
 .app-header .brand {
   grid-column: 1;
-  justify-self: center;
+  justify-self: start;
 }
 
 .app-header #guest-quick-actions {
