@@ -4983,6 +4983,47 @@ describe("Section RF4: fixed conversation toolbar + floating, draggable video wi
     expect(stored.left).toBe(200);
     expect(stored.top).toBe(200);
   });
+
+  it("bug report: clamps the drag so the handle can never end up above the viewport (or off any other edge), unreachable", () => {
+    const originalInnerWidth = window.innerWidth;
+    const originalInnerHeight = window.innerHeight;
+    Object.defineProperty(window, "innerWidth", { value: 1000, configurable: true });
+    Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
+    try {
+    initApp(document, { locale: "uk" });
+    const panel = document.getElementById("floating-video");
+    const handle = document.getElementById("floating-video-handle");
+    panel.getBoundingClientRect = () => ({ left: 100, top: 100, width: 320, height: 240 });
+
+    const down = new Event("pointerdown");
+    down.clientX = 110;
+    down.clientY = 105;
+    down.pointerId = 1;
+    handle.dispatchEvent(down);
+
+    // Drag far above/left of the viewport -- must clamp to 0, not go negative.
+    const moveNegative = new Event("pointermove");
+    moveNegative.clientX = -500;
+    moveNegative.clientY = -500;
+    handle.dispatchEvent(moveNegative);
+    expect(panel.style.left).toBe("0px");
+    expect(panel.style.top).toBe("0px");
+
+    // Drag far below/right of the viewport -- must clamp so at least part
+    // of the panel (including its handle) stays on-screen and grabbable.
+    const moveFar = new Event("pointermove");
+    moveFar.clientX = 5000;
+    moveFar.clientY = 5000;
+    handle.dispatchEvent(moveFar);
+    expect(parseFloat(panel.style.left)).toBeLessThanOrEqual(1000);
+    expect(parseFloat(panel.style.top)).toBeLessThanOrEqual(800);
+    expect(parseFloat(panel.style.left)).toBeGreaterThan(0);
+    expect(parseFloat(panel.style.top)).toBeGreaterThan(0);
+    } finally {
+      Object.defineProperty(window, "innerWidth", { value: originalInnerWidth, configurable: true });
+      Object.defineProperty(window, "innerHeight", { value: originalInnerHeight, configurable: true });
+    }
+  });
 });
 
 describe("multi-screen navigation (Section N2)", () => {

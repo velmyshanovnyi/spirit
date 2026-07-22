@@ -2021,12 +2021,31 @@ export function initApp(doc, options) {
       const saved = loadFloatingVideoRect();
       const defaultWidth = 320;
       const defaultHeight = 240;
-      const rect = saved || {
-        left: Math.max(16, win.innerWidth - defaultWidth - 16),
-        top: Math.max(16, win.innerHeight - defaultHeight - 16),
-        width: defaultWidth,
-        height: defaultHeight
+      // Bug report: dragging the handle above the viewport top (or far past
+      // any other edge) left it stuck there -- a fixed-position element at
+      // top < 0 renders above the visible page entirely, so the handle
+      // itself became unreachable to drag it back. Clamps left/top so at
+      // least HANDLE_MARGIN px of the panel (including its own drag handle,
+      // which is its top strip) always stays on-screen and grabbable,
+      // regardless of viewport size or how the panel got positioned.
+      const HANDLE_MARGIN = 32;
+      const clampRect = (rect) => {
+        const maxLeft = Math.max(0, win.innerWidth - HANDLE_MARGIN);
+        const maxTop = Math.max(0, win.innerHeight - HANDLE_MARGIN);
+        return {
+          ...rect,
+          left: Math.min(Math.max(rect.left, 0), maxLeft),
+          top: Math.min(Math.max(rect.top, 0), maxTop)
+        };
       };
+      const rect = clampRect(
+        saved || {
+          left: Math.max(16, win.innerWidth - defaultWidth - 16),
+          top: Math.max(16, win.innerHeight - defaultHeight - 16),
+          width: defaultWidth,
+          height: defaultHeight
+        }
+      );
       panel.style.left = `${rect.left}px`;
       panel.style.top = `${rect.top}px`;
       panel.style.width = `${rect.width}px`;
@@ -2053,8 +2072,12 @@ export function initApp(doc, options) {
         });
         handle.addEventListener("pointermove", (event) => {
           if (!dragging) return;
-          panel.style.left = `${event.clientX - dragOffsetX}px`;
-          panel.style.top = `${event.clientY - dragOffsetY}px`;
+          const maxLeft = Math.max(0, win.innerWidth - HANDLE_MARGIN);
+          const maxTop = Math.max(0, win.innerHeight - HANDLE_MARGIN);
+          const nextLeft = Math.min(Math.max(event.clientX - dragOffsetX, 0), maxLeft);
+          const nextTop = Math.min(Math.max(event.clientY - dragOffsetY, 0), maxTop);
+          panel.style.left = `${nextLeft}px`;
+          panel.style.top = `${nextTop}px`;
         });
         const endDrag = () => {
           if (!dragging) return;
@@ -2081,6 +2104,16 @@ export function initApp(doc, options) {
         });
         observer.observe(panel);
       }
+
+      // Re-clamps on window resize too -- a panel dragged near an edge on a
+      // large window would otherwise end up off-screen (handle included)
+      // after the browser window itself shrinks.
+      win.addEventListener("resize", () => {
+        const current = { left: panel.offsetLeft, top: panel.offsetTop, width: panel.offsetWidth, height: panel.offsetHeight };
+        const clamped = clampRect(current);
+        panel.style.left = `${clamped.left}px`;
+        panel.style.top = `${clamped.top}px`;
+      });
     }
   }
 
