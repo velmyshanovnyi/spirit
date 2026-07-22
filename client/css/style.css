@@ -69,6 +69,14 @@ body {
 
 /* ---------- Header ---------- */
 
+/* Header/toolbar backgrounds stay full-bleed (edge to edge), but their
+   CONTENT lines up with .app-body's actual content edges (which centers
+   at max-width: 1400px on wide viewports, per Section RF7 bug report --
+   the header/toolbar previously used a flat 16px padding regardless of
+   viewport width, so on anything wider than 1400px their content sat
+   noticeably inboard of/outboard of the sidebar and main content below).
+   max() falls back to the plain 16px once the viewport is narrower than
+   1400px (the calc() would go negative, which max() clamps away). */
 .app-header {
   position: sticky;
   top: 0;
@@ -77,7 +85,7 @@ body {
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 12px;
-  padding: 10px 16px;
+  padding: 10px max(16px, calc((100% - 1400px) / 2 + 16px));
   background: color-mix(in srgb, var(--card-bg) 85%, transparent);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
@@ -781,7 +789,7 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 6px 16px;
+  padding: 6px max(16px, calc((100% - 1400px) / 2 + 16px));
   background: var(--card-bg);
   border-bottom: 1px solid var(--border);
 }
