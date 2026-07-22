@@ -38,6 +38,7 @@ import { sendPushNotification } from "./pushSend.js";
 import { appendMessage, listMessages, listConversations } from "./historyStore.js";
 import { splitSecret } from "./shamir.js";
 import { buildRecoveryShareAnnounce, parseRecoveryShareAnnounce, encodeShareAsText } from "./recoveryShare.js";
+import { computeSharedSafetyNumber, hexToEmoji } from "./safetyNumber.js";
 import { saveTrustedShare, listTrustedShares, getTrustedShare } from "./trustedShares.js";
 import { qrSvgMarkup } from "./qr.js";
 import { recoverFromShares } from "./socialRecovery.js";
@@ -253,6 +254,15 @@ export function initApp(doc, options) {
     // instead of being blocked outright -- drained the moment a channel +
     // session key are both available again (flushPendingOutgoingMessages).
     pendingOutgoingMessages: [],
+    // Section RF10: "peer" shows each side's independently-verified fingerprint
+    // of the OTHER party (asymmetric, the original behavior); "shared" shows
+    // one order-independent value derived from BOTH fingerprints together
+    // (computeSharedSafetyNumber), comparable banner-to-banner. Synced to
+    // whichever peer(s) are connected via a safety-display-mode control
+    // message the moment either side toggles it.
+    safetyDisplayMode: "peer",
+    sharedSafetyNumber: null,
+    safetyHintVisible: false,
     // Own camera/mic MediaStream, acquired for local preview as soon as the
     // conversation lobby opens (Section F6) -- null before then and used by
     // the camera/mic toggle buttons.
@@ -437,6 +447,11 @@ export function initApp(doc, options) {
   const hideSafetyNumberHint = () => {
     const hintEl = el("safety-number-hint");
     if (hintEl) hintEl.hidden = true;
+    // Section RF10: don't carry a "shared" choice over into an unrelated
+    // next session/peer -- each new peer starts back at the default.
+    state.safetyHintVisible = false;
+    state.sharedSafetyNumber = null;
+    state.safetyDisplayMode = "peer";
     // Section FT2 (file-transfer.md): every site that resets peerFingerprint
     // (logout, starting a fresh session, joining a new one) also invalidates
     // any in-flight file transfers with the PREVIOUS peer -- an outgoing
@@ -450,6 +465,62 @@ export function initApp(doc, options) {
     const offerBanner = el("file-offer-banner");
     if (offerBanner) offerBanner.hidden = true;
   };
+  // Section RF10: re-renders the safety-number banner from current state
+  // (peerFingerprint/sharedSafetyNumber/safetyDisplayMode) -- called after
+  // computing a fresh value AND after either toggling locally or receiving
+  // the peer's toggle, so both call sites share one rendering path instead
+  // of drifting apart.
+  function renderSafetyHint() {
+    const hintEl = el("safety-number-hint");
+    if (!hintEl) return;
+    if (!state.safetyHintVisible || !state.peerFingerprint) {
+      hintEl.hidden = true;
+      return;
+    }
+    hintEl.hidden = false;
+    const shared = state.safetyDisplayMode === "shared" && state.sharedSafetyNumber;
+    const value = shared ? state.sharedSafetyNumber : state.peerFingerprint;
+    const textEl = el("safety-hint-text");
+    if (textEl) {
+      setDynamicText(
+        textEl,
+        shared ? t("safety.hintShared", { code: value }) : t("safety.hint", { fp: formatSpiritId(value) })
+      );
+    }
+    const emojiEl = el("safety-hint-emoji");
+    if (emojiEl) emojiEl.textContent = hexToEmoji(value);
+    const toggleBtn = el("btn-safety-toggle-mode");
+    if (toggleBtn) {
+      setDynamicText(toggleBtn, shared ? t("safety.switchToPeer") : t("safety.switchToShared"));
+    }
+  }
+  // Section RF10: tells whichever peer(s) are currently connected to switch
+  // their own display to match -- the whole point of the toggle is that
+  // both sides look at the same kind of value at the same time. Mirrors
+  // sendGroupMessage's fan-out shape for the group case (best-effort, one
+  // recipient's failure doesn't block the others).
+  async function broadcastSafetyDisplayMode() {
+    const payload = JSON.stringify({ type: "safety-display-mode", mode: state.safetyDisplayMode });
+    if (state.activeGroupId) {
+      for (const peer of state.peers.values()) {
+        if (peer.groupId !== state.activeGroupId || !peer.channel || !peer.sessionKey) continue;
+        try {
+          peer.channel.send(await encryptMessage(peer.sessionKey, payload));
+        } catch {
+          // Best-effort fan-out, same philosophy as broadcastGroupMemberJoined.
+        }
+      }
+      return;
+    }
+    if (state.channel && state.sessionKey) {
+      state.channel.send(await encryptMessage(state.sessionKey, payload));
+    }
+  }
+  el("btn-safety-toggle-mode")?.addEventListener("click", () => {
+    state.safetyDisplayMode = state.safetyDisplayMode === "shared" ? "peer" : "shared";
+    renderSafetyHint();
+    void broadcastSafetyDisplayMode();
+  });
   const setGoogleStatus = (text) => {
     el("google-verify-status").textContent = text;
   };
@@ -2313,7 +2384,8 @@ export function initApp(doc, options) {
     "file-reject",
     "file-chunk",
     "group-member-joined",
-    "group-message"
+    "group-message",
+    "safety-display-mode"
   ]);
 
   // Section FT2 (specs/phase4/file-transfer.md), architectural decisions:
@@ -2645,15 +2717,11 @@ export function initApp(doc, options) {
         continuity = status === "known" ? t("status.knownContact") : t("status.newContact");
         isFirstMeeting = status !== "known";
       }
-      const hintEl = el("safety-number-hint");
-      if (hintEl) {
-        if (isFirstMeeting) {
-          setDynamicText(hintEl, t("safety.hint", { fp: formatSpiritId(verified.fingerprint) }));
-          hintEl.hidden = false;
-        } else {
-          hintEl.hidden = true;
-        }
-      }
+      state.safetyHintVisible = isFirstMeeting;
+      state.sharedSafetyNumber = isFirstMeeting
+        ? await computeSharedSafetyNumber(state.senderKey, verified.fingerprint)
+        : null;
+      renderSafetyHint();
       // A nickname is peer-CHOSEN, not proof of identity -- a different
       // fingerprint could announce the same nickname (impersonation-by-name,
       // flagged in exec review). The fingerprint must stay visible so TOFU
@@ -2703,6 +2771,16 @@ export function initApp(doc, options) {
       if (accepted !== heldList) {
         await updateContactDeviceList(state.peerFingerprint, accepted);
       }
+      return;
+    }
+
+    if (control.type === "safety-display-mode") {
+      // Section RF10: applies the PEER's chosen display mode to this side
+      // too, so both ends look at the same kind of value at the same
+      // time -- no identity gate needed, this is a display preference,
+      // not a trust decision.
+      state.safetyDisplayMode = control.mode === "shared" ? "shared" : "peer";
+      renderSafetyHint();
       return;
     }
 

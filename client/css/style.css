@@ -501,6 +501,15 @@ button:disabled {
   border-radius: var(--radius-sm);
 }
 
+/* Section RF10: emoji rendering of the safety-number value -- a friendlier
+   read-aloud/eyeball-compare surface than raw hex, shown alongside it
+   (not instead of it). */
+.safety-hint-emoji {
+  font-size: 20px;
+  letter-spacing: 4px;
+  margin-top: 4px;
+}
+
 .secret-output {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12.5px;

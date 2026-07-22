@@ -386,7 +386,11 @@ const HTML = `
   </div>
 
   <section data-screen="conversation">
-    <div id="safety-number-hint" hidden class="banner-warn"></div>
+    <div id="safety-number-hint" hidden class="banner-warn">
+      <div id="safety-hint-text"></div>
+      <div id="safety-hint-emoji"></div>
+      <button id="btn-safety-toggle-mode" type="button"></button>
+    </div>
     <div id="file-offer-banner" hidden class="banner-warn">
       <span id="file-offer-text"></span>
       <button id="btn-file-accept" type="button">Прийняти</button>
@@ -3126,6 +3130,57 @@ describe("identity announce in chat flows (Section 12)", () => {
     await vi.waitFor(() => expect(hint.hidden).toBe(false));
     expect(hint.textContent).toContain("spirit0001peer-fp-ephemeral");
     expect(rememberContact).not.toHaveBeenCalled();
+  });
+
+  it("Section RF10: defaults to peer-identifier mode with an emoji rendering, and toggling switches to a shared code + notifies the peer", async () => {
+    verifyIdentityAnnounce.mockResolvedValue({ identityPublicKey: {}, identityPubkeyWire: "PEER", fingerprint: "b".repeat(64) });
+    fingerprint.mockResolvedValue("a".repeat(64));
+    encryptMessage.mockResolvedValue("ENCRYPTED_TOGGLE");
+
+    const { captured, channel } = await establishedInitiatorChat();
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+
+    const hint = document.getElementById("safety-number-hint");
+    await vi.waitFor(() => expect(hint.hidden).toBe(false));
+    expect(document.getElementById("safety-hint-text").textContent).toContain(formatSpiritId("b".repeat(64)));
+    expect(document.getElementById("safety-hint-emoji").textContent.trim()).not.toBe("");
+    const emojiBefore = document.getElementById("safety-hint-emoji").textContent;
+
+    document.getElementById("btn-safety-toggle-mode").click();
+
+    // Shared mode: NOT wrapped in the spirit0001 prefix (it isn't anyone's
+    // real identity, just a derived comparison code) and renders a
+    // DIFFERENT emoji sequence than the peer-identifier mode did.
+    expect(document.getElementById("safety-hint-text").textContent).not.toContain("spirit0001");
+    expect(document.getElementById("safety-hint-emoji").textContent).not.toBe(emojiBefore);
+    await vi.waitFor(() =>
+      expect(channel.send).toHaveBeenCalledWith("ENCRYPTED_TOGGLE")
+    );
+    expect(encryptMessage).toHaveBeenCalledWith(
+      { __tag: "session-key" },
+      expect.stringContaining("\"type\":\"safety-display-mode\"")
+    );
+  });
+
+  it("Section RF10: applies the PEER's toggle to this side too, without any local click", async () => {
+    verifyIdentityAnnounce.mockResolvedValue({ identityPublicKey: {}, identityPubkeyWire: "PEER", fingerprint: "b".repeat(64) });
+    fingerprint.mockResolvedValue("a".repeat(64));
+
+    const { captured } = await establishedInitiatorChat();
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+    await vi.waitFor(() => expect(document.getElementById("safety-number-hint").hidden).toBe(false));
+
+    const textBefore = document.getElementById("safety-hint-text").textContent;
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "safety-display-mode", mode: "shared" }));
+    await captured.onMessage("ENCRYPTED_TOGGLE_FROM_PEER");
+
+    expect(document.getElementById("safety-hint-text").textContent).not.toBe(textBefore);
+    expect(document.getElementById("safety-hint-text").textContent).not.toContain("spirit0001");
+    // Toggling BACK from here (locally) must produce the peer-mode view again.
+    document.getElementById("btn-safety-toggle-mode").click();
+    expect(document.getElementById("safety-hint-text").textContent).toContain(formatSpiritId("b".repeat(64)));
   });
 });
 

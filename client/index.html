@@ -406,7 +406,17 @@
     <!-- ================= Розмова (чат + відеодзвінок) ================= -->
     <section data-screen="conversation" class="screen">
       <section class="card card-wide">
-        <div id="safety-number-hint" hidden class="banner-warn"></div>
+        <!-- Section RF10: two ways to present this verification value --
+             each side's own view of the peer's fingerprint (default), or one
+             shared order-independent code both sides can compare directly.
+             Toggling syncs the OTHER side's display too (safety-display-mode
+             control message) -- see app.js's renderSafetyHint/
+             broadcastSafetyDisplayMode. -->
+        <div id="safety-number-hint" hidden class="banner-warn">
+          <div id="safety-hint-text"></div>
+          <div id="safety-hint-emoji" class="safety-hint-emoji" aria-hidden="true"></div>
+          <button id="btn-safety-toggle-mode" type="button" class="btn-link"></button>
+        </div>
         <div id="file-offer-banner" hidden class="banner-warn">
           <span id="file-offer-text"></span>
           <button id="btn-file-accept" type="button" data-i18n="fileTransfer.accept">Прийняти</button>
