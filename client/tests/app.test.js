@@ -4659,11 +4659,16 @@ describe("video call (Section V2)", () => {
     await establishedInitiatorChat();
     document.getElementById("btn-start-call").click();
     await vi.waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1));
+    expect(document.getElementById("btn-start-call").classList.contains("active")).toBe(true);
+    expect(document.getElementById("btn-toggle-camera").classList.contains("active")).toBe(true);
+    expect(document.getElementById("btn-toggle-mic").classList.contains("active")).toBe(true);
 
     document.getElementById("btn-toggle-camera").click();
     expect(localTracks[0].enabled).toBe(false);
+    expect(document.getElementById("btn-toggle-camera").classList.contains("active")).toBe(false);
     document.getElementById("btn-toggle-mic").click();
     expect(localTracks[1].enabled).toBe(false);
+    expect(document.getElementById("btn-toggle-mic").classList.contains("active")).toBe(false);
     expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
   });
 
@@ -4681,6 +4686,7 @@ describe("video call (Section V2)", () => {
 
     for (const id of ["btn-start-call", "btn-toggle-camera", "btn-toggle-mic"]) {
       expect(document.getElementById(id).disabled).toBe(true);
+      expect(document.getElementById(id).classList.contains("active")).toBe(false);
     }
     for (const track of localTracks) {
       expect(track.stop).toHaveBeenCalled();

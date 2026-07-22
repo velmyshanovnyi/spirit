@@ -737,24 +737,65 @@ button:disabled {
 /* ---------- Video call (Section V, specs/ui/video-call.md) ---------- */
 
 .video-area {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 8px;
+  position: relative;
+  min-height: 200px;
 }
 
-@media (min-width: 480px) {
-  .video-area {
-    grid-template-columns: 2fr 1fr;
-  }
-}
-
-.video-tile {
-  min-height: 140px;
+.video-tile-remote {
   width: 100%;
+  min-height: 200px;
   background: var(--code-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   object-fit: cover;
+}
+
+/* Self-view as a floating overlay window (picture-in-picture style)
+   instead of a same-size tile sitting side-by-side with the remote
+   video -- standard video-call convention, and much less space when
+   there's no remote peer video to show yet. */
+.video-tile-local {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  width: 30%;
+  max-width: 160px;
+  min-width: 90px;
+  aspect-ratio: 4 / 3;
+  background: var(--code-bg);
+  border: 2px solid var(--bg);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  object-fit: cover;
+  z-index: 2;
+}
+
+.call-controls {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 3;
+  display: flex;
+  gap: 6px;
+}
+
+.call-controls .btn-icon {
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.call-controls .btn-icon:hover {
+  background: rgba(0, 0, 0, 0.65);
+}
+
+/* Reflects actual on/off state (state.localStream + track.enabled in
+   app.js), not just :hover/:focus -- a toggled-on control reads as
+   visually "lit up" against the video, same accent used by .chip-active. */
+.call-controls .btn-icon.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
 }
 
 .hint-text {

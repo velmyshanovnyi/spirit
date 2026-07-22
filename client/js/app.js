@@ -1917,6 +1917,7 @@ export function initApp(doc, options) {
     state.senderKey = null;
     state.nickname = null;
     state.localStream = null;
+    updateCallButtonStates();
     hideSafetyNumberHint();
     // Section GC0: deletes the active state.peers entry outright (pc,
     // channel, sessionKey, sessionEcdhWires, sendChainKey, receiveChainKey,
@@ -2345,6 +2346,22 @@ export function initApp(doc, options) {
     await put("profile", key, remaining);
   }
 
+  // Reflects real on/off state on the icon call-controls (.active, styled in
+  // style.css) rather than leaving them looking identical whether camera/mic
+  // are live or not -- a plain :hover/:focus ring isn't enough to tell.
+  // btn-start-call is "active" once there's a local stream at all (a call is
+  // underway or at least being previewed); camera/mic reflect their own
+  // track.enabled.
+  function updateCallButtonStates() {
+    const hasStream = !!state.localStream;
+    el("btn-start-call")?.classList.toggle("active", hasStream);
+    const tracks = hasStream ? state.localStream.getTracks() : [];
+    const videoEnabled = tracks.some((track) => track.kind === "video" && track.enabled);
+    const audioEnabled = tracks.some((track) => track.kind === "audio" && track.enabled);
+    el("btn-toggle-camera")?.classList.toggle("active", videoEnabled);
+    el("btn-toggle-mic")?.classList.toggle("active", audioEnabled);
+  }
+
   // Section F6 (instant conversation lobby, 2026-07-17): local camera/mic
   // preview only -- no peer connection involved, so this is safe to call the
   // moment the conversation screen opens, before any peer has joined. Errors
@@ -2360,6 +2377,7 @@ export function initApp(doc, options) {
         el("video-local").srcObject = stream;
         el("btn-toggle-camera").disabled = false;
         el("btn-toggle-mic").disabled = false;
+        updateCallButtonStates();
         return stream;
       } catch (err) {
         setVideoStatus(t("status.error", { msg: err.message }));
@@ -2857,6 +2875,7 @@ export function initApp(doc, options) {
           state.localStream = null;
         }
         state.localTracksAddedToPeer = false;
+        updateCallButtonStates();
       },
       onError: (err) => {
         disarmIceTimeout(); // the local-description IIFE failed before onLocalOfferReady/onLocalAnswerReady
@@ -3938,6 +3957,7 @@ export function initApp(doc, options) {
       await acquireLocalStream();
       const offer = await createRenegotiationOffer(state.pc);
       state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify({ type: "webrtc-call-offer", sdp: offer })));
+      updateCallButtonStates();
     } catch (err) {
       setVideoStatus(t("status.error", { msg: err.message }));
     }
@@ -3948,6 +3968,7 @@ export function initApp(doc, options) {
     for (const track of state.localStream.getTracks()) {
       if (track.kind === "video") track.enabled = !track.enabled;
     }
+    updateCallButtonStates();
   });
 
   el("btn-toggle-mic").addEventListener("click", () => {
@@ -3955,6 +3976,7 @@ export function initApp(doc, options) {
     for (const track of state.localStream.getTracks()) {
       if (track.kind === "audio") track.enabled = !track.enabled;
     }
+    updateCallButtonStates();
   });
 
   async function sendChatMessage() {

@@ -377,7 +377,7 @@
         <h2 data-i18n="conversation.heading">Розмова</h2>
         <div id="connection-status" class="status" data-i18n="conn.none">не з'єднано</div>
         <div id="invite-bar" hidden class="identity">
-          <button id="btn-invite-from-chat" type="button" class="btn-icon" aria-label="Запросити">🔗 <span data-i18n="btn.copyInvite">Скопіювати запрошення</span></button>
+          <button id="btn-invite-from-chat" type="button" class="btn-icon" aria-label="Запросити" data-i18n-title="btn.copyInvite" title="Скопіювати запрошення">🔗</button>
         </div>
         <div id="ephemeral-identity-banner" hidden class="identity">
           <span data-i18n="ephemeral.youAre">Ви зараз:</span> <strong id="ephemeral-nickname-display"></strong>
@@ -390,19 +390,17 @@
         </div>
         <div id="file-transfers" class="list-area"></div>
         <div class="video-area">
+          <!-- Icon-only call controls float over the top-left corner of the
+               video area (standard video-call UI convention) instead of a
+               labeled button row below it. .active is toggled in app.js to
+               reflect actual on/off state, not just :hover/:focus. -->
+          <div class="call-controls">
+            <button id="btn-start-call" type="button" class="btn-icon" aria-label="Дзвінок" data-i18n-title="video.startCall" title="Дзвінок">📞</button>
+            <button id="btn-toggle-camera" type="button" class="btn-icon" aria-label="Камера" data-i18n-title="video.toggleCamera" title="Камера">🎥</button>
+            <button id="btn-toggle-mic" type="button" class="btn-icon" aria-label="Мікрофон" data-i18n-title="video.toggleMic" title="Мікрофон">🎤</button>
+          </div>
           <video id="video-remote" class="video-tile video-tile-remote" autoplay playsinline></video>
           <video id="video-local" class="video-tile video-tile-local" autoplay playsinline muted></video>
-        </div>
-        <div class="btn-row">
-          <button id="btn-start-call" type="button">
-            <span aria-hidden="true">📞</span> <span data-i18n="video.startCall">Дзвінок</span>
-          </button>
-          <button id="btn-toggle-camera" type="button">
-            <span aria-hidden="true">🎥</span> <span data-i18n="video.toggleCamera">Камера</span>
-          </button>
-          <button id="btn-toggle-mic" type="button">
-            <span aria-hidden="true">🎤</span> <span data-i18n="video.toggleMic">Мікрофон</span>
-          </button>
         </div>
         <div id="video-status" class="status"></div>
 
@@ -415,10 +413,10 @@
         <div id="group-chat-log" class="chat-log" hidden></div>
         <div id="chat-log" class="chat-log"></div>
         <div class="chat-input-row">
+          <label for="file-input" class="btn-icon" aria-label="Надіслати файл" data-i18n-title="fileTransfer.pick" title="Надіслати файл">📎</label>
+          <input id="file-input" type="file" hidden>
           <input id="message-input" type="text" data-i18n-placeholder="chat.placeholder">
           <button id="btn-send" type="button" class="btn-primary" data-i18n="btn.send">Надіслати</button>
-          <label for="file-input" class="btn-icon" data-i18n="fileTransfer.pick">📎 Надіслати файл</label>
-          <input id="file-input" type="file" hidden>
         </div>
       </section>
     </section>
