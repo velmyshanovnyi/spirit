@@ -361,16 +361,23 @@ const HTML = `
     <div id="invite-status"></div>
   </section>
 
-  <!-- Section RF4: fixed chrome OUTSIDE any [data-screen], mirroring the
-       real index.html -- app.js's setConversationChromeVisible toggles
+  <!-- Section RF4/RF6: fixed chrome OUTSIDE any [data-screen], mirroring
+       the real index.html -- app.js's setConversationChromeVisible toggles
        these directly (route === "conversation"), not router.js. -->
-  <div id="conversation-toolbar" hidden>
-    <div id="invite-bar" hidden>
-      <button id="btn-invite-from-chat" type="button">Скопіювати запрошення</button>
-    </div>
+  <span id="header-call-controls" hidden>
     <button id="btn-start-call" type="button"></button>
     <button id="btn-toggle-camera" type="button"></button>
     <button id="btn-toggle-mic" type="button"></button>
+  </span>
+  <div id="conversation-toolbar" hidden>
+    <h2 data-i18n="conversation.heading"></h2>
+    <div id="ephemeral-identity-banner" hidden>
+      <span id="ephemeral-nickname-display"></span>
+    </div>
+    <div id="connection-status" data-i18n="conn.none">не з'єднано</div>
+    <div id="invite-bar" hidden>
+      <button id="btn-invite-from-chat" type="button">Скопіювати запрошення</button>
+    </div>
   </div>
   <div id="floating-video" hidden>
     <div id="floating-video-handle"></div>
@@ -379,10 +386,6 @@ const HTML = `
   </div>
 
   <section data-screen="conversation">
-    <div id="connection-status" data-i18n="conn.none">не з'єднано</div>
-    <div id="ephemeral-identity-banner" hidden>
-      <span id="ephemeral-nickname-display"></span>
-    </div>
     <div id="safety-number-hint" hidden class="banner-warn"></div>
     <div id="file-offer-banner" hidden class="banner-warn">
       <span id="file-offer-text"></span>
@@ -4730,18 +4733,21 @@ describe("Section RF4: fixed conversation toolbar + floating, draggable video wi
 
     expect(document.getElementById("conversation-toolbar").hidden).toBe(true);
     expect(document.getElementById("floating-video").hidden).toBe(true);
+    expect(document.getElementById("header-call-controls").hidden).toBe(true);
     expect(document.body.classList.contains("conversation-toolbar-visible")).toBe(false);
 
     location.hash = "#/conversation";
     window.dispatchEvent(new Event("hashchange"));
     expect(document.getElementById("conversation-toolbar").hidden).toBe(false);
     expect(document.getElementById("floating-video").hidden).toBe(false);
+    expect(document.getElementById("header-call-controls").hidden).toBe(false);
     expect(document.body.classList.contains("conversation-toolbar-visible")).toBe(true);
 
     location.hash = "#/history";
     window.dispatchEvent(new Event("hashchange"));
     expect(document.getElementById("conversation-toolbar").hidden).toBe(true);
     expect(document.getElementById("floating-video").hidden).toBe(true);
+    expect(document.getElementById("header-call-controls").hidden).toBe(true);
     expect(document.body.classList.contains("conversation-toolbar-visible")).toBe(false);
   });
 

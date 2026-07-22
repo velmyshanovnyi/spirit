@@ -1852,6 +1852,10 @@ export function initApp(doc, options) {
     if (toolbar) toolbar.hidden = !visible;
     const floatingVideo = el("floating-video");
     if (floatingVideo) floatingVideo.hidden = !visible;
+    // Section RF6: call/camera/mic icons moved into the global header
+    // itself (still gated on the same route check as the toolbar above).
+    const headerCallControls = el("header-call-controls");
+    if (headerCallControls) headerCallControls.hidden = !visible;
     doc.body.classList.toggle("conversation-toolbar-visible", visible);
   }
   // Mirrors main-active above: a direct #/conversation load (or the

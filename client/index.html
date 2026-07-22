@@ -25,6 +25,16 @@
       <button id="btn-quick-login" type="button" class="btn-link" data-i18n="quick.login">Увійти</button>
     </div>
     <div class="header-controls">
+      <!-- Section RF6 (follow-up mockup): call/camera/mic icons live in the
+           global header itself, right next to lang/theme, instead of their
+           own row underneath -- shown only on the conversation route via
+           app.js's setConversationChromeVisible (same route gate as
+           #conversation-toolbar below, just a different DOM location). -->
+      <span id="header-call-controls" class="header-call-controls" hidden>
+        <button id="btn-start-call" type="button" class="btn-icon" aria-label="Дзвінок" data-i18n-title="video.startCall" title="Дзвінок">📞</button>
+        <button id="btn-toggle-camera" type="button" class="btn-icon" aria-label="Камера" data-i18n-title="video.toggleCamera" title="Камера">🎥</button>
+        <button id="btn-toggle-mic" type="button" class="btn-icon" aria-label="Мікрофон" data-i18n-title="video.toggleMic" title="Мікрофон">🎤</button>
+      </span>
       <select id="lang-select" aria-label="Language"></select>
       <button id="theme-toggle" type="button" class="btn-icon" data-i18n-title="theme.toggle" aria-label="Theme">◐</button>
       <div class="settings-wrap">
@@ -53,19 +63,26 @@
     </div>
   </header>
 
-  <!-- Section RF4 (floating video/toolbar redesign): the invite/call/
-       camera/mic icons live in their own fixed bar right under the global
-       header, independent of the conversation card's own scroll/layout --
-       outside [data-screen] entirely (app.js's onScreenChange shows/hides
-       it based on route === "conversation", covering both 1:1 and group
-       chat per Section GC3). -->
+  <!-- Section RF6 (follow-up mockup): a fixed bar right under the global
+       header, aligned with the sidebar/main-content split below it --
+       conversation title + "Ви зараз" ephemeral nickname on the left,
+       connection status/error + invite icon on the right. Independent of
+       the conversation card's own scroll/layout, outside [data-screen]
+       entirely (app.js's onScreenChange shows/hides it based on route ===
+       "conversation", covering both 1:1 and group chat per Section GC3). -->
   <div id="conversation-toolbar" class="conversation-toolbar" hidden>
-    <div id="invite-bar" hidden>
-      <button id="btn-invite-from-chat" type="button" class="btn-icon" aria-label="Запросити" data-i18n-title="btn.copyInvite" title="Скопіювати запрошення">🔗</button>
+    <div class="conversation-toolbar-left">
+      <h2 data-i18n="conversation.heading">Розмова</h2>
+      <div id="ephemeral-identity-banner" hidden class="identity">
+        <span data-i18n="ephemeral.youAre">Ви зараз:</span> <strong id="ephemeral-nickname-display"></strong>
+      </div>
     </div>
-    <button id="btn-start-call" type="button" class="btn-icon" aria-label="Дзвінок" data-i18n-title="video.startCall" title="Дзвінок">📞</button>
-    <button id="btn-toggle-camera" type="button" class="btn-icon" aria-label="Камера" data-i18n-title="video.toggleCamera" title="Камера">🎥</button>
-    <button id="btn-toggle-mic" type="button" class="btn-icon" aria-label="Мікрофон" data-i18n-title="video.toggleMic" title="Мікрофон">🎤</button>
+    <div class="conversation-toolbar-right">
+      <div id="connection-status" class="status" data-i18n="conn.none">не з'єднано</div>
+      <div id="invite-bar" hidden>
+        <button id="btn-invite-from-chat" type="button" class="btn-icon" aria-label="Запросити" data-i18n-title="btn.copyInvite" title="Скопіювати запрошення">🔗</button>
+      </div>
+    </div>
   </div>
 
   <div id="welcome-modal" hidden class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
@@ -389,11 +406,6 @@
     <!-- ================= Розмова (чат + відеодзвінок) ================= -->
     <section data-screen="conversation" class="screen">
       <section class="card card-wide">
-        <h2 data-i18n="conversation.heading">Розмова</h2>
-        <div id="connection-status" class="status" data-i18n="conn.none">не з'єднано</div>
-        <div id="ephemeral-identity-banner" hidden class="identity">
-          <span data-i18n="ephemeral.youAre">Ви зараз:</span> <strong id="ephemeral-nickname-display"></strong>
-        </div>
         <div id="safety-number-hint" hidden class="banner-warn"></div>
         <div id="file-offer-banner" hidden class="banner-warn">
           <span id="file-offer-text"></span>

@@ -764,9 +764,10 @@ button:disabled {
    Section RF4: floating window + fixed toolbar redesign) ---------- */
 
 /* Fixed row right under the global header (not inside the conversation
-   card) -- invite/call/camera/mic icons, shown only while route ===
-   "conversation" (app.js's onScreenChange toggles .hidden; `top` is set
-   from JS to the header's real rendered height, see positionConversationToolbar). */
+   card) -- title + "Ви зараз" on the left, connection status/error +
+   invite icon on the right, shown only while route === "conversation"
+   (app.js's onScreenChange toggles .hidden; `top` is set from JS to the
+   header's real rendered height, see positionConversationToolbar). */
 .conversation-toolbar {
   position: fixed;
   left: 0;
@@ -774,14 +775,49 @@ button:disabled {
   z-index: 90;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 12px;
   padding: 6px 16px;
   background: var(--card-bg);
   border-bottom: 1px solid var(--border);
 }
 
-.conversation-toolbar .btn-icon.active {
+.conversation-toolbar-left,
+.conversation-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.conversation-toolbar-left h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.conversation-toolbar-right .status {
+  margin: 0;
+  padding: 4px 10px;
+  min-height: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Call/camera/mic icons moved into the global header itself (Section
+   RF6) -- a plain inline flex span among the header's other controls. */
+.header-call-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.header-call-controls .btn-icon.active {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-contrast);
