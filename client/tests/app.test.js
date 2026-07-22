@@ -5860,6 +5860,40 @@ describe("identity verification proofs (Section E)", () => {
     expect(document.getElementById("group-conversation-heading").hidden).toBe(false);
   });
 
+  it("a group can be assigned to a folder via drag&drop, same as a contact, and is included when that folder is selected", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    listContacts.mockResolvedValue([
+      { fingerprint: "a".repeat(64), nickname: "Іван", identityPubkeyWire: "W1", firstSeen: 1, deviceList: null }
+    ]);
+    listGroups.mockResolvedValue([{ groupId: "group-1", name: "Друзі", memberFingerprints: [], createdAt: 1 }]);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+    await vi.waitFor(() => expect(document.querySelectorAll("#contacts-list .list-row").length).toBe(2));
+
+    document.querySelector("#folder-tree [data-folder-edit-toggle]").click();
+    document.querySelector("#folder-tree [data-add-folder]").click();
+    const folderRow = document.querySelector("#folder-tree .folder-row");
+
+    const contactRow = document.querySelector("#contacts-list [data-contact-fingerprint]");
+    const groupRow = document.querySelector("#contacts-list [data-group-id]");
+    groupRow.dispatchEvent(new Event("dragstart"));
+    folderRow.dispatchEvent(new Event("dragover", { cancelable: true }));
+    folderRow.dispatchEvent(new Event("drop", { cancelable: true }));
+    groupRow.dispatchEvent(new Event("dragend"));
+
+    const stored = JSON.parse(localStorage.getItem("spirit.folders"));
+    expect(stored[0].groupIds).toEqual(["group-1"]);
+    expect(document.querySelector("#folder-tree .folder-count").textContent).toBe("1");
+
+    document.querySelector("#folder-tree [data-folder-edit-toggle]").click(); // back to read-only
+    folderRow.click();
+    expect(groupRow.hidden).toBe(false);
+    expect(contactRow.hidden).toBe(true);
+  });
+
   it("shows a distinct status after several consecutive verification failures, without the badge disappearing", async () => {
     generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
     fingerprint.mockResolvedValue("sender-fp");

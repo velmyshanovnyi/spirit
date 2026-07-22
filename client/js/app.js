@@ -978,17 +978,24 @@ export function initApp(doc, options) {
 
     // Секція RF3 (UI redesign follow-up, узгоджена концепція "Тінь"):
     // групи тепер показуються в тому самому сайдбар-списку, що й контакти
-    // -- квадратна identicon-аватарка (shape-group, підготовлений клас,
-    // раніше не використовувався), клік відкриває групову розмову напряму,
-    // без переходу через екран "Керування". Групи НЕ мають proof/verified
-    // семантики й НЕ прив'язуються до папок у цій ітерації -- звичайні
-    // фільтри (пошук, "Верифіковані", вибір папки) просто приховують їх,
-    // як контакт без відповідної ознаки.
+    // -- квадратна identicon-аватарка (shape-group), клік відкриває групову
+    // розмову напряму, без переходу через екран "Керування". Групи можуть
+    // прив'язуватись до папок тим самим drag&drop-шляхом, що й контакти
+    // (нижче) -- те саме single-membership правило, той самий гейт на
+    // folderEditMode. Груп немає у verified-фільтрі (немає proof-семантики),
+    // звичайний пошук і далі працює через textContent.
     const groups = await listGroups();
     for (const group of groups) {
       const row = doc.createElement("div");
       row.className = "list-row";
       row.dataset.groupId = group.groupId;
+      row.draggable = true;
+      row.addEventListener("dragstart", () => {
+        groupDragId = group.groupId;
+      });
+      row.addEventListener("dragend", () => {
+        groupDragId = null;
+      });
 
       const avatar = doc.createElement("div");
       avatar.className = "avatar shape-group";
@@ -1037,19 +1044,24 @@ export function initApp(doc, options) {
   // piece of the sidebar's "Пошук" affordance in this pass.
   let contactsVerifiedOnly = false;
   let selectedFolderId = null;
-  function collectFolderFingerprints(node) {
-    let ids = [...(node.contactFingerprints || [])];
-    for (const child of node.children) ids = ids.concat(collectFolderFingerprints(child));
+  // Комбінований набір id-шок (contactFingerprints + groupIds) -- namespace
+  // не перетинається на практиці (64-символьний hex fingerprint проти
+  // 32-символьного hex groupId), а кожен рядок звіряється лише зі СВОЇМ
+  // атрибутом (contactFingerprint або groupId), тож об'єднання безпечне.
+  function collectFolderMemberIds(node) {
+    let ids = [...(node.contactFingerprints || []), ...(node.groupIds || [])];
+    for (const child of node.children) ids = ids.concat(collectFolderMemberIds(child));
     return ids;
   }
   function applyContactsFilter() {
     const query = (el("sidebar-search-input")?.value ?? "").trim().toLowerCase();
     const selectedFolder = selectedFolderId && findFolder(folders, selectedFolderId);
-    const folderFingerprints = selectedFolder ? new Set(collectFolderFingerprints(selectedFolder)) : null;
+    const folderMemberIds = selectedFolder ? new Set(collectFolderMemberIds(selectedFolder)) : null;
     for (const row of doc.querySelectorAll("#contacts-list .list-row")) {
       const matchesQuery = query.length === 0 || row.textContent.toLowerCase().includes(query);
       const matchesVerified = !contactsVerifiedOnly || row.dataset.verified === "1";
-      const matchesFolder = !folderFingerprints || folderFingerprints.has(row.dataset.contactFingerprint);
+      const rowMemberId = row.dataset.contactFingerprint ?? row.dataset.groupId;
+      const matchesFolder = !folderMemberIds || folderMemberIds.has(rowMemberId);
       row.hidden = !matchesQuery || !matchesVerified || !matchesFolder;
     }
   }
@@ -1091,6 +1103,7 @@ export function initApp(doc, options) {
   function normalizeFolderNodes(nodes) {
     for (const n of nodes) {
       if (!Array.isArray(n.contactFingerprints)) n.contactFingerprints = [];
+      if (!Array.isArray(n.groupIds)) n.groupIds = [];
       normalizeFolderNodes(n.children);
     }
     return nodes;
@@ -1115,6 +1128,7 @@ export function initApp(doc, options) {
   const folderCollapsed = new Set();
   let folderDragId = null;
   let contactDragFingerprint = null;
+  let groupDragId = null;
   let folderRenamingId = null;
   let folderPendingDeleteId = null;
   // Один перемикач "олівець" на рівні заголовка "Мої папки" вмикає/вимикає
@@ -1130,6 +1144,12 @@ export function initApp(doc, options) {
     for (const n of nodes) {
       n.contactFingerprints = n.contactFingerprints.filter((fp) => fp !== fingerprint);
       removeFingerprintFromAllFolders(n.children, fingerprint);
+    }
+  }
+  function removeGroupIdFromAllFolders(nodes, groupId) {
+    for (const n of nodes) {
+      n.groupIds = n.groupIds.filter((id) => id !== groupId);
+      removeGroupIdFromAllFolders(n.children, groupId);
     }
   }
 
@@ -1178,10 +1198,11 @@ export function initApp(doc, options) {
         const selected = selectedFolderId === n.id;
         const renaming = folderEditMode && folderRenamingId === n.id;
         const pendingDelete = folderEditMode && folderPendingDeleteId === n.id;
+        const memberCount = n.contactFingerprints.length + n.groupIds.length;
         const nameMarkup = renaming
           ? `<input type="text" class="folder-rename-input" data-folder-rename-input>`
           : `<span class="folder-name"></span>` +
-            (n.contactFingerprints.length > 0 ? `<span class="folder-count">${n.contactFingerprints.length}</span>` : "");
+            (memberCount > 0 ? `<span class="folder-count">${memberCount}</span>` : "");
         const actionsMarkup = !folderEditMode
           ? ""
           : renaming
@@ -1244,7 +1265,7 @@ export function initApp(doc, options) {
       rowEl.addEventListener("dragover", (event) => {
         if (!folderEditMode) return;
         event.preventDefault();
-        if (contactDragFingerprint) {
+        if (contactDragFingerprint || groupDragId) {
           rowEl.classList.add("drag-over");
           return;
         }
@@ -1294,7 +1315,7 @@ export function initApp(doc, options) {
       });
       rowEl.querySelector("[data-folder-add-child]")?.addEventListener("click", (event) => {
         event.stopPropagation();
-        node.children.push({ id: randomFolderId(), name: t("sidebar.newFolder"), children: [], contactFingerprints: [] });
+        node.children.push({ id: randomFolderId(), name: t("sidebar.newFolder"), children: [], contactFingerprints: [], groupIds: [] });
         folderCollapsed.delete(id);
         saveFolders(folders);
         renderFolderTree();
@@ -1334,6 +1355,19 @@ export function initApp(doc, options) {
           applyContactsFilter();
           return;
         }
+        if (groupDragId) {
+          const groupId = groupDragId;
+          groupDragId = null;
+          removeGroupIdFromAllFolders(folders, groupId);
+          const target = findFolder(folders, id);
+          if (target && !target.groupIds.includes(groupId)) {
+            target.groupIds.push(groupId);
+          }
+          saveFolders(folders);
+          renderFolderTree();
+          applyContactsFilter();
+          return;
+        }
         if (!folderDragId || folderDragId === id) return;
         const dragged = findFolder(folders, folderDragId);
         if (!dragged || isFolderDescendant(dragged, id)) return;
@@ -1351,7 +1385,7 @@ export function initApp(doc, options) {
       });
     });
     treeEl.querySelector("[data-add-folder]")?.addEventListener("click", () => {
-      folders.push({ id: randomFolderId(), name: t("sidebar.newFolder"), children: [], contactFingerprints: [] });
+      folders.push({ id: randomFolderId(), name: t("sidebar.newFolder"), children: [], contactFingerprints: [], groupIds: [] });
       saveFolders(folders);
       renderFolderTree();
     });

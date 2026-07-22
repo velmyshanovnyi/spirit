@@ -62,12 +62,12 @@ export function parseRecoveryShareAnnounce(control) {
   return { x, y: yBytes, threshold, totalShares };
 }
 
-// --- Manual text export (second channel, no QR rendering here) ----------
+// --- Manual text export (second, out-of-band channel) --------------------
 //
 // A compact, copyable string encoding of one share: "<x>.<threshold>.<total>.<y-base64url>".
-// Deliberately NOT JSON (shorter to read aloud/retype) and NOT a QR code --
-// QR rendering is explicitly deferred (see the spec: no QR library is
-// vendored in this codebase yet, and Section S2 does not introduce one).
+// Deliberately NOT JSON (shorter to read aloud/retype). This module only
+// produces the text form -- QR rendering of this exact string lives in
+// client/js/qr.js, wired in app.js next to both places this text is shown.
 
 const TEXT_PREFIX = "spirit-share:";
 
