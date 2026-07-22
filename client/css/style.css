@@ -123,6 +123,13 @@ body {
   margin: 0 auto;
 }
 
+/* Reserves space for the fixed .conversation-toolbar (Section RF4) so it
+   doesn't sit on top of the sidebar/main content underneath it -- toggled
+   by app.js alongside the toolbar's own .hidden (see onScreenChange). */
+body.conversation-toolbar-visible .app-body {
+  margin-top: 40px;
+}
+
 #app-sidebar {
   width: 300px;
   flex: 0 0 300px;
@@ -734,68 +741,92 @@ button:disabled {
   line-height: 1;
 }
 
-/* ---------- Video call (Section V, specs/ui/video-call.md) ---------- */
+/* ---------- Video call (Section V, specs/ui/video-call.md;
+   Section RF4: floating window + fixed toolbar redesign) ---------- */
 
-.video-area {
-  position: relative;
-  min-height: 200px;
+/* Fixed row right under the global header (not inside the conversation
+   card) -- invite/call/camera/mic icons, shown only while route ===
+   "conversation" (app.js's onScreenChange toggles .hidden; `top` is set
+   from JS to the header's real rendered height, see positionConversationToolbar). */
+.conversation-toolbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--border);
 }
 
-.video-tile-remote {
-  width: 100%;
-  min-height: 200px;
+.conversation-toolbar .btn-icon.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+
+/* The video call window floats over the ENTIRE page (not confined to the
+   conversation card), draggable via .floating-video-handle and resizable
+   via the native CSS `resize` handle -- both persisted to localStorage by
+   app.js (spirit.floatingVideoRect). Position/size are set inline from JS;
+   the values below are only the very first pre-JS paint's fallback. */
+.floating-video {
+  position: fixed;
+  top: 96px;
+  left: 16px;
+  width: 320px;
+  height: 240px;
+  min-width: 160px;
+  min-height: 120px;
+  max-width: 90vw;
+  max-height: 90vh;
+  resize: both;
+  overflow: hidden;
   background: var(--code-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 95;
+}
+
+.floating-video-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 22px;
+  cursor: move;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 4;
+}
+
+.floating-video .video-tile-remote {
+  width: 100%;
+  height: 100%;
+  background: var(--code-bg);
   object-fit: cover;
 }
 
-/* Self-view as a floating overlay window (picture-in-picture style)
-   instead of a same-size tile sitting side-by-side with the remote
+/* Self-view as a floating-within-the-floating overlay (picture-in-picture
+   style) instead of a same-size tile sitting side-by-side with the remote
    video -- standard video-call convention, and much less space when
    there's no remote peer video to show yet. */
-.video-tile-local {
+.floating-video .video-tile-local {
   position: absolute;
-  bottom: 12px;
-  right: 12px;
+  bottom: 8px;
+  right: 8px;
   width: 30%;
-  max-width: 160px;
-  min-width: 90px;
+  max-width: 120px;
+  min-width: 60px;
   aspect-ratio: 4 / 3;
   background: var(--code-bg);
   border: 2px solid var(--bg);
   border-radius: var(--radius-sm);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
   object-fit: cover;
   z-index: 2;
-}
-
-.call-controls {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 3;
-  display: flex;
-  gap: 6px;
-}
-
-.call-controls .btn-icon {
-  background: rgba(0, 0, 0, 0.45);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-}
-
-.call-controls .btn-icon:hover {
-  background: rgba(0, 0, 0, 0.65);
-}
-
-/* Reflects actual on/off state (state.localStream + track.enabled in
-   app.js), not just :hover/:focus -- a toggled-on control reads as
-   visually "lit up" against the video, same accent used by .chip-active. */
-.call-controls .btn-icon.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-contrast);
 }
 
 .hint-text {

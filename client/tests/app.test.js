@@ -361,11 +361,25 @@ const HTML = `
     <div id="invite-status"></div>
   </section>
 
-  <section data-screen="conversation">
-    <div id="connection-status" data-i18n="conn.none">не з'єднано</div>
+  <!-- Section RF4: fixed chrome OUTSIDE any [data-screen], mirroring the
+       real index.html -- app.js's setConversationChromeVisible toggles
+       these directly (route === "conversation"), not router.js. -->
+  <div id="conversation-toolbar" hidden>
     <div id="invite-bar" hidden>
       <button id="btn-invite-from-chat" type="button">Скопіювати запрошення</button>
     </div>
+    <button id="btn-start-call" type="button"></button>
+    <button id="btn-toggle-camera" type="button"></button>
+    <button id="btn-toggle-mic" type="button"></button>
+  </div>
+  <div id="floating-video" hidden>
+    <div id="floating-video-handle"></div>
+    <video id="video-remote"></video>
+    <video id="video-local"></video>
+  </div>
+
+  <section data-screen="conversation">
+    <div id="connection-status" data-i18n="conn.none">не з'єднано</div>
     <div id="ephemeral-identity-banner" hidden>
       <span id="ephemeral-nickname-display"></span>
     </div>
@@ -376,11 +390,6 @@ const HTML = `
       <button id="btn-file-reject" type="button">Відхилити</button>
     </div>
     <div id="file-transfers"></div>
-    <video id="video-remote"></video>
-    <video id="video-local"></video>
-    <button id="btn-start-call" type="button"></button>
-    <button id="btn-toggle-camera" type="button"></button>
-    <button id="btn-toggle-mic" type="button"></button>
     <div id="video-status"></div>
     <h3 id="group-conversation-heading" hidden></h3>
     <div id="group-chat-log" hidden></div>
@@ -4700,6 +4709,78 @@ describe("video call (Section V2)", () => {
     document.getElementById("btn-start-call").click();
 
     await vi.waitFor(() => expect(document.getElementById("video-status").textContent).toContain("Permission denied"));
+  });
+});
+
+describe("Section RF4: fixed conversation toolbar + floating, draggable video window", () => {
+  it("shows the toolbar and floating video only on the conversation route, for both 1:1 and group chat", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+
+    expect(document.getElementById("conversation-toolbar").hidden).toBe(true);
+    expect(document.getElementById("floating-video").hidden).toBe(true);
+    expect(document.body.classList.contains("conversation-toolbar-visible")).toBe(false);
+
+    location.hash = "#/conversation";
+    window.dispatchEvent(new Event("hashchange"));
+    expect(document.getElementById("conversation-toolbar").hidden).toBe(false);
+    expect(document.getElementById("floating-video").hidden).toBe(false);
+    expect(document.body.classList.contains("conversation-toolbar-visible")).toBe(true);
+
+    location.hash = "#/history";
+    window.dispatchEvent(new Event("hashchange"));
+    expect(document.getElementById("conversation-toolbar").hidden).toBe(true);
+    expect(document.getElementById("floating-video").hidden).toBe(true);
+    expect(document.body.classList.contains("conversation-toolbar-visible")).toBe(false);
+  });
+
+  it("applies a default position/size to the floating video panel when nothing is saved yet", () => {
+    initApp(document, { locale: "uk" });
+    const panel = document.getElementById("floating-video");
+    expect(panel.style.width).toBe("320px");
+    expect(panel.style.height).toBe("240px");
+    expect(panel.style.left).not.toBe("");
+    expect(panel.style.top).not.toBe("");
+  });
+
+  it("restores a previously saved position/size from localStorage instead of the default", () => {
+    localStorage.setItem("spirit.floatingVideoRect", JSON.stringify({ left: 42, top: 77, width: 400, height: 300 }));
+    initApp(document, { locale: "uk" });
+    const panel = document.getElementById("floating-video");
+    expect(panel.style.left).toBe("42px");
+    expect(panel.style.top).toBe("77px");
+    expect(panel.style.width).toBe("400px");
+    expect(panel.style.height).toBe("300px");
+  });
+
+  it("dragging the handle moves the floating video panel and persists the new position on release", () => {
+    initApp(document, { locale: "uk" });
+    const panel = document.getElementById("floating-video");
+    const handle = document.getElementById("floating-video-handle");
+    panel.getBoundingClientRect = () => ({ left: 100, top: 100, width: 320, height: 240 });
+
+    const down = new Event("pointerdown");
+    down.clientX = 110;
+    down.clientY = 105;
+    down.pointerId = 1;
+    handle.dispatchEvent(down);
+
+    const move = new Event("pointermove");
+    move.clientX = 210;
+    move.clientY = 205;
+    handle.dispatchEvent(move);
+
+    expect(panel.style.left).toBe("200px"); // 210 - (110 - 100)
+    expect(panel.style.top).toBe("200px"); // 205 - (105 - 100)
+
+    handle.dispatchEvent(new Event("pointerup"));
+    const stored = JSON.parse(localStorage.getItem("spirit.floatingVideoRect"));
+    expect(stored.left).toBe(200);
+    expect(stored.top).toBe(200);
   });
 });
 

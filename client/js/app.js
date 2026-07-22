@@ -1841,6 +1841,129 @@ export function initApp(doc, options) {
   // onScreenChange's toggle here once at startup so the just-rendered
   // screen is actually visible on mobile from the first paint.
   doc.body.classList.add("main-active");
+  // Section RF4: the invite/call/camera/mic toolbar and the floating video
+  // window both live OUTSIDE the router's [data-screen] mechanism (fixed
+  // chrome, not a screen), so they need their own route-based show/hide --
+  // a `function` declaration (hoisted) so it can be called here, before its
+  // own definition further down, exactly like main-active's manual mirror
+  // above needs to run before onScreenChange's hashchange listener exists.
+  function setConversationChromeVisible(visible) {
+    const toolbar = el("conversation-toolbar");
+    if (toolbar) toolbar.hidden = !visible;
+    const floatingVideo = el("floating-video");
+    if (floatingVideo) floatingVideo.hidden = !visible;
+    doc.body.classList.toggle("conversation-toolbar-visible", visible);
+  }
+  // Mirrors main-active above: a direct #/conversation load (or the
+  // zero-click quick-chat flow, which navigates before any hashchange
+  // listener is attached) must not leave this chrome stuck hidden.
+  setConversationChromeVisible(doc.defaultView.location.hash.replace(/^#\/?/, "") === "conversation");
+
+  // .conversation-toolbar sits right under the global header, but as fixed
+  // chrome outside normal flow it can't just rely on being next in the DOM
+  // -- its `top` has to match the header's real rendered height (which
+  // varies with locale/font/zoom), recomputed on resize too.
+  function positionConversationToolbar() {
+    const header = doc.querySelector(".app-header");
+    const toolbar = el("conversation-toolbar");
+    if (header && toolbar) toolbar.style.top = `${header.getBoundingClientRect().height}px`;
+  }
+  positionConversationToolbar();
+  doc.defaultView.addEventListener("resize", positionConversationToolbar);
+
+  // Section RF4: floating video window -- draggable via its handle bar,
+  // resizable via the native CSS `resize` on .floating-video itself (no
+  // custom resize logic needed), both persisted the same way as
+  // spirit.folders/spirit.theme (device-level localStorage, not account
+  // data). ResizeObserver/PointerEvent are guarded since jsdom's test
+  // environment doesn't implement either.
+  const FLOATING_VIDEO_STORAGE_KEY = "spirit.floatingVideoRect";
+  function loadFloatingVideoRect() {
+    try {
+      const raw = localStorage.getItem(FLOATING_VIDEO_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+  function saveFloatingVideoRect(rect) {
+    try {
+      localStorage.setItem(FLOATING_VIDEO_STORAGE_KEY, JSON.stringify(rect));
+    } catch {
+      // Best-effort only -- a full/unavailable localStorage just means the
+      // window resets to its default corner next load, not a functional break.
+    }
+  }
+  {
+    const panel = el("floating-video");
+    const handle = el("floating-video-handle");
+    if (panel) {
+      const win = doc.defaultView;
+      const saved = loadFloatingVideoRect();
+      const defaultWidth = 320;
+      const defaultHeight = 240;
+      const rect = saved || {
+        left: Math.max(16, win.innerWidth - defaultWidth - 16),
+        top: Math.max(16, win.innerHeight - defaultHeight - 16),
+        width: defaultWidth,
+        height: defaultHeight
+      };
+      panel.style.left = `${rect.left}px`;
+      panel.style.top = `${rect.top}px`;
+      panel.style.width = `${rect.width}px`;
+      panel.style.height = `${rect.height}px`;
+
+      const persistCurrentRect = () =>
+        saveFloatingVideoRect({
+          left: parseFloat(panel.style.left) || panel.offsetLeft,
+          top: parseFloat(panel.style.top) || panel.offsetTop,
+          width: panel.offsetWidth,
+          height: panel.offsetHeight
+        });
+
+      if (handle) {
+        let dragOffsetX = 0;
+        let dragOffsetY = 0;
+        let dragging = false;
+        handle.addEventListener("pointerdown", (event) => {
+          dragging = true;
+          const panelRect = panel.getBoundingClientRect();
+          dragOffsetX = event.clientX - panelRect.left;
+          dragOffsetY = event.clientY - panelRect.top;
+          handle.setPointerCapture?.(event.pointerId);
+        });
+        handle.addEventListener("pointermove", (event) => {
+          if (!dragging) return;
+          panel.style.left = `${event.clientX - dragOffsetX}px`;
+          panel.style.top = `${event.clientY - dragOffsetY}px`;
+        });
+        const endDrag = () => {
+          if (!dragging) return;
+          dragging = false;
+          persistCurrentRect();
+        };
+        handle.addEventListener("pointerup", endDrag);
+        handle.addEventListener("pointercancel", endDrag);
+      }
+
+      // The native `resize: both` handle changes the panel's box size
+      // without firing any dedicated JS event -- ResizeObserver is the
+      // standard way to notice that and persist it.
+      if (win.ResizeObserver) {
+        let firstCallback = true;
+        const observer = new win.ResizeObserver(() => {
+          // The observer's own initial callback fires once on `observe()`
+          // with the size we JUST set above -- skip it, nothing changed yet.
+          if (firstCallback) {
+            firstCallback = false;
+            return;
+          }
+          persistCurrentRect();
+        });
+        observer.observe(panel);
+      }
+    }
+  }
 
   // Section H2 (specs/ui/chat-first-redesign.md): the old always-visible top
   // nav collapsed into a "⚙️ Налаштування" dropdown, in the same spirit as
@@ -2106,6 +2229,9 @@ export function initApp(doc, options) {
     if (route === "history") renderHistoryScreen();
     if (route === "profile") renderOwnProofsList();
     if (route === "conversation") renderEphemeralBanner();
+    // Group AND 1:1 chat both route to "conversation" (Section GC3), so
+    // this single check covers both.
+    setConversationChromeVisible(route === "conversation");
   };
   if (win.__spiritAppHashListener) {
     win.removeEventListener("hashchange", win.__spiritAppHashListener);

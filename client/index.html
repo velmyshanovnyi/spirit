@@ -53,6 +53,21 @@
     </div>
   </header>
 
+  <!-- Section RF4 (floating video/toolbar redesign): the invite/call/
+       camera/mic icons live in their own fixed bar right under the global
+       header, independent of the conversation card's own scroll/layout --
+       outside [data-screen] entirely (app.js's onScreenChange shows/hides
+       it based on route === "conversation", covering both 1:1 and group
+       chat per Section GC3). -->
+  <div id="conversation-toolbar" class="conversation-toolbar" hidden>
+    <div id="invite-bar" hidden>
+      <button id="btn-invite-from-chat" type="button" class="btn-icon" aria-label="Запросити" data-i18n-title="btn.copyInvite" title="Скопіювати запрошення">🔗</button>
+    </div>
+    <button id="btn-start-call" type="button" class="btn-icon" aria-label="Дзвінок" data-i18n-title="video.startCall" title="Дзвінок">📞</button>
+    <button id="btn-toggle-camera" type="button" class="btn-icon" aria-label="Камера" data-i18n-title="video.toggleCamera" title="Камера">🎥</button>
+    <button id="btn-toggle-mic" type="button" class="btn-icon" aria-label="Мікрофон" data-i18n-title="video.toggleMic" title="Мікрофон">🎤</button>
+  </div>
+
   <div id="welcome-modal" hidden class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
     <div class="modal-card">
       <h2 id="welcome-title" data-i18n="welcome.title">Ласкаво просимо до Spirit</h2>
@@ -376,9 +391,6 @@
       <section class="card card-wide">
         <h2 data-i18n="conversation.heading">Розмова</h2>
         <div id="connection-status" class="status" data-i18n="conn.none">не з'єднано</div>
-        <div id="invite-bar" hidden class="identity">
-          <button id="btn-invite-from-chat" type="button" class="btn-icon" aria-label="Запросити" data-i18n-title="btn.copyInvite" title="Скопіювати запрошення">🔗</button>
-        </div>
         <div id="ephemeral-identity-banner" hidden class="identity">
           <span data-i18n="ephemeral.youAre">Ви зараз:</span> <strong id="ephemeral-nickname-display"></strong>
         </div>
@@ -389,19 +401,6 @@
           <button id="btn-file-reject" type="button" data-i18n="fileTransfer.reject">Відхилити</button>
         </div>
         <div id="file-transfers" class="list-area"></div>
-        <div class="video-area">
-          <!-- Icon-only call controls float over the top-left corner of the
-               video area (standard video-call UI convention) instead of a
-               labeled button row below it. .active is toggled in app.js to
-               reflect actual on/off state, not just :hover/:focus. -->
-          <div class="call-controls">
-            <button id="btn-start-call" type="button" class="btn-icon" aria-label="Дзвінок" data-i18n-title="video.startCall" title="Дзвінок">📞</button>
-            <button id="btn-toggle-camera" type="button" class="btn-icon" aria-label="Камера" data-i18n-title="video.toggleCamera" title="Камера">🎥</button>
-            <button id="btn-toggle-mic" type="button" class="btn-icon" aria-label="Мікрофон" data-i18n-title="video.toggleMic" title="Мікрофон">🎤</button>
-          </div>
-          <video id="video-remote" class="video-tile video-tile-remote" autoplay playsinline></video>
-          <video id="video-local" class="video-tile video-tile-local" autoplay playsinline muted></video>
-        </div>
         <div id="video-status" class="status"></div>
 
         <!-- Section GC3 (specs/phase4/group-chats.md), design point 5: a
@@ -481,6 +480,18 @@
 
   </main>
 
+  </div>
+
+  <!-- Section RF4: the video call window floats over the ENTIRE page
+       (position: fixed in style.css), not confined to the conversation
+       card -- draggable via #floating-video-handle, resizable via native
+       CSS `resize` on the panel itself, both persisted to localStorage
+       (app.js's floating-video drag/resize wiring) the same way
+       spirit.folders/spirit.theme persist other device-level UI state. -->
+  <div id="floating-video" class="floating-video" hidden>
+    <div id="floating-video-handle" class="floating-video-handle" aria-hidden="true"></div>
+    <video id="video-remote" class="video-tile video-tile-remote" autoplay playsinline></video>
+    <video id="video-local" class="video-tile video-tile-local" autoplay playsinline muted></video>
   </div>
 
   <script type="module">
