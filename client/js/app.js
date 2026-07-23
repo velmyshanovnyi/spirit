@@ -470,7 +470,12 @@ export function initApp(doc, options) {
   // computing a fresh value AND after either toggling locally or receiving
   // the peer's toggle, so both call sites share one rendering path instead
   // of drifting apart.
-  function renderSafetyHint() {
+  // Section RF11: `blink` requests the 5x attention animation -- only
+  // passed `true` by the identity-announce handler on an actual first
+  // reveal (hidden -> visible for a NEW peer), never on a toggle-driven
+  // re-render (local click or the peer's synced choice), so it draws the
+  // eye exactly once per new connection, not on every mode switch.
+  function renderSafetyHint({ blink = false } = {}) {
     const hintEl = el("safety-number-hint");
     if (!hintEl) return;
     if (!state.safetyHintVisible || !state.peerFingerprint) {
@@ -492,6 +497,11 @@ export function initApp(doc, options) {
     const toggleBtn = el("btn-safety-toggle-mode");
     if (toggleBtn) {
       setDynamicText(toggleBtn, shared ? t("safety.switchToPeer") : t("safety.switchToShared"));
+    }
+    if (blink) {
+      hintEl.classList.remove("safety-hint-attention");
+      void hintEl.offsetWidth; // forces reflow so re-adding the class restarts the animation
+      hintEl.classList.add("safety-hint-attention");
     }
   }
   // Section RF10: tells whichever peer(s) are currently connected to switch
@@ -2754,7 +2764,7 @@ export function initApp(doc, options) {
       state.sharedSafetyNumber = isFirstMeeting
         ? await computeSharedSafetyNumber(state.senderKey, verified.fingerprint)
         : null;
-      renderSafetyHint();
+      renderSafetyHint({ blink: isFirstMeeting });
       // A nickname is peer-CHOSEN, not proof of identity -- a different
       // fingerprint could announce the same nickname (impersonation-by-name,
       // flagged in exec review). The fingerprint must stay visible so TOFU

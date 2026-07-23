@@ -510,6 +510,20 @@ button:disabled {
   margin-top: 4px;
 }
 
+/* Section RF11: blinks 5 times the moment a NEW peer's safety code first
+   appears -- both sides trigger this independently the moment their own
+   identity-announce verifies (naturally close in time, since it's the
+   same handshake), so a first-time user actually notices there's a code
+   worth comparing instead of it just silently sitting in a banner. */
+@keyframes safety-hint-attention {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50% { box-shadow: 0 0 0 3px var(--accent); }
+}
+
+.safety-hint-attention {
+  animation: safety-hint-attention 0.5s ease-in-out 5;
+}
+
 .secret-output {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12.5px;

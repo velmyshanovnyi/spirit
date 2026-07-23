@@ -3182,6 +3182,23 @@ describe("identity announce in chat flows (Section 12)", () => {
     document.getElementById("btn-safety-toggle-mode").click();
     expect(document.getElementById("safety-hint-text").textContent).toContain(formatSpiritId("b".repeat(64)));
   });
+
+  it("Section RF11: blinks the hint banner on a genuine first reveal, but NOT on a later toggle", async () => {
+    verifyIdentityAnnounce.mockResolvedValue({ identityPublicKey: {}, identityPubkeyWire: "PEER", fingerprint: "b".repeat(64) });
+    fingerprint.mockResolvedValue("a".repeat(64));
+
+    const { captured } = await establishedInitiatorChat();
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+
+    const hint = document.getElementById("safety-number-hint");
+    await vi.waitFor(() => expect(hint.hidden).toBe(false));
+    expect(hint.classList.contains("safety-hint-attention")).toBe(true);
+
+    hint.classList.remove("safety-hint-attention"); // simulates the animation having already finished
+    document.getElementById("btn-safety-toggle-mode").click();
+    expect(hint.classList.contains("safety-hint-attention")).toBe(false);
+  });
 });
 
 describe("device-list transport (Section 13)", () => {
