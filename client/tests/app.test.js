@@ -4199,6 +4199,12 @@ describe("ephemeral identity banner on conversation screen (Section F5)", () => 
 
     await vi.waitFor(() => expect(writeText).toHaveBeenCalled());
     expect(writeText.mock.calls[0][0]).toContain("room=room1");
+    // Section RF12 (bug report): the icon-only toolbar button has no
+    // visible text feedback of its own (#invite-status lives on the Room
+    // screen) -- a transient tooltip must appear at the button itself.
+    const tooltip = document.getElementById("copied-tooltip");
+    expect(tooltip).not.toBeNull();
+    expect(tooltip.classList.contains("copied-tooltip-visible")).toBe(true);
     delete navigator.clipboard;
   });
 });

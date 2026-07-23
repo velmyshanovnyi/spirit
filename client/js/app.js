@@ -651,12 +651,40 @@ export function initApp(doc, options) {
     return link.toString();
   }
 
+  // Section RF12 (bug report): #btn-invite-from-chat is an icon-only button
+  // in the fixed toolbar -- #invite-status (the existing text feedback)
+  // lives on the Room screen only, so clicking the toolbar icon gave no
+  // visible confirmation at all. A small tooltip positioned right at
+  // whichever button was actually clicked works for both call sites
+  // without needing per-button markup.
+  function showCopiedTooltip(anchorEl) {
+    if (!anchorEl) return;
+    let tooltip = el("copied-tooltip");
+    if (!tooltip) {
+      tooltip = doc.createElement("div");
+      tooltip.id = "copied-tooltip";
+      tooltip.className = "copied-tooltip";
+      doc.body.appendChild(tooltip);
+    }
+    tooltip.textContent = t("room.inviteCopied");
+    const rect = anchorEl.getBoundingClientRect();
+    tooltip.style.left = `${rect.left + rect.width / 2}px`;
+    tooltip.style.top = `${rect.bottom + 6}px`;
+    tooltip.classList.remove("copied-tooltip-visible");
+    void tooltip.offsetWidth; // forces reflow so re-adding the class restarts the fade-in
+    tooltip.classList.add("copied-tooltip-visible");
+    clearTimeout(tooltip.dataset.hideTimeoutId);
+    tooltip.dataset.hideTimeoutId = doc.defaultView.setTimeout(() => {
+      tooltip.classList.remove("copied-tooltip-visible");
+    }, 1500);
+  }
+
   function copyInviteLink() {
     const roomId = el("room-id").value;
     const inviteToken = el("invite-token").value;
     if (!roomId || !inviteToken) {
       setInviteStatus(t("room.inviteMissing"));
-      return;
+      return false;
     }
     const linkText = buildInviteLinkText(roomId, inviteToken);
 
@@ -668,8 +696,11 @@ export function initApp(doc, options) {
     if (doc.defaultView.navigator.clipboard && doc.defaultView.navigator.clipboard.writeText) {
       doc.defaultView.navigator.clipboard.writeText(linkText).catch(() => {});
     }
+    return true;
   }
-  el("btn-copy-invite").addEventListener("click", copyInviteLink);
+  el("btn-copy-invite").addEventListener("click", (event) => {
+    if (copyInviteLink()) showCopiedTooltip(event.currentTarget);
+  });
 
   // Section F5 (specs/ui/ephemeral-spirit-mode.md): a temp nickname banner on
   // the conversation screen itself, shown only in ephemeral mode (a nickname
@@ -696,7 +727,9 @@ export function initApp(doc, options) {
     if (!bar) return;
     bar.hidden = !state.isInviteOwner;
   }
-  el("btn-invite-from-chat").addEventListener("click", copyInviteLink);
+  el("btn-invite-from-chat").addEventListener("click", (event) => {
+    if (copyInviteLink()) showCopiedTooltip(event.currentTarget);
+  });
 
   // Section H3 (specs/ui/chat-first-redesign.md): "Створити"/"Увійти" quick
   // actions in the header, visible only while no identity exists yet --

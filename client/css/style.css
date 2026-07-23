@@ -524,6 +524,31 @@ button:disabled {
   animation: safety-hint-attention 0.5s ease-in-out 5;
 }
 
+/* Section RF12: transient "copied" tooltip positioned at whichever invite-
+   copy button was actually clicked (#btn-copy-invite or the icon-only
+   #btn-invite-from-chat in the fixed toolbar) -- fixed positioning + JS-set
+   left/top (see showCopiedTooltip) since the two buttons live in
+   completely different parts of the layout. */
+.copied-tooltip {
+  position: fixed;
+  transform: translate(-50%, 0);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 200;
+  transition: opacity 0.15s ease-in-out;
+}
+
+.copied-tooltip-visible {
+  opacity: 1;
+}
+
 .secret-output {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12.5px;
