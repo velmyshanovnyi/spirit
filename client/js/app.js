@@ -39,6 +39,7 @@ import { appendMessage, listMessages, listConversations } from "./historyStore.j
 import { splitSecret } from "./shamir.js";
 import { buildRecoveryShareAnnounce, parseRecoveryShareAnnounce, encodeShareAsText } from "./recoveryShare.js";
 import { computeSharedSafetyNumber, hexToEmoji } from "./safetyNumber.js";
+import { getSetting, setSetting, resetSetting, resetAllSettings, SETTINGS } from "./settingsRegistry.js";
 import { saveTrustedShare, listTrustedShares, getTrustedShare } from "./trustedShares.js";
 import { qrSvgMarkup } from "./qr.js";
 import { recoverFromShares } from "./socialRecovery.js";
@@ -966,7 +967,6 @@ export function initApp(doc, options) {
   // status per (contact fingerprint, proof url) -- re-derived from a live
   // fetch each check, so it doesn't need to survive a reload. `null`
   // verifiedAt/failedAt means "not checked yet this session".
-  const PROOF_FAILURE_THRESHOLD = 3;
   const proofVerification = new Map();
   const proofVerificationKey = (fingerprint, url) => `${fingerprint}|${url}`;
 
@@ -1100,7 +1100,7 @@ export function initApp(doc, options) {
         const v = proofVerification.get(proofVerificationKey(contact.fingerprint, proof.url));
         if (v?.verifiedAt) {
           badge.textContent = ` ${proof.label}: ${t("proofs.verifiedAt", { date: new Date(v.verifiedAt).toLocaleString() })}`;
-        } else if (v && v.consecutiveFailures >= PROOF_FAILURE_THRESHOLD) {
+        } else if (v && v.consecutiveFailures >= getSetting("proofFailureThreshold")) {
           badge.textContent = ` ${proof.label}: ${t("proofs.failedSince", { date: new Date(v.failedAt).toLocaleString() })}`;
         } else {
           badge.textContent = ` ${proof.label}`;
@@ -1897,7 +1897,7 @@ export function initApp(doc, options) {
    * called on demand ("Перевірити зараз") and on the periodic timer below.
    * A single fetch/verify failure doesn't flip the badge to "failed"
    * immediately (transient network hiccups are common); only
-   * PROOF_FAILURE_THRESHOLD consecutive failures do (docs/identity-verification.md).
+   * the "proofFailureThreshold" setting's consecutive failures do (docs/identity-verification.md).
    */
   async function checkContactProofs() {
     const contacts = await listContacts();
@@ -2062,8 +2062,8 @@ export function initApp(doc, options) {
     if (panel) {
       const win = doc.defaultView;
       const saved = loadFloatingVideoRect();
-      const defaultWidth = 320;
-      const defaultHeight = 240;
+      const defaultWidth = getSetting("floatingVideoDefaultWidth");
+      const defaultHeight = getSetting("floatingVideoDefaultHeight");
       // Bug report: dragging the handle above the viewport top (or far past
       // any other edge) left it stuck there -- a fixed-position element at
       // top < 0 renders above the visible page entirely, so the handle
@@ -2386,6 +2386,81 @@ export function initApp(doc, options) {
     }
   });
 
+  // Section RF13 (specs/ui/settings-panel.md), Stage 1: renders SETTINGS
+  // structurally -- one heading per category (deduped, in registry order),
+  // one row per setting with its label/description/input/reset, so adding a
+  // new tunable parameter later never requires new hand-written markup.
+  function renderSettingsRegistry() {
+    const list = el("settings-registry-list");
+    if (!list) return;
+    list.innerHTML = "";
+    const categoryLabels = {
+      connection: t("settings.category.connection"),
+      identity: t("settings.category.identity"),
+      fileTransfer: t("settings.category.fileTransfer"),
+      accounts: t("settings.category.accounts"),
+      ui: t("settings.category.ui"),
+      notifications: t("settings.category.notifications")
+    };
+    let lastCategory = null;
+    for (const entry of SETTINGS) {
+      if (entry.category !== lastCategory) {
+        lastCategory = entry.category;
+        const heading = doc.createElement("h3");
+        heading.textContent = categoryLabels[entry.category] || entry.category;
+        list.appendChild(heading);
+      }
+      const row = doc.createElement("div");
+      row.className = "settings-row";
+      const label = doc.createElement("label");
+      label.className = "field";
+      const labelText = doc.createElement("span");
+      labelText.textContent = entry.label;
+      label.appendChild(labelText);
+      const input = doc.createElement("input");
+      input.type = "number";
+      input.min = String(entry.min);
+      input.max = String(entry.max);
+      input.value = String(getSetting(entry.key));
+      input.dataset.settingKey = entry.key;
+      label.appendChild(input);
+      row.appendChild(label);
+      const description = doc.createElement("p");
+      description.className = "hint-text";
+      description.textContent = entry.description;
+      row.appendChild(description);
+      const resetBtn = doc.createElement("button");
+      resetBtn.type = "button";
+      resetBtn.className = "btn-link";
+      resetBtn.textContent = t("settings.resetOne");
+      resetBtn.dataset.resetSettingKey = entry.key;
+      row.appendChild(resetBtn);
+      list.appendChild(row);
+    }
+  }
+  renderSettingsRegistry();
+
+  el("settings-registry-list")?.addEventListener("change", (event) => {
+    const input = event.target.closest("[data-setting-key]");
+    if (!input) return;
+    if (!setSetting(input.dataset.settingKey, input.value)) {
+      // Rejected (out of range/non-numeric) -- re-render to snap the field
+      // back to whatever's actually stored, rather than leaving an invalid
+      // value sitting in the input looking like it took effect.
+      renderSettingsRegistry();
+    }
+  });
+  el("settings-registry-list")?.addEventListener("click", (event) => {
+    const resetBtn = event.target.closest("[data-reset-setting-key]");
+    if (!resetBtn) return;
+    resetSetting(resetBtn.dataset.resetSettingKey);
+    renderSettingsRegistry();
+  });
+  el("btn-reset-all-settings")?.addEventListener("click", () => {
+    resetAllSettings();
+    renderSettingsRegistry();
+  });
+
   withBusyButton(el("btn-admin-login"), async () => {
     const password = el("admin-password").value;
     if (!password) {
@@ -2473,7 +2548,6 @@ export function initApp(doc, options) {
   // by deliberate zero-database design).
   const FILE_CHUNK_SIZE = 16 * 1024;
   const BUFFERED_AMOUNT_HIGH_THRESHOLD = 1024 * 1024;
-  const FILE_SIZE_WARNING_BYTES = 100 * 1024 * 1024;
 
   function randomFileId() {
     return [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -3639,13 +3713,12 @@ export function initApp(doc, options) {
   // tab is open, not just on-screen-open) -- deduplicated the same way as
   // the router's/app's own hashchange listeners, so re-initializing (tests,
   // HMR) never stacks a second interval ticking in the background.
-  const PROOF_RECHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
   if (doc.defaultView.__spiritProofRecheckInterval) {
     doc.defaultView.clearInterval(doc.defaultView.__spiritProofRecheckInterval);
   }
   doc.defaultView.__spiritProofRecheckInterval = doc.defaultView.setInterval(() => {
     checkContactProofs().catch(() => {});
-  }, PROOF_RECHECK_INTERVAL_MS);
+  }, getSetting("proofRecheckIntervalMs"));
 
   // Section 17/18: a returning user (stored profiles exist) sees the login
   // block instead of the create-account flow; a remembered, not-yet-expired
@@ -4540,7 +4613,7 @@ export function initApp(doc, options) {
         )
       );
       const statusText =
-        file.size > FILE_SIZE_WARNING_BYTES
+        file.size > getSetting("fileSizeWarningBytes")
           ? t("fileTransfer.sizeWarning", { name: file.name })
           : t("fileTransfer.progressSending", { name: file.name, sent: 0, total: chunks.length });
       renderFileTransferStatus(fileId, statusText);

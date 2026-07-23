@@ -189,6 +189,7 @@ import { saveTrustedShare, listTrustedShares, getTrustedShare } from "../js/trus
 import { buildRecoveryShareAnnounce, encodeShareAsText } from "../js/recoveryShare.js";
 import { splitSecret } from "../js/shamir.js";
 import { formatSpiritId } from "../js/spiritId.js";
+import { SETTINGS, getSetting, setSetting } from "../js/settingsRegistry.js";
 import { acceptNewerProofSet, signProofSet, addProofToSet, revokeProofFromSet } from "../js/proofSet.js";
 import { createProofBlock, parseProofBlock, verifyProofBlock } from "../js/proofs.js";
 import { generateAnonymousNickname } from "../js/anonymousNickname.js";
@@ -348,6 +349,8 @@ const HTML = `
     </div>
     <div id="admin-status"></div>
     <div id="admin-config-list" hidden></div>
+    <div id="settings-registry-list"></div>
+    <button id="btn-reset-all-settings" type="button"></button>
   </section>
 
   <section data-screen="room">
@@ -897,6 +900,56 @@ describe("server admin panel (read-only, Section S)", () => {
     expect(document.getElementById("admin-login-form").hidden).toBeFalsy();
     expect(document.getElementById("admin-config-list").hidden).toBe(true);
     expect(getAdminConfig).not.toHaveBeenCalled();
+  });
+});
+
+describe("Section RF13: settings registry panel", () => {
+  it("renders one input per registered setting, pre-filled with its default", () => {
+    initApp(document, { locale: "uk" });
+    const inputs = document.querySelectorAll("#settings-registry-list [data-setting-key]");
+    expect(inputs.length).toBe(SETTINGS.length);
+    const proofThresholdInput = document.querySelector('[data-setting-key="proofFailureThreshold"]');
+    expect(proofThresholdInput.value).toBe("3");
+  });
+
+  it("changing a value persists it via setSetting and getSetting reflects it afterward", () => {
+    initApp(document, { locale: "uk" });
+    const input = document.querySelector('[data-setting-key="maxRecentAccounts"]');
+    input.value = "20";
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(getSetting("maxRecentAccounts")).toBe(20);
+  });
+
+  it("an out-of-range value is rejected and the field snaps back to the stored value", () => {
+    initApp(document, { locale: "uk" });
+    const input = document.querySelector('[data-setting-key="maxRecentAccounts"]');
+    input.value = "99999";
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(getSetting("maxRecentAccounts")).toBe(10); // unchanged -- rejected
+    expect(document.querySelector('[data-setting-key="maxRecentAccounts"]').value).toBe("10");
+  });
+
+  it("per-row reset reverts just that one setting", () => {
+    initApp(document, { locale: "uk" });
+    setSetting("proofFailureThreshold", 9);
+    document.querySelector('[data-setting-key="maxRecentAccounts"]').value = "25";
+    document.querySelector('[data-setting-key="maxRecentAccounts"]').dispatchEvent(new Event("change", { bubbles: true }));
+
+    document.querySelector('[data-reset-setting-key="proofFailureThreshold"]').click();
+
+    expect(getSetting("proofFailureThreshold")).toBe(3);
+    expect(getSetting("maxRecentAccounts")).toBe(25); // untouched by the OTHER field's reset
+  });
+
+  it("btn-reset-all-settings reverts every setting at once", () => {
+    initApp(document, { locale: "uk" });
+    setSetting("proofFailureThreshold", 9);
+    setSetting("maxRecentAccounts", 25);
+
+    document.getElementById("btn-reset-all-settings").click();
+
+    expect(getSetting("proofFailureThreshold")).toBe(3);
+    expect(getSetting("maxRecentAccounts")).toBe(10);
   });
 });
 

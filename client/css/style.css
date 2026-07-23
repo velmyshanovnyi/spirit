@@ -999,6 +999,21 @@ button:disabled {
   gap: 6px;
 }
 
+/* Section RF13: one row per tunable setting -- label+input on top,
+   description hint below, reset link at the end. */
+.settings-row {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-row:last-child {
+  border-bottom: none;
+}
+
+.settings-row .hint-text {
+  margin: 4px 0;
+}
+
 .list-row {
   padding: 10px 12px;
   font-size: 13.5px;

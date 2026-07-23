@@ -18,9 +18,9 @@
 import { encryptWebPushPayload } from "./webPushCrypto.js";
 import { signVapidJwt } from "./vapid.js";
 import { VAPID_PUBLIC_KEY_RAW_BASE64URL, VAPID_PRIVATE_KEY_JWK } from "./vapidKeys.js";
+import { getSetting } from "./settingsRegistry.js";
 
 const VAPID_SUBJECT = "mailto:spirit@example.invalid"; // no real server/contact -- see PN2's rationale for the shared baked-in keypair
-const PUSH_TTL_SECONDS = 86400; // 24h -- generous but bounded upper bound on how long the push service should hold this if the recipient's device is offline
 
 export function vapidAudienceFromEndpoint(endpoint) {
   return new URL(endpoint).origin;
@@ -32,7 +32,7 @@ export function buildPushRequestInit(encryptedBody, jwt, vapidPublicKeyRawBase64
     headers: {
       "Content-Encoding": "aes128gcm",
       "Content-Type": "application/octet-stream",
-      TTL: String(PUSH_TTL_SECONDS),
+      TTL: String(getSetting("pushTtlSeconds")),
       Authorization: `vapid t=${jwt}, k=${vapidPublicKeyRawBase64Url}`
     },
     body: encryptedBody

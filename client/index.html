@@ -377,6 +377,25 @@
         <div id="admin-status" class="status"></div>
         <div id="admin-config-list" class="list-area" hidden></div>
       </section>
+
+      <!-- Section RF13 (specs/ui/settings-panel.md), Stage 1: previously
+           hardcoded tunable parameters, now editable here -- rendered
+           structurally from client/js/settingsRegistry.js's SETTINGS list
+           (label + description per field), grouped by category. Device-level
+           localStorage, same as spirit.theme/spirit.folders -- not tied to
+           an account/profile. Deliberately excludes anything with its own
+           UI already (server/STUN/TURN above) and crypto/protocol constants
+           that must not be user-tunable (see the spec for why). -->
+      <section class="card">
+        <h2 data-i18n="settings.heading">Розширені параметри</h2>
+        <p class="hint" data-i18n="settings.hint">
+          Значення застосовуються одразу (для більшості) або після перезавантаження сторінки.
+        </p>
+        <div id="settings-registry-list" class="list-area"></div>
+        <div class="btn-row">
+          <button id="btn-reset-all-settings" type="button" data-i18n="settings.resetAll">Скинути все до типових значень</button>
+        </div>
+      </section>
     </section>
 
     <!-- ================= Ініціація / приєднання до кімнати ================= -->
@@ -529,12 +548,22 @@
 
   <script type="module">
     import { initApp } from "./js/app.js";
+    import { getSetting } from "./js/settingsRegistry.js";
     // autoStartChat: true matches the previous bare initApp(document) call's
     // implicit default (Section H5). localMediaPreviewDelayMs: real
     // production delay before the camera/mic permission prompt appears
     // (Section F6 follow-up, bug report 2026-07-17) -- app.js's own default
     // is 0 (instant), matching this file's test suite's expectations.
-    initApp(document, { autoStartChat: true, localMediaPreviewDelayMs: 1500 });
+    // iceTimeoutMs/answerWaitTimeoutMs (Section RF13): read from the
+    // user-tunable settings registry here rather than app.js's own
+    // (test-only) defaults, so production actually honors whatever the
+    // user set on the settings screen.
+    initApp(document, {
+      autoStartChat: true,
+      localMediaPreviewDelayMs: 1500,
+      iceTimeoutMs: getSetting("iceTimeoutMs"),
+      answerWaitTimeoutMs: getSetting("answerWaitTimeoutMs")
+    });
 
     // Section PN3 (specs/phase5/push-notifications.md): register the push
     // Service Worker eagerly so it's ready by the time a permanent-profile
