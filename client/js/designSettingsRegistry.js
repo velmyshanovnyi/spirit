@@ -124,6 +124,16 @@ export const DESIGN_SETTINGS = [
     max: 500
   },
   {
+    key: "sidebarSide",
+    category: "layout",
+    label: "Бік бічної панелі",
+    description: "На якому боці екрана розташований сайдбар із чатами й папками.",
+    type: "choice",
+    options: ["left", "right"],
+    optionLabels: { left: "Зліва", right: "Справа" },
+    rootAttribute: "sidebarSide"
+  },
+  {
     key: "callControls",
     category: "visibility",
     label: "Кнопки відеодзвінка в шапці",
@@ -180,6 +190,7 @@ export function getDesignSetting(key) {
       return parsed;
     }
     if (def.type === "boolean") return raw === "1";
+    if (def.type === "choice") return def.options.includes(raw) ? raw : null;
     return raw;
   } catch {
     return null;
@@ -199,6 +210,7 @@ export function setDesignSetting(key, value) {
   }
   if (def.type === "text" && (typeof value !== "string" || value.trim() === "")) return false;
   if (def.type === "boolean") toStore = value ? "1" : "0";
+  if (def.type === "choice" && !def.options.includes(value)) return false;
   try {
     localStorage.setItem(STORAGE_PREFIX + key, String(toStore));
   } catch {
@@ -238,6 +250,14 @@ export function applyDesignSettings(doc = document) {
     if (entry.type === "boolean") {
       for (const node of doc.querySelectorAll(entry.selector)) {
         node.style.display = value === false ? "none" : "";
+      }
+      continue;
+    }
+    if (entry.type === "choice") {
+      if (value === null) {
+        delete root.dataset[entry.rootAttribute];
+      } else {
+        root.dataset[entry.rootAttribute] = value;
       }
       continue;
     }

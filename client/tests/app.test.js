@@ -958,10 +958,19 @@ describe("Section RF13: settings registry panel", () => {
 });
 
 describe("Section RF14: design settings panel", () => {
-  it("renders one input per registered design setting", () => {
+  it("renders one input (or choice-toggle, for RF17 choice-type settings) per registered design setting", () => {
     initApp(document, { locale: "uk" });
     const inputs = document.querySelectorAll("#design-settings-list [data-design-setting-key]");
-    expect(inputs.length).toBe(DESIGN_SETTINGS.length);
+    // Section RF17: "choice"-type entries render a button pair
+    // ([data-design-choice-key]) instead of a single [data-design-setting-key]
+    // input -- count those separately (one toggle group per choice entry,
+    // not one per option button).
+    const choiceKeys = new Set(
+      [...document.querySelectorAll("#design-settings-list [data-design-choice-key]")].map(
+        (btn) => btn.dataset.designChoiceKey
+      )
+    );
+    expect(inputs.length + choiceKeys.size).toBe(DESIGN_SETTINGS.length);
     const accentInput = document.querySelector('[data-design-setting-key="accentColor"]');
     expect(accentInput.type).toBe("color");
   });
@@ -1037,6 +1046,22 @@ describe("Section RF14: design settings panel", () => {
     checkbox.checked = true;
     checkbox.dispatchEvent(new Event("change", { bubbles: true }));
     expect(document.getElementById("folder-tree").style.display).toBe("");
+  });
+
+  it("Section RF17: clicking the sidebar-side choice buttons swaps the data-sidebar-side attribute on :root and back", () => {
+    initApp(document, { locale: "uk" });
+    const rightBtn = document.querySelector('[data-design-choice-key="sidebarSide"][data-design-choice-value="right"]');
+    expect(rightBtn).toBeTruthy();
+
+    rightBtn.click();
+    expect(document.documentElement.dataset.sidebarSide).toBe("right");
+    // renderDesignSettings() rebuilds the DOM after every change -- re-query
+    // rather than reuse the (now-detached) captured reference.
+    expect(document.querySelector('[data-design-choice-key="sidebarSide"][data-design-choice-value="right"]').className).toContain("chip-active");
+
+    document.querySelector('[data-design-choice-key="sidebarSide"][data-design-choice-value="left"]').click();
+    expect(document.documentElement.dataset.sidebarSide).toBe("left");
+    expect(document.querySelector('[data-design-choice-key="sidebarSide"][data-design-choice-value="left"]').className).toContain("chip-active");
   });
 });
 

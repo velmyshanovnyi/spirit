@@ -139,6 +139,28 @@ describe("Section RF16: element visibility settings", () => {
   });
 });
 
+describe("Section RF17: layout edit mode -- sidebar side swap", () => {
+  it("getDesignSetting returns null (== default left) when nothing is stored", () => {
+    expect(getDesignSetting("sidebarSide")).toBeNull();
+  });
+
+  it("setDesignSetting persists a valid choice value and rejects an invalid one", () => {
+    expect(setDesignSetting("sidebarSide", "right")).toBe(true);
+    expect(getDesignSetting("sidebarSide")).toBe("right");
+    expect(setDesignSetting("sidebarSide", "up")).toBe(false);
+  });
+
+  it("applyDesignSettings sets/removes a data attribute on :root for a choice setting", () => {
+    setDesignSetting("sidebarSide", "right");
+    applyDesignSettings(document);
+    expect(document.documentElement.dataset.sidebarSide).toBe("right");
+
+    resetDesignSetting("sidebarSide");
+    applyDesignSettings(document);
+    expect(document.documentElement.dataset.sidebarSide).toBeUndefined();
+  });
+});
+
 describe("DESIGN_SETTINGS registry shape", () => {
   it("every entry has the fields the UI needs to render itself structurally", () => {
     for (const entry of DESIGN_SETTINGS) {
@@ -146,9 +168,12 @@ describe("DESIGN_SETTINGS registry shape", () => {
       expect(entry.category).toBeTruthy();
       expect(entry.label).toBeTruthy();
       expect(entry.description).toBeTruthy();
-      expect(["color", "length", "text", "boolean"]).toContain(entry.type);
+      expect(["color", "length", "text", "boolean", "choice"]).toContain(entry.type);
       if (entry.type === "boolean") {
         expect(entry.selector).toBeTruthy();
+      } else if (entry.type === "choice") {
+        expect(Array.isArray(entry.options) && entry.options.length >= 2).toBe(true);
+        expect(entry.rootAttribute).toBeTruthy();
       } else {
         expect(entry.cssVar.startsWith("--")).toBe(true);
       }

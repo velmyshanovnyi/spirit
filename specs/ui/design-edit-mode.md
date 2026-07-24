@@ -103,12 +103,64 @@ RF14-16) -- НЕ прив'язано до акаунта:
   RF14-16, чи як розширення тієї самої кнопки -- рішення на етапі
   імплементації).
 
+## Уточнення обсягу під час імплементації RF17 (спрощення)
+
+Реалізовано БЕЗ окремого "режиму редагування макета" з inline-кнопками
+прямо на сторінці -- замість цього новий тип налаштування `"choice"`
+доданий у ТОЙ САМИЙ `designSettingsRegistry.js`/розділ "Дизайн" на
+екрані «Сервер», де вже живуть RF14-16 (кольори/форма/типографіка/
+ширина/видимість). Пара кнопок "Зліва"/"Справа" рендериться прямо в
+рядку налаштування (той самий `.settings-row`, що й для кольору/числа),
+а не як окремий toggle-режим з рамками навколо блоків на сторінці.
+Причина: ОДИН уніфікований розділ налаштувань, куди користувач уже
+звик заглядати для всього дизайну (той самий принцип, що вже двічі
+підтверджений у RF14-16), простіше й дешевше в підтримці, ніж друга
+паралельна UI-парадигма ("режим редагування" з інлайн-стрілками). Якщо
+згодом виявиться недостатньо зручним -- inline-кнопки можна додати
+пізніше, не змінюючи саму persistence-модель.
+
 ## Стадії
 
-- [ ] **Stage RF17 -- інфраструктура + бік сайдбара**
-  - [ ] **Tests**: TBD
-  - [ ] **Impl**: TBD
-  - [ ] **Exec review**: TBD
+- [x] **Stage RF17 -- бік бічної панелі (сайдбар зліва/справа)**
+  - [x] **Tests**: `client/tests/designSettingsRegistry.test.js`, новий
+        `describe("Section RF17: layout edit mode -- sidebar side swap")`
+        (3 тести: default = `null`/зліва; валідний/невалідний choice
+        через `setDesignSetting`; `applyDesignSettings` виставляє/знімає
+        `data-sidebar-side` на `:root`). Registry-shape тест розширено
+        під `type: "choice"` (`options`-масив ≥2, `rootAttribute`).
+        `client/tests/app.test.js`, новий тест: клік по кнопці "Справа"
+        виставляє `data-sidebar-side="right"` і підсвічує активну
+        кнопку; клік "Зліва" повертає назад. Існуючий тест "renders one
+        input per registered design setting" (RF14) скоригований під
+        нову форму рендеру (choice-тип рахується як ОДНА група кнопок,
+        не окремий `[data-design-setting-key]` input). Разом: 331/331
+        (307 у `app.test.js` + 23 у `designSettingsRegistry.test.js`
+        + 1 новий у кожному).
+  - [x] **Impl**: `client/js/designSettingsRegistry.js` -- новий
+        `type: "choice"` (`options: string[]`, `optionLabels`,
+        `rootAttribute`), `getDesignSetting`/`setDesignSetting`
+        валідують проти `options`, `applyDesignSettings` виставляє/знімає
+        `root.dataset[rootAttribute]`; новий запис `sidebarSide`
+        (`"left"`/`"right"`, default `"left"`) у категорії `layout` (не
+        нова категорія -- логічно те саме, що ширина сайдбара). `client/js/app.js`
+        -- `renderDesignSettings` розширено гілкою для `type==="choice"`
+        (пара `<button class="chip">`, підсвітка активної через
+        `chip-active`, замість `<input>`), новий делегований click-обробник
+        `[data-design-choice-key]` у тому самому `#design-settings-list`.
+        `client/css/style.css` -- `:root[data-sidebar-side="right"]`
+        перемикає `order`/бордер на `#app-sidebar`/`.app-body > .layout`
+        (flex `order`, DOM-порядок не чіпається); `.choice-toggle`/
+        `.chip`/`.chip-active` (той самий вигляд, що й `.sidebar-filters
+        .chip`, але той клас скопований лише туди -- переозначено тут
+        глобально для перевикористання).
+  - [x] **Exec review**: самоперевірка -- (а) на mobile-брейкпоінті
+        (`@media max-width: 768px`) `.app-body` стає `display:block`,
+        де `order` не має ефекту (властивість лише для flex/grid-дітей)
+        -- перевірено читанням CSS, конфлікту з мобільним stacking немає;
+        (б) `sidebarSide` default (`null` -- немає запису) рендериться
+        як `"left"` активна кнопка (перший елемент `options`), узгоджено
+        з тим, що стилі за замовчуванням і так дають сайдбар зліва;
+        (в) 331/331, без регресій у наявних RF14-16 тестах.
 - [ ] **Stage RF18 -- бік панелі розмови**
 - [ ] **Stage RF19 -- порядок елементів шапки**
 

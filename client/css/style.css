@@ -188,6 +188,21 @@ body.conversation-toolbar-visible .app-body {
   box-sizing: border-box;
 }
 
+/* Section RF17 (specs/ui/design-edit-mode.md): sidebar/main-content swap --
+   :root[data-sidebar-side] set by designSettingsRegistry.js's applyDesignSettings
+   for the "sidebarSide" choice setting. Only `order` needs flipping (.app-body
+   is a flex row, DOM order is left untouched) -- the border moves with it so
+   it still reads as the sidebar's OUTER edge regardless of which side it's on. */
+:root[data-sidebar-side="right"] #app-sidebar {
+  order: 2;
+  border-right: none;
+  border-left: 1px solid var(--border);
+}
+
+:root[data-sidebar-side="right"] .app-body > .layout {
+  order: 1;
+}
+
 .sidebar-header {
   display: flex;
   align-items: center;
@@ -1022,6 +1037,30 @@ button:disabled {
 
 .settings-row .hint-text {
   margin: 4px 0;
+}
+
+/* Section RF17: two-option toggle for "choice"-type design settings
+   (e.g. sidebar side) -- same chip look as .sidebar-filters .chip
+   (scoped there, not global, so restated here), but clickable. */
+.choice-toggle {
+  display: flex;
+  gap: 6px;
+}
+
+.choice-toggle .chip {
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.choice-toggle .chip-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .settings-row input[type="color"] {

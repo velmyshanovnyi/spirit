@@ -2524,7 +2524,40 @@ export function initApp(doc, options) {
       label.appendChild(labelText);
 
       const stored = getDesignSetting(entry.key);
-      const currentRaw = entry.type === "boolean" ? "" : computed.getPropertyValue(entry.cssVar).trim();
+      // Section RF17: "choice" settings have no cssVar to read a live
+      // computed value from -- there's nothing to fall back to when unset,
+      // the first option (e.g. "left") IS the stylesheet default.
+      const currentRaw = entry.type === "boolean" || entry.type === "choice" ? "" : computed.getPropertyValue(entry.cssVar).trim();
+      if (entry.type === "choice") {
+        const currentValue = stored ?? entry.options[0];
+        const toggle = doc.createElement("div");
+        toggle.className = "choice-toggle";
+        for (const option of entry.options) {
+          const optionBtn = doc.createElement("button");
+          optionBtn.type = "button";
+          optionBtn.textContent = entry.optionLabels[option] || option;
+          optionBtn.className = option === currentValue ? "chip chip-active" : "chip";
+          optionBtn.dataset.designChoiceKey = entry.key;
+          optionBtn.dataset.designChoiceValue = option;
+          toggle.appendChild(optionBtn);
+        }
+        label.appendChild(toggle);
+        row.appendChild(label);
+
+        const description = doc.createElement("p");
+        description.className = "hint-text";
+        description.textContent = entry.description;
+        row.appendChild(description);
+
+        const resetBtn = doc.createElement("button");
+        resetBtn.type = "button";
+        resetBtn.className = "btn-link";
+        resetBtn.textContent = t("settings.resetOne");
+        resetBtn.dataset.resetDesignSettingKey = entry.key;
+        row.appendChild(resetBtn);
+        list.appendChild(row);
+        continue;
+      }
       const input = doc.createElement("input");
       input.dataset.designSettingKey = entry.key;
       if (entry.type === "boolean") {
@@ -2575,6 +2608,14 @@ export function initApp(doc, options) {
     }
   });
   el("design-settings-list")?.addEventListener("click", (event) => {
+    const choiceBtn = event.target.closest("[data-design-choice-key]");
+    if (choiceBtn) {
+      if (setDesignSetting(choiceBtn.dataset.designChoiceKey, choiceBtn.dataset.designChoiceValue)) {
+        applyDesignSettings(doc);
+      }
+      renderDesignSettings();
+      return;
+    }
     const resetBtn = event.target.closest("[data-reset-design-setting-key]");
     if (!resetBtn) return;
     resetDesignSetting(resetBtn.dataset.resetDesignSettingKey);
