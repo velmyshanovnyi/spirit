@@ -22,6 +22,23 @@ export async function getGroup(groupId) {
   return get("groups", groupId);
 }
 
+/**
+ * Section GC4 fix (specs/phase4/group-chats.md): a device that only ever
+ * JOINED a group via an invite link -- never called createGroup itself --
+ * had no local record for that groupId at all (getGroup always returned
+ * undefined for it), silently starving every receiving-side group gate.
+ * Unlike createGroup, this writes to the EXACT groupId given (not a freshly
+ * minted one) and only if nothing is there yet -- never overwrites an
+ * existing (possibly more authoritative) record.
+ */
+export async function ensureGroupBootstrap(groupId, { name, memberFingerprints, now = Date.now() }) {
+  const existing = await get("groups", groupId);
+  if (existing) return existing;
+  const group = { groupId, name, memberFingerprints, createdAt: now };
+  await put("groups", groupId, group);
+  return group;
+}
+
 export async function listGroups() {
   const keys = await listKeys("groups");
   return Promise.all(keys.map((key) => get("groups", key)));

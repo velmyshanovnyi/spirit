@@ -56,7 +56,7 @@ import { createProofBlock, parseProofBlock, verifyProofBlock } from "./proofs.js
 import { fetchProofPageText } from "./fetchProof.js";
 import { generateAnonymousNickname } from "./anonymousNickname.js";
 import { splitFileIntoChunks, chunkToBase64, base64ToChunk, computeFileHash, createFileAssembler } from "./fileTransfer.js";
-import { createGroup, getGroup, listGroups, updateGroupMembers } from "./groups.js";
+import { createGroup, getGroup, listGroups, updateGroupMembers, ensureGroupBootstrap } from "./groups.js";
 import {
   saveImportedContact,
   listImportedContacts,
@@ -2931,6 +2931,27 @@ export function initApp(doc, options) {
     return stream;
   }
 
+  // Section GC4 fix: a device that only ever JOINED a group via an invite
+  // (never called createGroup itself) had no local groups.js record at all
+  // -- getGroup(groupId) always returns undefined for it on a real separate
+  // device, which silently starved every receiving-side group gate below
+  // (group-message, group-member-joined, mesh-relay-offer) of a group to
+  // attach to. This bootstraps a minimal local record -- name is a
+  // placeholder (the real chosen name is never transmitted to a plain
+  // joiner; deliberately not introducing a new control message for this,
+  // per the scope agreed with the user) -- the first time any of those
+  // gates would otherwise find nothing. Membership starts as just [self,
+  // the connected peer] and grows correctly afterward via the existing
+  // updateGroupMembers calls once real roster data arrives.
+  async function ensureLocalGroupRecord(groupId) {
+    const existing = await getGroup(groupId);
+    if (existing) return existing;
+    return ensureGroupBootstrap(groupId, {
+      name: t("groups.bootstrapNameFallback"),
+      memberFingerprints: [state.senderKey, state.peerFingerprint].filter(Boolean)
+    });
+  }
+
   /**
    * Default handler for decrypted chat-channel messages. Control messages
    * (JSON with a known type) are routed; everything else is chat text --
@@ -3027,7 +3048,7 @@ export function initApp(doc, options) {
       if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
         const joinedGroupId = getActivePeer()?.groupId;
         if (joinedGroupId) {
-          const group = await getGroup(joinedGroupId);
+          const group = await ensureLocalGroupRecord(joinedGroupId);
           if (group && !group.memberFingerprints.includes(verified.fingerprint)) {
             await updateGroupMembers(joinedGroupId, [...group.memberFingerprints, verified.fingerprint]);
           }
@@ -3108,14 +3129,16 @@ export function initApp(doc, options) {
       // (1) the connection it arrived on must actually be tagged with the
       // groupId being claimed -- a peer cannot inject membership for a
       // group it was never invited into via a mismatched/forged groupId;
-      // (2) the group must already exist locally -- learning about a group
-      // this device isn't tracking is silently ignored, since there is
-      // nothing sensible to attach an unknown member to.
+      // (2) a local record for this group must exist -- ensureLocalGroupRecord
+      // (Section GC4 fix) bootstraps a minimal one if this device only ever
+      // joined via invite and never had its own copy, rather than silently
+      // dropping every group-scoped message the way the old getGroup-only
+      // gate did.
       if (!state.peerFingerprint || !state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
       if (typeof control.groupId !== "string" || typeof control.memberFingerprint !== "string") return;
       const activePeerEntry = getActivePeer();
       if (!activePeerEntry || activePeerEntry.groupId !== control.groupId) return;
-      const group = await getGroup(control.groupId);
+      const group = await ensureLocalGroupRecord(control.groupId);
       if (!group) return;
       if (!group.memberFingerprints.includes(control.memberFingerprint)) {
         await updateGroupMembers(control.groupId, [...group.memberFingerprints, control.memberFingerprint]);
@@ -3159,12 +3182,12 @@ export function initApp(doc, options) {
       let senderLabel = formatSpiritId(state.peerFingerprint);
       // GC3 exec-review iter1 finding: profile mode only (ephemeral mode has
       // no group storage at all -- GC1's groups.js is only ever populated
-      // via the profile-mode UI paths), same existence check as
-      // group-member-joined above -- a message for a group this device
-      // isn't locally tracking is silently ignored rather than rendered/
-      // persisted under an unknown groupId.
+      // via the profile-mode UI paths). ensureLocalGroupRecord (Section GC4
+      // fix) bootstraps a local record if this device only ever joined via
+      // invite -- previously this used getGroup directly and silently
+      // dropped every group message for anyone but the original creator.
       if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
-        const group = await getGroup(control.groupId);
+        const group = await ensureLocalGroupRecord(control.groupId);
         if (!group) return;
         const senderContact = await getContact(state.peerFingerprint);
         if (senderContact?.nickname) senderLabel = senderContact.nickname;
@@ -3512,7 +3535,7 @@ export function initApp(doc, options) {
   // duplicate connection if the same offer is somehow relayed twice).
   async function handleIncomingMeshRelayOffer(control, relayConnectionId) {
     if (!state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
-    const group = await getGroup(control.groupId);
+    const group = await ensureLocalGroupRecord(control.groupId);
     if (!group) return;
     if (getGroupPeerByFingerprint(control.groupId, control.fromFingerprint)) return;
 

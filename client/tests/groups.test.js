@@ -5,7 +5,8 @@ import {
   getGroup,
   listGroups,
   updateGroupMembers,
-  deleteGroup
+  deleteGroup,
+  ensureGroupBootstrap
 } from "../js/groups.js";
 
 beforeEach(() => {
@@ -88,5 +89,23 @@ describe("deleteGroup", () => {
 
     expect(await getGroup(group.groupId)).toBeUndefined();
     expect(await listGroups()).toEqual([]);
+  });
+});
+
+describe("ensureGroupBootstrap (Section GC4 fix)", () => {
+  it("writes a record under the EXACT groupId given, not a freshly minted one", async () => {
+    const group = await ensureGroupBootstrap("given-group-id", { name: "Unnamed group", memberFingerprints: [FP_A, FP_B] });
+
+    expect(group.groupId).toBe("given-group-id");
+    expect(await getGroup("given-group-id")).toEqual(group);
+  });
+
+  it("never overwrites an already-existing record for that groupId", async () => {
+    const original = await createGroup({ name: "Друзі", memberFingerprints: [FP_A, FP_B, FP_C] });
+
+    const result = await ensureGroupBootstrap(original.groupId, { name: "Unnamed group", memberFingerprints: [FP_A] });
+
+    expect(result).toEqual(original);
+    expect(await getGroup(original.groupId)).toEqual(original);
   });
 });

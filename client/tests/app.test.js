@@ -84,7 +84,8 @@ vi.mock("../js/groups.js", () => ({
   createGroup: vi.fn(),
   getGroup: vi.fn(),
   listGroups: vi.fn().mockResolvedValue([]),
-  updateGroupMembers: vi.fn()
+  updateGroupMembers: vi.fn(),
+  ensureGroupBootstrap: vi.fn()
 }));
 vi.mock("../js/importedContacts.js", () => ({
   saveImportedContact: vi.fn(),
@@ -197,7 +198,7 @@ import { generateAnonymousNickname } from "../js/anonymousNickname.js";
 import { fetchProofPageText } from "../js/fetchProof.js";
 import { get as dbGet, put as dbPut } from "../js/db.js";
 import { appendMessage, listMessages, listConversations } from "../js/historyStore.js";
-import { createGroup, getGroup, listGroups, updateGroupMembers } from "../js/groups.js";
+import { createGroup, getGroup, listGroups, updateGroupMembers, ensureGroupBootstrap } from "../js/groups.js";
 import { saveImportedContact, listImportedContacts, getImportedContact, setMatchedFingerprint, deleteImportedContact, clearPendingMessages } from "../js/importedContacts.js";
 import { parseContactList, parseChatExport } from "../js/importParsers.js";
 import { adminLogin, getAdminConfig } from "../js/adminAuth.js";
@@ -7632,6 +7633,31 @@ describe("GC4: full-mesh auto-connect via relay (specs/phase4/group-chats.md)", 
     });
     expect(typeof body.relayId).toBe("string");
     expect(body.relayId.length).toBeGreaterThan(0);
+  });
+
+  it("Section GC4 fix: a device with NO local group record yet (only ever joined via invite) still bootstraps one and auto-starts the mesh-connect (was previously silently dropped by getGroup returning undefined)", async () => {
+    const chat = await verifiedGroupChat("group-1");
+    getGroup.mockResolvedValue(undefined); // this device never called createGroup itself
+    ensureGroupBootstrap.mockResolvedValue({ groupId: "group-1", name: "Група без назви", memberFingerprints: ["profile-fp", "peer-fp"] });
+    updateGroupMembers.mockResolvedValue(undefined);
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({
+      type: "group-member-joined", groupId: "group-1", memberFingerprint: "new-member-fp", memberNickname: "Марія"
+    }));
+
+    let meshCaptured;
+    startAsInitiator.mockImplementation((opts) => {
+      meshCaptured = opts;
+      return { __fakePc: true };
+    });
+
+    await chat.captured.onMessage("ENCRYPTED_GMJ");
+
+    expect(ensureGroupBootstrap).toHaveBeenCalledWith("group-1", {
+      name: "Група без назви",
+      memberFingerprints: ["profile-fp", "peer-fp"]
+    });
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalledTimes(2));
+    expect(meshCaptured).toBeTruthy();
   });
 
   it("receiving group-member-joined about an ALREADY-known group member does not start a second mesh-connect attempt", async () => {
