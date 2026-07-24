@@ -190,6 +190,7 @@ import { buildRecoveryShareAnnounce, encodeShareAsText } from "../js/recoverySha
 import { splitSecret } from "../js/shamir.js";
 import { formatSpiritId } from "../js/spiritId.js";
 import { SETTINGS, getSetting, setSetting } from "../js/settingsRegistry.js";
+import { DESIGN_SETTINGS, getDesignSetting, setDesignSetting, applyDesignSettings } from "../js/designSettingsRegistry.js";
 import { acceptNewerProofSet, signProofSet, addProofToSet, revokeProofFromSet } from "../js/proofSet.js";
 import { createProofBlock, parseProofBlock, verifyProofBlock } from "../js/proofs.js";
 import { generateAnonymousNickname } from "../js/anonymousNickname.js";
@@ -351,6 +352,8 @@ const HTML = `
     <div id="admin-config-list" hidden></div>
     <div id="settings-registry-list"></div>
     <button id="btn-reset-all-settings" type="button"></button>
+    <div id="design-settings-list"></div>
+    <button id="btn-reset-all-design-settings" type="button"></button>
   </section>
 
   <section data-screen="room">
@@ -950,6 +953,60 @@ describe("Section RF13: settings registry panel", () => {
 
     expect(getSetting("proofFailureThreshold")).toBe(3);
     expect(getSetting("maxRecentAccounts")).toBe(10);
+  });
+});
+
+describe("Section RF14: design settings panel", () => {
+  it("renders one input per registered design setting", () => {
+    initApp(document, { locale: "uk" });
+    const inputs = document.querySelectorAll("#design-settings-list [data-design-setting-key]");
+    expect(inputs.length).toBe(DESIGN_SETTINGS.length);
+    const accentInput = document.querySelector('[data-design-setting-key="accentColor"]');
+    expect(accentInput.type).toBe("color");
+  });
+
+  it("setting a color persists it and applies it as an inline :root custom property immediately", () => {
+    initApp(document, { locale: "uk" });
+    const input = document.querySelector('[data-design-setting-key="accentColor"]');
+    input.value = "#ff0000";
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+
+    expect(getDesignSetting("accentColor")).toBe("#ff0000");
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#ff0000");
+  });
+
+  it("an invalid value is rejected without touching the CSS variable", () => {
+    initApp(document, { locale: "uk" });
+    const input = document.querySelector('[data-design-setting-key="fontFamily"]');
+    input.value = "   ";
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+
+    expect(getDesignSetting("fontFamily")).toBeNull();
+    expect(document.documentElement.style.getPropertyValue("--font-family")).toBe("");
+  });
+
+  it("per-row reset removes just that one CSS override, leaving others intact", () => {
+    initApp(document, { locale: "uk" });
+    setDesignSetting("accentColor", "#ff0000");
+    setDesignSetting("cornerRadius", 20);
+    applyDesignSettings(document);
+
+    document.querySelector('[data-reset-design-setting-key="accentColor"]').click();
+
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("");
+    expect(document.documentElement.style.getPropertyValue("--radius")).toBe("20px"); // untouched
+  });
+
+  it("btn-reset-all-design-settings clears every CSS override at once", () => {
+    initApp(document, { locale: "uk" });
+    setDesignSetting("accentColor", "#ff0000");
+    setDesignSetting("cornerRadius", 20);
+    applyDesignSettings(document);
+
+    document.getElementById("btn-reset-all-design-settings").click();
+
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("");
+    expect(document.documentElement.style.getPropertyValue("--radius")).toBe("");
   });
 });
 

@@ -19,6 +19,11 @@
   --shadow: 0 1px 2px rgba(20, 22, 40, 0.05), 0 8px 24px rgba(20, 22, 40, 0.06);
   --radius: 14px;
   --radius-sm: 9px;
+  /* Section RF14 (specs/ui/settings-panel.md, design-settings extension):
+     theme-independent (same in light/dark) -- user-tunable via the
+     settings panel, client/js/designSettingsRegistry.js. */
+  --font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-size-base: 15px;
 }
 
 :root[data-theme="dark"] {
@@ -58,8 +63,8 @@ html {
 
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  font-size: 15px;
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
   line-height: 1.5;
   color: var(--text);
   background: var(--bg-gradient), var(--bg);
@@ -1012,6 +1017,16 @@ button:disabled {
 
 .settings-row .hint-text {
   margin: 4px 0;
+}
+
+.settings-row input[type="color"] {
+  width: 44px;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
 }
 
 .list-row {

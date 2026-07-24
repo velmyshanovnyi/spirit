@@ -40,6 +40,14 @@ import { splitSecret } from "./shamir.js";
 import { buildRecoveryShareAnnounce, parseRecoveryShareAnnounce, encodeShareAsText } from "./recoveryShare.js";
 import { computeSharedSafetyNumber, hexToEmoji } from "./safetyNumber.js";
 import { getSetting, setSetting, resetSetting, resetAllSettings, SETTINGS } from "./settingsRegistry.js";
+import {
+  DESIGN_SETTINGS,
+  getDesignSetting,
+  setDesignSetting,
+  resetDesignSetting,
+  resetAllDesignSettings,
+  applyDesignSettings
+} from "./designSettingsRegistry.js";
 import { saveTrustedShare, listTrustedShares, getTrustedShare } from "./trustedShares.js";
 import { qrSvgMarkup } from "./qr.js";
 import { recoverFromShares } from "./socialRecovery.js";
@@ -143,6 +151,10 @@ export function initApp(doc, options) {
   // Locale: explicit option (tests) -> stored choice -> browser language.
   setLocale(locale ?? detectLocale(typeof navigator !== "undefined" ? navigator.language : undefined));
   initTheme(doc);
+  // Section RF14: applies any stored color/shape/typography overrides as
+  // inline :root custom properties -- must run on every load regardless of
+  // which screen the user starts on, same as theme itself.
+  applyDesignSettings(doc);
   applyTranslations(doc);
 
   const themeToggle = doc.getElementById("theme-toggle");
@@ -2459,6 +2471,97 @@ export function initApp(doc, options) {
   el("btn-reset-all-settings")?.addEventListener("click", () => {
     resetAllSettings();
     renderSettingsRegistry();
+  });
+
+  // Section RF14 (specs/ui/settings-panel.md, design-settings extension):
+  // same structural-rendering shape as renderSettingsRegistry above, but the
+  // displayed value for a NOT-overridden setting comes from getComputedStyle
+  // (the current theme's real value) rather than a fixed default -- light
+  // and dark themes disagree on what "default" even means for a color.
+  function renderDesignSettings() {
+    const list = el("design-settings-list");
+    if (!list) return;
+    list.innerHTML = "";
+    const categoryLabels = {
+      colors: t("design.category.colors"),
+      shape: t("design.category.shape"),
+      typography: t("design.category.typography")
+    };
+    const computed = doc.defaultView.getComputedStyle(doc.documentElement);
+    let lastCategory = null;
+    for (const entry of DESIGN_SETTINGS) {
+      if (entry.category !== lastCategory) {
+        lastCategory = entry.category;
+        const heading = doc.createElement("h3");
+        heading.textContent = categoryLabels[entry.category] || entry.category;
+        list.appendChild(heading);
+      }
+      const row = doc.createElement("div");
+      row.className = "settings-row";
+      const label = doc.createElement("label");
+      label.className = "field";
+      const labelText = doc.createElement("span");
+      labelText.textContent = entry.label;
+      label.appendChild(labelText);
+
+      const stored = getDesignSetting(entry.key);
+      const currentRaw = computed.getPropertyValue(entry.cssVar).trim();
+      const input = doc.createElement("input");
+      input.dataset.designSettingKey = entry.key;
+      if (entry.type === "color") {
+        input.type = "color";
+        // A CSS color value (named color, rgb(), etc.) isn't guaranteed to
+        // be hex -- <input type=color> only accepts #rrggbb, so fall back
+        // to a neutral value rather than leaving it on an invalid string.
+        input.value = stored ?? (/^#[0-9a-fA-F]{6}$/.test(currentRaw) ? currentRaw : "#000000");
+      } else if (entry.type === "length") {
+        input.type = "number";
+        input.min = String(entry.min);
+        input.max = String(entry.max);
+        input.value = String(stored ?? (parseFloat(currentRaw) || 0));
+      } else {
+        input.type = "text";
+        input.value = stored ?? currentRaw;
+      }
+      label.appendChild(input);
+      row.appendChild(label);
+
+      const description = doc.createElement("p");
+      description.className = "hint-text";
+      description.textContent = entry.description;
+      row.appendChild(description);
+
+      const resetBtn = doc.createElement("button");
+      resetBtn.type = "button";
+      resetBtn.className = "btn-link";
+      resetBtn.textContent = t("settings.resetOne");
+      resetBtn.dataset.resetDesignSettingKey = entry.key;
+      row.appendChild(resetBtn);
+      list.appendChild(row);
+    }
+  }
+  renderDesignSettings();
+
+  el("design-settings-list")?.addEventListener("change", (event) => {
+    const input = event.target.closest("[data-design-setting-key]");
+    if (!input) return;
+    if (setDesignSetting(input.dataset.designSettingKey, input.value)) {
+      applyDesignSettings(doc);
+    } else {
+      renderDesignSettings();
+    }
+  });
+  el("design-settings-list")?.addEventListener("click", (event) => {
+    const resetBtn = event.target.closest("[data-reset-design-setting-key]");
+    if (!resetBtn) return;
+    resetDesignSetting(resetBtn.dataset.resetDesignSettingKey);
+    applyDesignSettings(doc);
+    renderDesignSettings();
+  });
+  el("btn-reset-all-design-settings")?.addEventListener("click", () => {
+    resetAllDesignSettings();
+    applyDesignSettings(doc);
+    renderDesignSettings();
   });
 
   withBusyButton(el("btn-admin-login"), async () => {

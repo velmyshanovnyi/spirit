@@ -396,6 +396,23 @@
           <button id="btn-reset-all-settings" type="button" data-i18n="settings.resetAll">Скинути все до типових значень</button>
         </div>
       </section>
+
+      <!-- Section RF14 (specs/ui/settings-panel.md, design-settings
+           extension): colors/shape/typography tokens, rendered structurally
+           from client/js/designSettingsRegistry.js. Unlike the panel above,
+           "default" here means "no override" -- values are read live from
+           the current theme via getComputedStyle, not a baked-in constant,
+           since light/dark have different defaults. -->
+      <section class="card">
+        <h2 data-i18n="design.heading">Дизайн</h2>
+        <p class="hint" data-i18n="design.hint">
+          Змінює вигляд інтерфейсу одразу, без перезавантаження. Порожнє поле "скинути" повертає колір/розмір теми за замовчуванням (світлої чи темної).
+        </p>
+        <div id="design-settings-list" class="list-area"></div>
+        <div class="btn-row">
+          <button id="btn-reset-all-design-settings" type="button" data-i18n="design.resetAll">Скинути весь дизайн до типового</button>
+        </div>
+      </section>
     </section>
 
     <!-- ================= Ініціація / приєднання до кімнати ================= -->
