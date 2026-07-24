@@ -68,11 +68,34 @@ default, min?, max? }`), що:
         codec/profile тестів, які вже неодноразово підтверджені чистими в
         ізоляції цієї сесії).
 
-- [ ] **Stage 2 — file-transfer/мережеві параметри**: `FILE_CHUNK_SIZE`,
-      `BUFFERED_AMOUNT_HIGH_THRESHOLD` (обидва app.js) -- ризикованіші за
-      Stage 1 (напряму впливають на пропускну здатність/стабільність
-      передачі файлів через DataChannel), тому окрема секція з ретельнішим
-      тестуванням граничних значень перед додаванням у UI.
+- [x] **Stage 2 — file-transfer/мережеві параметри (2 шт.)**
+  - [x] **Tests**: `client/tests/settingsRegistry.test.js` -- новий тест
+        підтверджує default-значення `fileChunkSize`/
+        `bufferedAmountHighThresholdBytes` збігаються з оригінальними
+        константами (16KB/1MB). `client/tests/app.test.js` -- новий
+        end-to-end тест ("a smaller fileChunkSize setting actually
+        produces more chunks"): реально відправляє 10KB-файл через живий
+        file-transfer flow з `fileChunkSize=4096` і перевіряє, що
+        `offer.totalChunks` дійсно змінюється (3 замість 1 за замовчуванням)
+        -- доказ, що налаштування насправді використовується, не просто
+        зберігається.
+  - [x] **Impl**: `client/js/settingsRegistry.js` -- `fileChunkSize`
+        (default 16KB, min 4KB, max 256KB), `bufferedAmountHighThresholdBytes`
+        (default 1MB, min 64KB, max 16MB), обидва в категорії `fileTransfer`
+        (групуються в тому самому розділі UI, що й `fileSizeWarningBytes` із
+        Stage 1). `client/js/app.js` -- `FILE_CHUNK_SIZE`/
+        `BUFFERED_AMOUNT_HIGH_THRESHOLD` константи видалено, замінено на
+        `getSetting(...)` у точках виклику (`sendFileChunks`,
+        `splitFileIntoChunks`-виклик у file-picker обробнику).
+  - [x] **Exec review**: самоперевірка -- (а) обидва default-значення
+        точно збігаються з видаленими константами (16*1024, 1024*1024);
+        (б) `bufferedAmountLowThreshold` (властивість каналу) і поточна
+        перевірка backpressure тепер читають ОДНЕ й те саме значення
+        `getSetting(...)` за виклик (не два окремі виклики, що могли б
+        розійтися, якщо користувач змінить налаштування мід-transfer) --
+        збережено як локальну змінну `bufferedAmountHighThreshold` на
+        початку `sendFileChunks`; (в) 293/293 в app.test.js, 787/787
+        повний прогін (чисто, без sandbox-flaky шуму цього разу).
 - [ ] **Stage 3+** -- решта інвентаризації нижче, за потреби користувача;
       секції, позначені "НЕ переносити", лишаються задокументованими
       константами назавжди, не черговою стадією.

@@ -6532,6 +6532,21 @@ describe("file transfer (Section FT2, specs/phase4/file-transfer.md)", () => {
     expect(channel.send.mock.calls.some(([p]) => p.includes('"type":"file-chunk"'))).toBe(false);
   });
 
+  it("Section RF13 Stage 2: a smaller fileChunkSize setting actually produces more chunks", async () => {
+    setSetting("fileChunkSize", 4 * 1024); // registry minimum
+    const { channel } = await fileTransferChat();
+    const bytes = new Uint8Array(10 * 1024); // 10KB / 4KB chunks = 3 chunks (vs. 1 at the 16KB default)
+
+    setFileInput(makeFile(bytes));
+    await vi.waitFor(() =>
+      expect(channel.send.mock.calls.some(([p]) => p.includes('"type":"file-offer"'))).toBe(true)
+    );
+
+    const offerCall = channel.send.mock.calls.find(([p]) => p.includes('"type":"file-offer"'));
+    const offer = JSON.parse(offerCall[0].slice("ENC(".length, -1));
+    expect(offer.totalChunks).toBe(3);
+  });
+
   it("shows an accept/reject banner with the offered file's name and size on incoming file-offer", async () => {
     const { captured } = await fileTransferChat();
 

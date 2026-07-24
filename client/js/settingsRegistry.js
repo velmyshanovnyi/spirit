@@ -68,6 +68,26 @@ export const SETTINGS = [
     max: 2 * 1024 * 1024 * 1024
   },
   {
+    key: "fileChunkSize",
+    category: "fileTransfer",
+    label: "Розмір частини файлу (байти)",
+    description: "На частини якого розміру розбивається файл перед надсиланням через DataChannel. Більші частини -- менше накладних витрат, але довша затримка перед тим, як приймач побачить прогрес.",
+    type: "number",
+    default: 16 * 1024,
+    min: 4 * 1024,
+    max: 256 * 1024
+  },
+  {
+    key: "bufferedAmountHighThresholdBytes",
+    category: "fileTransfer",
+    label: "Поріг зворотного тиску каналу (байти)",
+    description: "Коли скільки байтів чекає відправки в DataChannel, передача файлу призупиняється, поки черга не звільниться -- захищає від переповнення внутрішнього буфера WebRTC на великих файлах.",
+    type: "number",
+    default: 1024 * 1024,
+    min: 64 * 1024,
+    max: 16 * 1024 * 1024
+  },
+  {
     key: "maxRecentAccounts",
     category: "accounts",
     label: "Кількість останніх акаунтів",

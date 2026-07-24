@@ -2540,15 +2540,15 @@ export function initApp(doc, options) {
   ]);
 
   // Section FT2 (specs/phase4/file-transfer.md), architectural decisions:
-  // 16KB raw-byte chunks (base64'd into JSON control messages, consistent
-  // with the existing "everything is JSON text" control pattern); a 1MB
-  // bufferedAmount backpressure threshold, to avoid overflowing the WebRTC
-  // SCTP send buffer on large files; and a 100MB soft UI warning (no hard
-  // limit -- the whole file is held in RAM for the duration of a transfer,
-  // by deliberate zero-database design).
-  const FILE_CHUNK_SIZE = 16 * 1024;
-  const BUFFERED_AMOUNT_HIGH_THRESHOLD = 1024 * 1024;
-
+  // raw-byte chunks (base64'd into JSON control messages, consistent with
+  // the existing "everything is JSON text" control pattern), a bufferedAmount
+  // backpressure threshold (avoids overflowing the WebRTC SCTP send buffer
+  // on large files), and a soft UI size warning (no hard limit -- the whole
+  // file is held in RAM for the duration of a transfer, by deliberate
+  // zero-database design) -- all three now user-tunable (Section RF13 Stage
+  // 2, client/js/settingsRegistry.js: fileChunkSize,
+  // bufferedAmountHighThresholdBytes, fileSizeWarningBytes), defaults
+  // unchanged from the original hardcoded 16KB/1MB/100MB.
   function randomFileId() {
     return [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
   }
@@ -2625,12 +2625,13 @@ export function initApp(doc, options) {
     const transfer = state.outgoingFileTransfers[fileId];
     if (!transfer || !state.channel || !state.sessionKey) return;
     const channel = state.channel;
-    channel.bufferedAmountLowThreshold = BUFFERED_AMOUNT_HIGH_THRESHOLD;
+    const bufferedAmountHighThreshold = getSetting("bufferedAmountHighThresholdBytes");
+    channel.bufferedAmountLowThreshold = bufferedAmountHighThreshold;
     for (let index = transfer.sentCount; index < transfer.chunks.length; index++) {
       // The transfer can vanish mid-flight (peer session reset) -- stop
       // rather than keep pushing chunks nobody will ever assemble.
       if (!state.outgoingFileTransfers[fileId] || state.channel !== channel) return;
-      if (channel.bufferedAmount > BUFFERED_AMOUNT_HIGH_THRESHOLD) {
+      if (channel.bufferedAmount > bufferedAmountHighThreshold) {
         await waitForBufferedAmountLow(channel);
       }
       const data = chunkToBase64(transfer.chunks[index]);
@@ -4589,7 +4590,7 @@ export function initApp(doc, options) {
       if (!file || !state.channel || !state.sessionKey || !state.peerFingerprint) return;
       const buffer = await file.arrayBuffer();
       const sha256 = await computeFileHash(buffer);
-      const chunks = splitFileIntoChunks(buffer, FILE_CHUNK_SIZE);
+      const chunks = splitFileIntoChunks(buffer, getSetting("fileChunkSize"));
       const fileId = randomFileId();
       state.outgoingFileTransfers[fileId] = {
         chunks,

@@ -11,6 +11,11 @@ describe("getSetting", () => {
     expect(getSetting("proofFailureThreshold")).toBe(3);
   });
 
+  it("Stage 2: file-transfer defaults match the constants they replaced", () => {
+    expect(getSetting("fileChunkSize")).toBe(16 * 1024);
+    expect(getSetting("bufferedAmountHighThresholdBytes")).toBe(1024 * 1024);
+  });
+
   it("throws for an unknown key rather than silently returning undefined", () => {
     expect(() => getSetting("notARealSetting")).toThrow();
   });
