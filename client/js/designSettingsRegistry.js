@@ -134,6 +134,16 @@ export const DESIGN_SETTINGS = [
     rootAttribute: "sidebarSide"
   },
   {
+    key: "toolbarSide",
+    category: "layout",
+    label: "Бік панелі розмови",
+    description: "На якому боці панелі розмови розташована назва чату (зліва) відносно статусу з'єднання й запрошення (справа).",
+    type: "choice",
+    options: ["left", "right"],
+    optionLabels: { left: "Зліва", right: "Справа" },
+    rootAttribute: "toolbarSide"
+  },
+  {
     key: "callControls",
     category: "visibility",
     label: "Кнопки відеодзвінка в шапці",

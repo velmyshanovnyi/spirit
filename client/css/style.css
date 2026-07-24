@@ -896,6 +896,17 @@ button:disabled {
   min-width: 0;
 }
 
+/* Section RF18 (specs/ui/design-edit-mode.md): swaps which side carries
+   the title/nickname vs the status/invite -- same `order`-flip pattern
+   as RF17's sidebar side, DOM order untouched. */
+:root[data-toolbar-side="right"] .conversation-toolbar-left {
+  order: 2;
+}
+
+:root[data-toolbar-side="right"] .conversation-toolbar-right {
+  order: 1;
+}
+
 .conversation-toolbar-left h2 {
   margin: 0;
   font-size: 13px;

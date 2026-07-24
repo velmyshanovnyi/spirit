@@ -1063,6 +1063,20 @@ describe("Section RF14: design settings panel", () => {
     expect(document.documentElement.dataset.sidebarSide).toBe("left");
     expect(document.querySelector('[data-design-choice-key="sidebarSide"][data-design-choice-value="left"]').className).toContain("chip-active");
   });
+
+  it("Section RF18: clicking the toolbar-side choice buttons swaps the data-toolbar-side attribute on :root and back", () => {
+    initApp(document, { locale: "uk" });
+    const rightBtn = document.querySelector('[data-design-choice-key="toolbarSide"][data-design-choice-value="right"]');
+    expect(rightBtn).toBeTruthy();
+
+    rightBtn.click();
+    expect(document.documentElement.dataset.toolbarSide).toBe("right");
+    expect(document.querySelector('[data-design-choice-key="toolbarSide"][data-design-choice-value="right"]').className).toContain("chip-active");
+
+    document.querySelector('[data-design-choice-key="toolbarSide"][data-design-choice-value="left"]').click();
+    expect(document.documentElement.dataset.toolbarSide).toBe("left");
+    expect(document.querySelector('[data-design-choice-key="toolbarSide"][data-design-choice-value="left"]').className).toContain("chip-active");
+  });
 });
 
 describe("settings menu replacing the top nav (Section H2)", () => {

@@ -161,6 +161,28 @@ describe("Section RF17: layout edit mode -- sidebar side swap", () => {
   });
 });
 
+describe("Section RF18: layout edit mode -- conversation toolbar side swap", () => {
+  it("getDesignSetting returns null (== default left) when nothing is stored", () => {
+    expect(getDesignSetting("toolbarSide")).toBeNull();
+  });
+
+  it("setDesignSetting persists a valid choice value and rejects an invalid one", () => {
+    expect(setDesignSetting("toolbarSide", "right")).toBe(true);
+    expect(getDesignSetting("toolbarSide")).toBe("right");
+    expect(setDesignSetting("toolbarSide", "up")).toBe(false);
+  });
+
+  it("applyDesignSettings sets/removes a data attribute on :root for a choice setting", () => {
+    setDesignSetting("toolbarSide", "right");
+    applyDesignSettings(document);
+    expect(document.documentElement.dataset.toolbarSide).toBe("right");
+
+    resetDesignSetting("toolbarSide");
+    applyDesignSettings(document);
+    expect(document.documentElement.dataset.toolbarSide).toBeUndefined();
+  });
+});
+
 describe("DESIGN_SETTINGS registry shape", () => {
   it("every entry has the fields the UI needs to render itself structurally", () => {
     for (const entry of DESIGN_SETTINGS) {
