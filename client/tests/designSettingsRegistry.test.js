@@ -183,6 +183,52 @@ describe("Section RF18: layout edit mode -- conversation toolbar side swap", () 
   });
 });
 
+describe("Section RF19: layout edit mode -- header controls order", () => {
+  it("getDesignSetting returns null (== default DOM order) when nothing is stored", () => {
+    expect(getDesignSetting("headerControlsOrder")).toBeNull();
+  });
+
+  it("setDesignSetting persists a valid permutation and rejects an invalid one", () => {
+    const validOrder = ["themeToggle", "langSelect", "settingsGear", "headerCallControls"];
+    expect(setDesignSetting("headerControlsOrder", validOrder)).toBe(true);
+    expect(getDesignSetting("headerControlsOrder")).toEqual(validOrder);
+
+    expect(setDesignSetting("headerControlsOrder", ["langSelect", "themeToggle"])).toBe(false); // wrong length
+    expect(setDesignSetting("headerControlsOrder", ["langSelect", "themeToggle", "settingsGear", "notReal"])).toBe(false); // unknown item key
+  });
+
+  it("applyDesignSettings sets inline order per item when overridden, removes it on reset", () => {
+    const langNode = document.createElement("select");
+    langNode.id = "lang-select";
+    const themeNode = document.createElement("button");
+    themeNode.id = "theme-toggle";
+    const gearNode = document.createElement("div");
+    gearNode.className = "settings-wrap";
+    const callNode = document.createElement("span");
+    callNode.id = "header-call-controls";
+    document.body.append(langNode, themeNode, gearNode, callNode);
+
+    setDesignSetting("headerControlsOrder", ["themeToggle", "langSelect", "settingsGear", "headerCallControls"]);
+    applyDesignSettings(document);
+    expect(themeNode.style.order).toBe("0");
+    expect(langNode.style.order).toBe("1");
+    expect(gearNode.style.order).toBe("2");
+    expect(callNode.style.order).toBe("3");
+
+    resetDesignSetting("headerControlsOrder");
+    applyDesignSettings(document);
+    expect(themeNode.style.order).toBe("");
+    expect(langNode.style.order).toBe("");
+    expect(gearNode.style.order).toBe("");
+    expect(callNode.style.order).toBe("");
+
+    document.body.removeChild(langNode);
+    document.body.removeChild(themeNode);
+    document.body.removeChild(gearNode);
+    document.body.removeChild(callNode);
+  });
+});
+
 describe("DESIGN_SETTINGS registry shape", () => {
   it("every entry has the fields the UI needs to render itself structurally", () => {
     for (const entry of DESIGN_SETTINGS) {
@@ -190,12 +236,19 @@ describe("DESIGN_SETTINGS registry shape", () => {
       expect(entry.category).toBeTruthy();
       expect(entry.label).toBeTruthy();
       expect(entry.description).toBeTruthy();
-      expect(["color", "length", "text", "boolean", "choice"]).toContain(entry.type);
+      expect(["color", "length", "text", "boolean", "choice", "order"]).toContain(entry.type);
       if (entry.type === "boolean") {
         expect(entry.selector).toBeTruthy();
       } else if (entry.type === "choice") {
         expect(Array.isArray(entry.options) && entry.options.length >= 2).toBe(true);
         expect(entry.rootAttribute).toBeTruthy();
+      } else if (entry.type === "order") {
+        expect(Array.isArray(entry.items) && entry.items.length >= 2).toBe(true);
+        for (const item of entry.items) {
+          expect(item.key).toBeTruthy();
+          expect(item.label).toBeTruthy();
+          expect(item.selector).toBeTruthy();
+        }
       } else {
         expect(entry.cssVar.startsWith("--")).toBe(true);
       }

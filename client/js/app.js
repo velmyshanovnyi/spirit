@@ -2558,6 +2558,55 @@ export function initApp(doc, options) {
         list.appendChild(row);
         continue;
       }
+      if (entry.type === "order") {
+        const currentOrder = stored ?? entry.items.map((item) => item.key);
+        const orderList = doc.createElement("div");
+        orderList.className = "order-list";
+        currentOrder.forEach((itemKey, index) => {
+          const item = entry.items.find((i) => i.key === itemKey);
+          if (!item) return;
+          const itemRow = doc.createElement("div");
+          itemRow.className = "order-list-item";
+          const itemLabel = doc.createElement("span");
+          itemLabel.textContent = item.label;
+          itemRow.appendChild(itemLabel);
+          const upBtn = doc.createElement("button");
+          upBtn.type = "button";
+          upBtn.className = "btn-link";
+          upBtn.textContent = "▲";
+          upBtn.disabled = index === 0;
+          upBtn.dataset.orderSettingKey = entry.key;
+          upBtn.dataset.orderItemKey = itemKey;
+          upBtn.dataset.orderMove = "up";
+          itemRow.appendChild(upBtn);
+          const downBtn = doc.createElement("button");
+          downBtn.type = "button";
+          downBtn.className = "btn-link";
+          downBtn.textContent = "▼";
+          downBtn.disabled = index === currentOrder.length - 1;
+          downBtn.dataset.orderSettingKey = entry.key;
+          downBtn.dataset.orderItemKey = itemKey;
+          downBtn.dataset.orderMove = "down";
+          itemRow.appendChild(downBtn);
+          orderList.appendChild(itemRow);
+        });
+        label.appendChild(orderList);
+        row.appendChild(label);
+
+        const description = doc.createElement("p");
+        description.className = "hint-text";
+        description.textContent = entry.description;
+        row.appendChild(description);
+
+        const resetBtn = doc.createElement("button");
+        resetBtn.type = "button";
+        resetBtn.className = "btn-link";
+        resetBtn.textContent = t("settings.resetOne");
+        resetBtn.dataset.resetDesignSettingKey = entry.key;
+        row.appendChild(resetBtn);
+        list.appendChild(row);
+        continue;
+      }
       const input = doc.createElement("input");
       input.dataset.designSettingKey = entry.key;
       if (entry.type === "boolean") {
@@ -2611,6 +2660,22 @@ export function initApp(doc, options) {
     const choiceBtn = event.target.closest("[data-design-choice-key]");
     if (choiceBtn) {
       if (setDesignSetting(choiceBtn.dataset.designChoiceKey, choiceBtn.dataset.designChoiceValue)) {
+        applyDesignSettings(doc);
+      }
+      renderDesignSettings();
+      return;
+    }
+    const orderBtn = event.target.closest("[data-order-setting-key]");
+    if (orderBtn) {
+      const entry = DESIGN_SETTINGS.find((e) => e.key === orderBtn.dataset.orderSettingKey);
+      if (!entry) return;
+      const current = getDesignSetting(entry.key) ?? entry.items.map((item) => item.key);
+      const index = current.indexOf(orderBtn.dataset.orderItemKey);
+      const swapWith = orderBtn.dataset.orderMove === "up" ? index - 1 : index + 1;
+      if (index < 0 || swapWith < 0 || swapWith >= current.length) return;
+      const next = [...current];
+      [next[index], next[swapWith]] = [next[swapWith], next[index]];
+      if (setDesignSetting(entry.key, next)) {
         applyDesignSettings(doc);
       }
       renderDesignSettings();

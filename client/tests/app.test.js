@@ -229,6 +229,7 @@ const HTML = `
     <button id="btn-quick-create" type="button"></button>
     <button id="btn-quick-login" type="button"></button>
   </div>
+  <div class="settings-wrap">
   <button id="btn-settings-toggle" type="button" aria-expanded="false"></button>
   <nav id="settings-menu" hidden>
     ${ROUTES.filter((r) => r !== "account" && r !== "manage")
@@ -236,6 +237,7 @@ const HTML = `
       .join("")}
     <button id="btn-logout" type="button" class="nav-item"></button>
   </nav>
+  </div>
   <div id="welcome-modal" hidden>
     <h2 id="welcome-title" data-i18n="welcome.title"></h2>
     <p id="welcome-body" data-i18n="welcome.body"></p>
@@ -958,7 +960,7 @@ describe("Section RF13: settings registry panel", () => {
 });
 
 describe("Section RF14: design settings panel", () => {
-  it("renders one input (or choice-toggle, for RF17 choice-type settings) per registered design setting", () => {
+  it("renders one input (or choice-toggle/order-list, for RF17/RF19 non-input settings) per registered design setting", () => {
     initApp(document, { locale: "uk" });
     const inputs = document.querySelectorAll("#design-settings-list [data-design-setting-key]");
     // Section RF17: "choice"-type entries render a button pair
@@ -970,7 +972,14 @@ describe("Section RF14: design settings panel", () => {
         (btn) => btn.dataset.designChoiceKey
       )
     );
-    expect(inputs.length + choiceKeys.size).toBe(DESIGN_SETTINGS.length);
+    // Section RF19: "order"-type entries render a reorderable list
+    // ([data-order-setting-key]) -- one group per entry, not one per item.
+    const orderKeys = new Set(
+      [...document.querySelectorAll("#design-settings-list [data-order-setting-key]")].map(
+        (btn) => btn.dataset.orderSettingKey
+      )
+    );
+    expect(inputs.length + choiceKeys.size + orderKeys.size).toBe(DESIGN_SETTINGS.length);
     const accentInput = document.querySelector('[data-design-setting-key="accentColor"]');
     expect(accentInput.type).toBe("color");
   });
@@ -1076,6 +1085,27 @@ describe("Section RF14: design settings panel", () => {
     document.querySelector('[data-design-choice-key="toolbarSide"][data-design-choice-value="left"]').click();
     expect(document.documentElement.dataset.toolbarSide).toBe("left");
     expect(document.querySelector('[data-design-choice-key="toolbarSide"][data-design-choice-value="left"]').className).toContain("chip-active");
+  });
+
+  it("Section RF19: moving a header-controls order item up/down applies the new inline order to the real elements", () => {
+    initApp(document, { locale: "uk" });
+    // Default order: headerCallControls, langSelect, themeToggle, settingsGear.
+    const moveUpBtn = document.querySelector(
+      '[data-order-setting-key="headerControlsOrder"][data-order-item-key="themeToggle"][data-order-move="up"]'
+    );
+    expect(moveUpBtn).toBeTruthy();
+    // First item's "up" button is disabled -- themeToggle is 3rd, its "up"
+    // button (swap with langSelect, 2nd) must be enabled.
+    expect(moveUpBtn.disabled).toBe(false);
+
+    moveUpBtn.click();
+
+    // themeToggle swapped with langSelect -> new order: headerCallControls,
+    // themeToggle, langSelect, settingsGear (indices 0,1,2,3).
+    expect(document.getElementById("header-call-controls").style.order).toBe("0");
+    expect(document.getElementById("theme-toggle").style.order).toBe("1");
+    expect(document.getElementById("lang-select").style.order).toBe("2");
+    expect(document.querySelector(".settings-wrap").style.order).toBe("3");
   });
 });
 

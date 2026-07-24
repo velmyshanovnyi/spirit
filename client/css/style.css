@@ -1074,6 +1074,32 @@ button:disabled {
   border-color: var(--accent);
 }
 
+/* Section RF19: reorderable list for "order"-type design settings (e.g.
+   header controls order) -- one row per item, current position implicit
+   in list order, ▲/▼ move buttons instead of drag-and-drop (see
+   specs/ui/design-edit-mode.md for why). */
+.order-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.order-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+}
+
+.order-list-item span {
+  color: var(--text);
+  font-size: 13px;
+}
+
 .settings-row input[type="color"] {
   width: 44px;
   height: 30px;

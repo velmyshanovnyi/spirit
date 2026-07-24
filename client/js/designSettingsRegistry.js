@@ -144,6 +144,22 @@ export const DESIGN_SETTINGS = [
     rootAttribute: "toolbarSide"
   },
   {
+    key: "headerControlsOrder",
+    category: "layout",
+    label: "Порядок елементів у шапці",
+    description: "У якому порядку розташовані кнопки в правій частині шапки сайту.",
+    type: "order",
+    // Array order here IS the stylesheet default -- matches client/index.html's
+    // actual DOM order for these elements exactly, so "no override" naturally
+    // renders identically to this list, no special-casing needed on reset.
+    items: [
+      { key: "headerCallControls", label: "Дзвінок / камера / мікрофон", selector: "#header-call-controls" },
+      { key: "langSelect", label: "Вибір мови", selector: "#lang-select" },
+      { key: "themeToggle", label: "Перемикач теми", selector: "#theme-toggle" },
+      { key: "settingsGear", label: "Шестерня налаштувань", selector: ".settings-wrap" }
+    ]
+  },
+  {
     key: "callControls",
     category: "visibility",
     label: "Кнопки відеодзвінка в шапці",
@@ -201,6 +217,13 @@ export function getDesignSetting(key) {
     }
     if (def.type === "boolean") return raw === "1";
     if (def.type === "choice") return def.options.includes(raw) ? raw : null;
+    if (def.type === "order") {
+      const parsed = JSON.parse(raw);
+      const validKeys = def.items.map((item) => item.key);
+      if (!Array.isArray(parsed) || parsed.length !== validKeys.length) return null;
+      if (!validKeys.every((k) => parsed.includes(k))) return null;
+      return parsed;
+    }
     return raw;
   } catch {
     return null;
@@ -221,6 +244,13 @@ export function setDesignSetting(key, value) {
   if (def.type === "text" && (typeof value !== "string" || value.trim() === "")) return false;
   if (def.type === "boolean") toStore = value ? "1" : "0";
   if (def.type === "choice" && !def.options.includes(value)) return false;
+  if (def.type === "order") {
+    const validKeys = def.items.map((item) => item.key);
+    if (!Array.isArray(value) || value.length !== validKeys.length || !validKeys.every((k) => value.includes(k))) {
+      return false;
+    }
+    toStore = JSON.stringify(value);
+  }
   try {
     localStorage.setItem(STORAGE_PREFIX + key, String(toStore));
   } catch {
@@ -268,6 +298,24 @@ export function applyDesignSettings(doc = document) {
         delete root.dataset[entry.rootAttribute];
       } else {
         root.dataset[entry.rootAttribute] = value;
+      }
+      continue;
+    }
+    if (entry.type === "order") {
+      if (value === null) {
+        for (const item of entry.items) {
+          for (const node of doc.querySelectorAll(item.selector)) {
+            node.style.removeProperty("order");
+          }
+        }
+      } else {
+        value.forEach((itemKey, index) => {
+          const item = entry.items.find((i) => i.key === itemKey);
+          if (!item) return;
+          for (const node of doc.querySelectorAll(item.selector)) {
+            node.style.order = String(index);
+          }
+        });
       }
       continue;
     }
