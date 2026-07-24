@@ -1022,6 +1022,21 @@ describe("Section RF14: design settings panel", () => {
     expect(document.documentElement.style.getPropertyValue("--content-max-width")).toBe("1600px");
     expect(document.documentElement.style.getPropertyValue("--sidebar-width")).toBe("260px");
   });
+
+  it("Section RF16: unchecking a visibility checkbox hides the target element, rechecking shows it again", () => {
+    initApp(document, { locale: "uk" });
+    const checkbox = document.querySelector('[data-design-setting-key="folderTree"]');
+    expect(checkbox.type).toBe("checkbox");
+    expect(checkbox.checked).toBe(true);
+
+    checkbox.checked = false;
+    checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(document.getElementById("folder-tree").style.display).toBe("none");
+
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(document.getElementById("folder-tree").style.display).toBe("");
+  });
 });
 
 describe("settings menu replacing the top nav (Section H2)", () => {

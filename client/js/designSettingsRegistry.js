@@ -122,6 +122,46 @@ export const DESIGN_SETTINGS = [
     cssVar: "--sidebar-width",
     min: 200,
     max: 500
+  },
+  {
+    key: "callControls",
+    category: "visibility",
+    label: "Кнопки відеодзвінка в шапці",
+    description: "Іконки дзвінка/камери/мікрофона, що з'являються в шапці під час розмови.",
+    type: "boolean",
+    selector: "#header-call-controls"
+  },
+  {
+    key: "sidebarSearch",
+    category: "visibility",
+    label: "Пошук у бічній панелі",
+    description: "Поле пошуку контактів, груп і папок над списком чатів.",
+    type: "boolean",
+    selector: ".sidebar-search"
+  },
+  {
+    key: "sidebarFilters",
+    category: "visibility",
+    label: "Фільтри списку чатів",
+    description: "Чипи \"Усі\"/\"Верифіковані\"/\"Групи\" над списком контактів.",
+    type: "boolean",
+    selector: ".sidebar-filters"
+  },
+  {
+    key: "folderTree",
+    category: "visibility",
+    label: "Дерево папок",
+    description: "Список папок для сортування чатів у бічній панелі.",
+    type: "boolean",
+    selector: "#folder-tree"
+  },
+  {
+    key: "proofsCheckBlock",
+    category: "visibility",
+    label: "Блок перевірки доказів ідентичності",
+    description: "Кнопка \"Перевірити зараз\" і статус останньої перевірки доказів у бічній панелі.",
+    type: "boolean",
+    selector: "#proofs-check-block"
   }
 ];
 
@@ -139,6 +179,7 @@ export function getDesignSetting(key) {
       if (!Number.isFinite(parsed) || parsed < def.min || parsed > def.max) return null;
       return parsed;
     }
+    if (def.type === "boolean") return raw === "1";
     return raw;
   } catch {
     return null;
@@ -157,6 +198,7 @@ export function setDesignSetting(key, value) {
     toStore = parsed;
   }
   if (def.type === "text" && (typeof value !== "string" || value.trim() === "")) return false;
+  if (def.type === "boolean") toStore = value ? "1" : "0";
   try {
     localStorage.setItem(STORAGE_PREFIX + key, String(toStore));
   } catch {
@@ -193,6 +235,12 @@ export function applyDesignSettings(doc = document) {
   const root = doc.documentElement;
   for (const entry of DESIGN_SETTINGS) {
     const value = getDesignSetting(entry.key);
+    if (entry.type === "boolean") {
+      for (const node of doc.querySelectorAll(entry.selector)) {
+        node.style.display = value === false ? "none" : "";
+      }
+      continue;
+    }
     if (value === null) {
       root.style.removeProperty(entry.cssVar);
       continue;

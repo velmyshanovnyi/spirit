@@ -2486,7 +2486,8 @@ export function initApp(doc, options) {
       colors: t("design.category.colors"),
       shape: t("design.category.shape"),
       typography: t("design.category.typography"),
-      layout: t("design.category.layout")
+      layout: t("design.category.layout"),
+      visibility: t("design.category.visibility")
     };
     const computed = doc.defaultView.getComputedStyle(doc.documentElement);
     let lastCategory = null;
@@ -2506,10 +2507,13 @@ export function initApp(doc, options) {
       label.appendChild(labelText);
 
       const stored = getDesignSetting(entry.key);
-      const currentRaw = computed.getPropertyValue(entry.cssVar).trim();
+      const currentRaw = entry.type === "boolean" ? "" : computed.getPropertyValue(entry.cssVar).trim();
       const input = doc.createElement("input");
       input.dataset.designSettingKey = entry.key;
-      if (entry.type === "color") {
+      if (entry.type === "boolean") {
+        input.type = "checkbox";
+        input.checked = stored === false ? false : true;
+      } else if (entry.type === "color") {
         input.type = "color";
         // A CSS color value (named color, rgb(), etc.) isn't guaranteed to
         // be hex -- <input type=color> only accepts #rrggbb, so fall back
@@ -2546,7 +2550,8 @@ export function initApp(doc, options) {
   el("design-settings-list")?.addEventListener("change", (event) => {
     const input = event.target.closest("[data-design-setting-key]");
     if (!input) return;
-    if (setDesignSetting(input.dataset.designSettingKey, input.value)) {
+    const value = input.type === "checkbox" ? input.checked : input.value;
+    if (setDesignSetting(input.dataset.designSettingKey, value)) {
       applyDesignSettings(doc);
     } else {
       renderDesignSettings();

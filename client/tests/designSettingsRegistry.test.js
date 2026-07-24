@@ -110,6 +110,35 @@ describe("Section RF15: layout width settings", () => {
   });
 });
 
+describe("Section RF16: element visibility settings", () => {
+  it("getDesignSetting returns null (== visible) when nothing is stored", () => {
+    expect(getDesignSetting("folderTree")).toBeNull();
+  });
+
+  it("setDesignSetting persists a boolean and getDesignSetting reads it back", () => {
+    expect(setDesignSetting("folderTree", false)).toBe(true);
+    expect(getDesignSetting("folderTree")).toBe(false);
+    expect(setDesignSetting("folderTree", true)).toBe(true);
+    expect(getDesignSetting("folderTree")).toBe(true);
+  });
+
+  it("applyDesignSettings hides the matched element when set to false, shows it again on reset", () => {
+    const node = document.createElement("div");
+    node.id = "folder-tree";
+    document.body.appendChild(node);
+
+    setDesignSetting("folderTree", false);
+    applyDesignSettings(document);
+    expect(node.style.display).toBe("none");
+
+    resetDesignSetting("folderTree");
+    applyDesignSettings(document);
+    expect(node.style.display).toBe("");
+
+    document.body.removeChild(node);
+  });
+});
+
 describe("DESIGN_SETTINGS registry shape", () => {
   it("every entry has the fields the UI needs to render itself structurally", () => {
     for (const entry of DESIGN_SETTINGS) {
@@ -117,8 +146,12 @@ describe("DESIGN_SETTINGS registry shape", () => {
       expect(entry.category).toBeTruthy();
       expect(entry.label).toBeTruthy();
       expect(entry.description).toBeTruthy();
-      expect(["color", "length", "text"]).toContain(entry.type);
-      expect(entry.cssVar.startsWith("--")).toBe(true);
+      expect(["color", "length", "text", "boolean"]).toContain(entry.type);
+      if (entry.type === "boolean") {
+        expect(entry.selector).toBeTruthy();
+      } else {
+        expect(entry.cssVar.startsWith("--")).toBe(true);
+      }
     }
   });
 

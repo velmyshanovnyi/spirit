@@ -172,17 +172,73 @@ default, min?, max? }`), що:
         застосувалась як inline `--content-max-width: 900px` без
         перезавантаження. Коміт `218e715`, задеплоєно на kibr/kolomedi.
 
+- [ ] **Stage RF16 -- показ/приховування елементів UI (нова категорія
+      "visibility" у тому самому реєстрі дизайну)**
+  - Рішення архітектури (без додаткового обговорення, деталізує вже
+    описаний в попередній версії цього розділу підхід): розширити
+    `DESIGN_SETTINGS`/`designSettingsRegistry.js` записами
+    `{key, category:"visibility", type:"boolean", selector, label,
+    description}` замість окремого нового реєстру -- за прямим запитом
+    користувача "усі можливі налаштування винось в цей розділ" (один
+    розділ дизайну, а не декілька паралельних UI). `getDesignSetting`/
+    `setDesignSetting`/`applyDesignSettings` розширюються під тип
+    `"boolean"`: default (немає запису в `localStorage`) = елемент
+    видимий; `applyDesignSettings` викликає `querySelectorAll(selector)`
+    і виставляє/знімає inline `style.display = "none"` (не CSS custom
+    property -- ці записи не мають `cssVar`).
+  - Список кандидатів (безпечні для приховування -- не ламають базовий
+    функціонал чату, на відміну від, наприклад, кнопки "Надіслати"):
+    `callControls` (`#header-call-controls` -- кнопки відеодзвінка в
+    шапці), `sidebarSearch` (`.sidebar-search`), `sidebarFilters`
+    (`.sidebar-filters` -- чипи "Усі"/"Верифіковані"/"Групи"),
+    `folderTree` (`#folder-tree`), `proofsCheckBlock`
+    (`#proofs-check-block`, новий wrapping-div у `client/index.html`
+    навколо кнопки "Перевірити зараз" і статусу перевірки -- потрібен,
+    бо раніше кнопка й статус не мали спільного контейнера).
+  - [x] **Tests**: `client/tests/designSettingsRegistry.test.js`, нова
+        секція "Section RF16: element visibility settings" (3 тести:
+        default = visible/null, boolean set/get round-trip,
+        `applyDesignSettings` виставляє/знімає `style.display` на
+        елементі за `selector`); registry-shape тест розширено під
+        `type: "boolean"` (без `cssVar`, з обов'язковим `selector`).
+        `client/tests/app.test.js`, новий тест "Section RF16: unchecking
+        a visibility checkbox hides the target element, rechecking shows
+        it again" -- підтверджено RED до імплементації (3 тести впали з
+        `unknown setting "folderTree"` / falsy assertion), потім GREEN.
+  - [x] **Impl**: `client/js/designSettingsRegistry.js` -- 5 нових
+        записів категорії `visibility` (`callControls`, `sidebarSearch`,
+        `sidebarFilters`, `folderTree`, `proofsCheckBlock`);
+        `getDesignSetting`/`setDesignSetting` розширено під
+        `type: "boolean"` (`"1"`/`"0"` у localStorage, default null =
+        видимий); `applyDesignSettings` для boolean-записів робить
+        `querySelectorAll(selector)` і виставляє
+        `style.display = "none"`/`""`. `client/js/app.js` --
+        `renderDesignSettings` рендерить `<input type=checkbox>` для
+        `type==="boolean"`, change-обробник читає `input.checked`
+        замість `input.value` для цього типу; категорія `visibility`
+        додана в мапу заголовків. `client/js/i18n.js` --
+        `design.category.visibility` у 11 локалях (перевірено Node-
+        скриптом: усі 11 різні й коректні). `client/index.html` -- нова
+        wrapping-обгортка `#proofs-check-block` навколо кнопки
+        "Перевірити зараз" і статусу перевірки (раніше без спільного
+        контейнера).
+  - [x] **Exec review**: самоперевірка -- (а) жоден із 5 обраних
+        селекторів не торкається елементів, приховування яких зламало б
+        базовий флоу чату (кнопка "Надіслати", поле вводу повідомлення,
+        сама розмова -- свідомо НЕ додані в список кандидатів); (б)
+        default (немає запису в localStorage) = видимий елемент,
+        підтверджено тестом, узгоджено з семантикою "default" інших
+        design-записів; (в) 332/332 у фокусованому прогоні трьох
+        файлів (1 непов'язаний flaky-тест "ICE gathering timeout" впав
+        у спільному прогоні через sandbox timer-race, підтверджено
+        чистим в ізольованому повторному запуску -- той самий
+        добре задокументований клас sandbox-шуму цієї сесії, не
+        регресія від цієї зміни).
+
 ## Розділ дизайну -- що НЕ увійшло (за прямим запитом включно, свідомо
 відкладено як подальші стадії)
 
-- **Показ/приховування елементів UI** ("відображення чи приховування тих
-  чи інших елементів") -- потребує окремого механізму (registry записів
-  типу `{key, selector, label}` + CSS-правил на кшталт
-  `body[data-hide-x] .selector {display:none}` для кожного елемента) і
-  явного рішення КОТРІ елементи взагалі можна ховати без ламання
-  функціональності (наприклад, приховування кнопки "Надіслати" зробило б
-  чат непридатним для використання) -- список кандидатів і сама механіка
-  вимагають окремого продумування, не проста заміна константи.
+- **Графіка** (іконки/identicon-палітра з `client/js/identicon.js`,
 - **Графіка** (іконки/identicon-палітра з `client/js/identicon.js`,
   emoji-палітра з `client/js/safetyNumber.js`) -- поза очевидним обсягом
   "змінна = число", власна дизайн-розмова.
