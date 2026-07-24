@@ -262,6 +262,12 @@ export function initApp(doc, options) {
     // the Map outright rather than left behind as stale all-null data.
     peers: new Map(),
     activeConnectionId: null,
+    // Section GC4 (specs/phase4/group-chats.md): pending relayed
+    // mesh-connect attempts this device initiated, keyed by relayId so an
+    // eventual mesh-relay-answer can be matched back to the right
+    // connectionId/ecdhKeyPair regardless of how many concurrent attempts
+    // are in flight.
+    pendingMeshRelays: new Map(),
     // Section RF9: 1:1 chat messages typed before a peer has connected yet
     // (or after an unstable connection drops mid-session) queue here
     // instead of being blocked outright -- drained the moment a channel +
@@ -389,6 +395,17 @@ export function initApp(doc, options) {
   // connectionId.
   function getPeerByConnectionId(connectionId) {
     return state.peers.get(connectionId);
+  }
+
+  // Section GC4: like getPeerByFingerprint, but scoped to a specific
+  // groupId -- used both to check "am I already mesh-connected to this
+  // member" and to find the relay target for an outgoing mesh-relay-*
+  // message.
+  function getGroupPeerByFingerprint(groupId, targetFingerprint) {
+    for (const entry of state.peers.values()) {
+      if (entry.groupId === groupId && entry.peerFingerprint === targetFingerprint) return entry;
+    }
+    return undefined;
   }
 
   // Tears down the CURRENTLY active connection: deletes its entry from
@@ -2645,7 +2662,9 @@ export function initApp(doc, options) {
     "file-chunk",
     "group-member-joined",
     "group-message",
-    "safety-display-mode"
+    "safety-display-mode",
+    "mesh-relay-offer",
+    "mesh-relay-answer"
   ]);
 
   // Section FT2 (specs/phase4/file-transfer.md), architectural decisions:
@@ -3100,6 +3119,22 @@ export function initApp(doc, options) {
       if (!group) return;
       if (!group.memberFingerprints.includes(control.memberFingerprint)) {
         await updateGroupMembers(control.groupId, [...group.memberFingerprints, control.memberFingerprint]);
+        // Section GC4: this is the FIRST time this device has heard of
+        // memberFingerprint in this group -- auto-start a relayed
+        // mesh-connect toward them through the very connection this
+        // notice arrived on (guaranteed already connected to both sides).
+        // Only "old" members ever reach this branch, since a brand-new
+        // joiner never retroactively receives group-member-joined about
+        // pre-existing members (broadcastGroupMemberJoined only notifies
+        // the OTHER already-connected peers, never the joiner itself) --
+        // so there is no symmetric race needing a tie-break here.
+        if (control.memberFingerprint !== state.senderKey) {
+          void initiateMeshRelayConnect({
+            groupId: control.groupId,
+            relayConnectionId: state.activeConnectionId,
+            targetFingerprint: control.memberFingerprint
+          });
+        }
       }
       return;
     }
@@ -3150,6 +3185,34 @@ export function initApp(doc, options) {
           text: JSON.stringify({ senderFingerprint: state.peerFingerprint, senderNickname: senderLabel, body: control.text }),
           timestamp: receivedAt
         });
+      }
+      return;
+    }
+
+    if (control.type === "mesh-relay-offer" || control.type === "mesh-relay-answer") {
+      // Section GC4: same anti-spoofing gate as group-member-joined/
+      // group-message -- the claimed groupId must match what THIS
+      // connection was actually tagged with, and identity on this
+      // connection must already be verified (a relay path is only ever
+      // an already-authenticated same-groupId edge).
+      if (!state.peerFingerprint) return;
+      if (
+        typeof control.groupId !== "string" ||
+        typeof control.toFingerprint !== "string" ||
+        typeof control.fromFingerprint !== "string"
+      ) {
+        return;
+      }
+      const activeMeshPeerEntry = getActivePeer();
+      if (!activeMeshPeerEntry || activeMeshPeerEntry.groupId !== control.groupId) return;
+      if (control.toFingerprint !== state.senderKey) {
+        await relayGroupMeshMessage(control);
+        return;
+      }
+      if (control.type === "mesh-relay-offer") {
+        await handleIncomingMeshRelayOffer(control, state.activeConnectionId);
+      } else {
+        await handleIncomingMeshRelayAnswer(control);
       }
       return;
     }
@@ -3287,6 +3350,243 @@ export function initApp(doc, options) {
         setStatus(t("status.error", { msg: err.message })); // afterChannelOpen path is detached; nothing upstream catches
       }
     };
+  }
+
+  // Section GC4: per-entry identity announcer for background mesh-relay
+  // connections -- same shape as makeIdentityAnnouncer, but reads/writes
+  // the GIVEN entry directly instead of the active-connection proxy
+  // fields, and skips the device-list/proof-set/push-subscription
+  // piggyback (deliberate scope cut, documented in the spec -- a mesh-relay
+  // connection only needs identity verified to become a usable group-mesh
+  // edge).
+  function makeEntryIdentityAnnouncer(entry) {
+    let announced = false;
+    return async () => {
+      if (announced || !entry.channel || !entry.sessionKey || !entry.sessionEcdhWires) return;
+      announced = true;
+      try {
+        const announce = await createIdentityAnnounce(
+          state.identityKeyPair.privateKey,
+          state.identityKeyPair.publicKey,
+          entry.sessionEcdhWires.localEcdhWire,
+          entry.sessionEcdhWires.peerEcdhWire,
+          state.nickname ?? ""
+        );
+        entry.channel.send(await encryptMessage(entry.sessionKey, JSON.stringify(announce)));
+      } catch {
+        // Background handshake -- nothing upstream can surface a failure to.
+      }
+    };
+  }
+
+  // Section GC4: connection-lifecycle wiring for a mesh-relay background
+  // connection. Deliberately DOES NOT reuse wireChannelCallbacks: that
+  // function gates its one-shot onChannelOpen callback on "is this still
+  // the active connection" (state.activeConnectionId === ownerConnectionIdAtWireTime),
+  // correct for GC0-GC3's one-foreground-handshake-at-a-time model but
+  // wrong here -- a mesh-relay connection is established entirely in the
+  // background and its ICE gathering can easily finish while some OTHER
+  // connection (the user's foreground chat, or another concurrent mesh
+  // attempt) is active, in which case that gate would silently DROP the
+  // channel. This writes directly to the connectionId's own state.peers
+  // entry instead, independent of activeConnectionId. Message dispatch
+  // (onMessage) is the one part safe to route through the same
+  // temporarily-rebind-then-restore technique wireChannelCallbacks already
+  // uses, because it is fully serialized through state.messageDispatchLock
+  // (GC3) -- no interleaving is possible there regardless of how many
+  // background connections exist.
+  function wireMeshRelayChannelCallbacks(connectionId, { afterChannelOpen } = {}) {
+    return {
+      onChannelOpen: (channel) => {
+        const entry = state.peers.get(connectionId);
+        if (!entry) return; // torn down before the channel finished opening
+        entry.channel = channel;
+        if (afterChannelOpen) afterChannelOpen();
+      },
+      onMessage: (payload) => {
+        const task = state.messageDispatchLock.then(async () => {
+          if (!state.peers.has(connectionId)) return;
+          const previousActiveConnectionId = state.activeConnectionId;
+          state.activeConnectionId = connectionId;
+          try {
+            const entry = state.peers.get(connectionId);
+            if (!entry || !entry.sessionKey) return;
+            const text = await decryptMessage(entry.sessionKey, payload);
+            await handleChatMessage(text);
+          } catch {
+            // Background connection -- nothing upstream can surface a failure to.
+          } finally {
+            state.activeConnectionId = previousActiveConnectionId;
+          }
+        });
+        state.messageDispatchLock = task.then(
+          () => {},
+          () => {}
+        );
+        return task;
+      },
+      onChannelClose: () => {
+        const entry = state.peers.get(connectionId);
+        if (entry) entry.channel = null;
+      }
+    };
+  }
+
+  // Section GC4: initiator side of a relayed mesh-connect attempt --
+  // establishes a NEW background pairwise connection toward targetFingerprint
+  // (a group member this device isn't directly connected to yet), routing
+  // the offer/answer exchange through relayConnectionId (an existing,
+  // already-verified same-groupId connection) instead of the signaling
+  // server, since the signaling protocol only supports one pairwise room
+  // per invite (GC0 finding) and no fresh out-of-band invite exists for
+  // this pair. No ICE timeout is armed here (armIceTimeout writes to the
+  // visible status bar -- inappropriate for a background attempt the user
+  // never initiated directly); a stuck attempt just never completes.
+  async function initiateMeshRelayConnect({ groupId, relayConnectionId, targetFingerprint }) {
+    const relay = state.peers.get(relayConnectionId);
+    if (!relay || !relay.channel || !relay.sessionKey) return; // relay path not usable right now
+
+    const connectionId = randomConnectionId();
+    const entry = createPeerEntry();
+    entry.groupId = groupId;
+    state.peers.set(connectionId, entry);
+
+    const relayId = randomConnectionId();
+    const ecdhKeyPair = await generateEcdhKeyPair();
+    const announce = makeEntryIdentityAnnouncer(entry);
+    state.pendingMeshRelays.set(relayId, { connectionId, ecdhKeyPair, announce });
+
+    const rtcConfig = buildRtcConfig(el("stun-url").value, { forceTurnRelay: el("force-turn-relay").checked });
+    entry.pc = startAsInitiator({
+      rtcConfig,
+      ...wireMeshRelayChannelCallbacks(connectionId, { afterChannelOpen: announce }),
+      onLocalOfferReady: async (offerSdp) => {
+        const currentRelay = state.peers.get(relayConnectionId);
+        if (!currentRelay || !currentRelay.channel || !currentRelay.sessionKey) return; // relay vanished before the offer was ready
+        try {
+          const ecdhPubkeyWire = await exportEcdhPublicKeyForWire(ecdhKeyPair.publicKey);
+          currentRelay.channel.send(
+            await encryptMessage(
+              currentRelay.sessionKey,
+              JSON.stringify({
+                type: "mesh-relay-offer",
+                groupId,
+                relayId,
+                fromFingerprint: state.senderKey,
+                toFingerprint: targetFingerprint,
+                sdp: offerSdp,
+                ecdhPubkey: ecdhPubkeyWire
+              })
+            )
+          );
+        } catch {
+          // Best-effort, same philosophy as broadcastGroupMemberJoined.
+        }
+      }
+    });
+  }
+
+  // Section GC4: transparent forwarding of a mesh-relay-offer/-answer NOT
+  // addressed to this device -- re-encrypts the SAME control message body
+  // under the target's own sessionKey without inspecting/decrypting the
+  // wrapped SDP. Only ever forwards to an ALREADY-VERIFIED same-groupId
+  // peer (peerFingerprint set post identity-announce) -- the security
+  // invariant this whole section leans on: relaying only happens between
+  // edges of the mesh graph that are already authenticated, so a
+  // tampering relay is caught the same way a malicious signaling node
+  // already is (identity-announce, docs/e2ee.md).
+  async function relayGroupMeshMessage(control) {
+    const target = getGroupPeerByFingerprint(control.groupId, control.toFingerprint);
+    if (!target || !target.channel || !target.sessionKey) return; // no relay path -- best-effort, drop
+    try {
+      target.channel.send(await encryptMessage(target.sessionKey, JSON.stringify(control)));
+    } catch {
+      // Best-effort forwarding, same philosophy as broadcastGroupMemberJoined.
+    }
+  }
+
+  // Section GC4: responder side -- a brand-new mesh-connect request
+  // relayed to me. Only handled in permanent-profile mode (ephemeral mode
+  // has no persisted groups to mesh into) and only if this device isn't
+  // already mesh-connected to the requester under this groupId (avoids a
+  // duplicate connection if the same offer is somehow relayed twice).
+  async function handleIncomingMeshRelayOffer(control, relayConnectionId) {
+    if (!state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
+    const group = await getGroup(control.groupId);
+    if (!group) return;
+    if (getGroupPeerByFingerprint(control.groupId, control.fromFingerprint)) return;
+
+    const connectionId = randomConnectionId();
+    const entry = createPeerEntry();
+    entry.groupId = control.groupId;
+    state.peers.set(connectionId, entry);
+
+    const ecdhKeyPair = await generateEcdhKeyPair();
+    const announce = makeEntryIdentityAnnouncer(entry);
+    const rtcConfig = buildRtcConfig(el("stun-url").value, { forceTurnRelay: el("force-turn-relay").checked });
+    entry.pc = startAsJoiner({
+      rtcConfig,
+      offerSdp: control.sdp,
+      ...wireMeshRelayChannelCallbacks(connectionId, { afterChannelOpen: announce }),
+      onLocalAnswerReady: async (answerSdp) => {
+        try {
+          const ecdhPubkeyWire = await exportEcdhPublicKeyForWire(ecdhKeyPair.publicKey);
+          const peerEcdhPubkey = await importEcdhPublicKeyFromWire(control.ecdhPubkey);
+          entry.sessionEcdhWires = { localEcdhWire: ecdhPubkeyWire, peerEcdhWire: control.ecdhPubkey };
+          entry.sessionKey = await deriveSessionKey(ecdhKeyPair.privateKey, peerEcdhPubkey);
+
+          // relayConnectionId was captured (via getActivePeer() at dispatch
+          // time, synchronously, before any await) by the handleChatMessage
+          // branch that called this function -- NOT re-read from
+          // state.activeConnectionId here, which by this point (after the
+          // awaits above) could easily point at a completely different
+          // connection.
+          const relayPeer = state.peers.get(relayConnectionId);
+          if (!relayPeer || !relayPeer.channel || !relayPeer.sessionKey) return;
+          try {
+            relayPeer.channel.send(
+              await encryptMessage(
+                relayPeer.sessionKey,
+                JSON.stringify({
+                  type: "mesh-relay-answer",
+                  groupId: control.groupId,
+                  relayId: control.relayId,
+                  fromFingerprint: state.senderKey,
+                  toFingerprint: control.fromFingerprint,
+                  sdp: answerSdp,
+                  ecdhPubkey: ecdhPubkeyWire
+                })
+              )
+            );
+          } catch {
+            // Best-effort, same philosophy as broadcastGroupMemberJoined.
+          }
+          await announce();
+        } catch {
+          // Best-effort background handshake.
+        }
+      }
+    });
+  }
+
+  // Section GC4: initiator side completion -- an incoming mesh-relay-answer
+  // matched back to the pending attempt by relayId.
+  async function handleIncomingMeshRelayAnswer(control) {
+    const pending = state.pendingMeshRelays.get(control.relayId);
+    if (!pending) return; // unknown/stale relayId -- drop
+    state.pendingMeshRelays.delete(control.relayId);
+    const entry = state.peers.get(pending.connectionId);
+    if (!entry || !entry.pc) return; // torn down already
+    try {
+      await applyRemoteAnswer(entry.pc, control.sdp);
+      const peerEcdhPubkey = await importEcdhPublicKeyFromWire(control.ecdhPubkey);
+      const ecdhPubkeyWire = await exportEcdhPublicKeyForWire(pending.ecdhKeyPair.publicKey);
+      entry.sessionEcdhWires = { localEcdhWire: ecdhPubkeyWire, peerEcdhWire: control.ecdhPubkey };
+      entry.sessionKey = await deriveSessionKey(pending.ecdhKeyPair.privateKey, peerEcdhPubkey);
+      await pending.announce();
+    } catch {
+      // Best-effort background handshake.
+    }
   }
 
   function wireChannelCallbacks(disarmIceTimeout, { onDecryptedMessage = handleChatMessage, afterChannelOpen } = {}) {

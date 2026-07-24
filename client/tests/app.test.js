@@ -7483,3 +7483,253 @@ describe("GC3: fan-out send + group UI (specs/phase4/group-chats.md)", () => {
     expect(document.getElementById("chat-log").hidden).toBe(true);
   });
 });
+
+describe("GC4: full-mesh auto-connect via relay (specs/phase4/group-chats.md)", () => {
+  // Same helper as GC2/GC3's describe blocks (each self-contained per this
+  // file's existing style).
+  async function establishedProfileChat() {
+    createPermanentProfile.mockResolvedValue({
+      privateKey: { __tag: "profile-priv" },
+      publicKey: fakePublicKey("profile-pub"),
+      vaultKey: { __tag: "vault-key" }
+    });
+    fingerprint.mockResolvedValue("profile-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockImplementation(async (key, text) => `ENC(${JSON.stringify(key)}:${text})`);
+    dbGet.mockResolvedValue(undefined);
+    rememberContact.mockResolvedValue({ status: "new", contact: { deviceList: null } });
+
+    const channel = fakeChannel();
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    const api = initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "pass";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001profile-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    captured.onChannelOpen(channel);
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+    return { ...api, captured, channel };
+  }
+
+  // Establishes the "relay" connection C<->self, already verified and
+  // tagged with groupId -- the vantage point every GC4 test operates from
+  // (either as an existing member relaying/auto-connecting, or as the new
+  // member responding to a relayed offer).
+  async function verifiedGroupChat(groupId) {
+    const chat = await establishedProfileChat();
+    chat.state.peers.get(chat.state.activeConnectionId).groupId = groupId;
+    verifyIdentityAnnounce.mockResolvedValue({
+      identityPublicKey: {},
+      identityPubkeyWire: "PEER",
+      fingerprint: "peer-fp",
+      nickname: "Оксана"
+    });
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await chat.captured.onMessage("ENCRYPTED_ANNOUNCE");
+    return chat;
+  }
+
+  // encryptMessage above is mocked to prefix the plaintext with a JSON dump
+  // of the key it was called with, so relay/self-send targeting can be
+  // verified even though every mock call otherwise looks identical.
+  function decodeSent(sentArg) {
+    const match = /^ENC\((.*?):(\{.*\})\)$/.exec(sentArg);
+    return { key: JSON.parse(match[1]), body: JSON.parse(match[2]) };
+  }
+
+  it("transparently relays a mesh-relay-offer addressed to someone else onto the matching verified same-group peer, re-encrypted under ITS session key", async () => {
+    const chat = await verifiedGroupChat("group-1");
+    const targetChannel = { send: vi.fn() };
+    chat.state.peers.set("to-m", {
+      pc: {}, channel: targetChannel, sessionKey: "session-key-m", peerFingerprint: "m-fp", groupId: "group-1"
+    });
+
+    const offerControl = {
+      type: "mesh-relay-offer",
+      groupId: "group-1",
+      relayId: "rid-1",
+      fromFingerprint: "p-fp",
+      toFingerprint: "m-fp",
+      sdp: { type: "offer", sdp: "X" },
+      ecdhPubkey: "ecdh-p"
+    };
+    decryptMessage.mockResolvedValueOnce(JSON.stringify(offerControl));
+
+    await chat.captured.onMessage("ENCRYPTED_RELAY");
+
+    await vi.waitFor(() => expect(targetChannel.send).toHaveBeenCalled());
+    const { key, body } = decodeSent(targetChannel.send.mock.calls[0][0]);
+    expect(key).toBe("session-key-m");
+    expect(body).toEqual(offerControl);
+  });
+
+  it("drops a mesh-relay-offer whose claimed groupId does not match the connection it actually arrived on (anti-spoofing)", async () => {
+    const chat = await verifiedGroupChat("group-real");
+    const targetChannel = { send: vi.fn() };
+    chat.state.peers.set("to-m", {
+      pc: {}, channel: targetChannel, sessionKey: "session-key-m", peerFingerprint: "m-fp", groupId: "group-spoofed"
+    });
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({
+      type: "mesh-relay-offer",
+      groupId: "group-spoofed",
+      relayId: "rid-1",
+      fromFingerprint: "p-fp",
+      toFingerprint: "m-fp",
+      sdp: { type: "offer", sdp: "X" },
+      ecdhPubkey: "ecdh-p"
+    }));
+
+    await expect(chat.captured.onMessage("ENCRYPTED_RELAY")).resolves.not.toThrow();
+
+    expect(targetChannel.send).not.toHaveBeenCalled();
+  });
+
+  it("receiving group-member-joined about a brand-new group member auto-starts a relayed mesh-connect attempt toward them", async () => {
+    const chat = await verifiedGroupChat("group-1");
+    getGroup.mockResolvedValue({ groupId: "group-1", name: "Друзі", memberFingerprints: ["peer-fp"] });
+    updateGroupMembers.mockResolvedValue(undefined);
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({
+      type: "group-member-joined", groupId: "group-1", memberFingerprint: "new-member-fp", memberNickname: "Марія"
+    }));
+
+    let meshCaptured;
+    startAsInitiator.mockImplementation((opts) => {
+      meshCaptured = opts;
+      return { __fakePc: true };
+    });
+
+    await chat.captured.onMessage("ENCRYPTED_GMJ");
+
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalledTimes(2)); // 1 for establishedProfileChat's own connection + 1 for this mesh attempt
+    expect(meshCaptured).toBeTruthy();
+
+    await meshCaptured.onLocalOfferReady({ type: "offer", sdp: "MESH_OFFER" });
+
+    await vi.waitFor(() => expect(chat.channel.send).toHaveBeenCalledTimes(2)); // identity-announce (setup) + this offer
+    const { body } = decodeSent(chat.channel.send.mock.calls[1][0]);
+    expect(body).toMatchObject({
+      type: "mesh-relay-offer",
+      groupId: "group-1",
+      fromFingerprint: "profile-fp",
+      toFingerprint: "new-member-fp",
+      sdp: { type: "offer", sdp: "MESH_OFFER" },
+      ecdhPubkey: "ECDH_PUB_WIRE"
+    });
+    expect(typeof body.relayId).toBe("string");
+    expect(body.relayId.length).toBeGreaterThan(0);
+  });
+
+  it("receiving group-member-joined about an ALREADY-known group member does not start a second mesh-connect attempt", async () => {
+    const chat = await verifiedGroupChat("group-1");
+    getGroup.mockResolvedValue({ groupId: "group-1", name: "Друзі", memberFingerprints: ["peer-fp", "known-fp"] });
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({
+      type: "group-member-joined", groupId: "group-1", memberFingerprint: "known-fp", memberNickname: "Іван"
+    }));
+
+    await chat.captured.onMessage("ENCRYPTED_GMJ");
+
+    expect(startAsInitiator).toHaveBeenCalledTimes(1); // only the original establishedProfileChat call
+    expect(updateGroupMembers).not.toHaveBeenCalled();
+  });
+
+  it("responds to an incoming mesh-relay-offer addressed to me by joining, then relays back a mesh-relay-answer and announces identity once the new channel opens", async () => {
+    const chat = await verifiedGroupChat("group-1"); // "chat" here plays M's connection to relay-peer C
+    getGroup.mockResolvedValue({ groupId: "group-1", name: "Друзі", memberFingerprints: ["peer-fp"] });
+    const offerControl = {
+      type: "mesh-relay-offer",
+      groupId: "group-1",
+      relayId: "rid-9",
+      fromFingerprint: "p-fp",
+      toFingerprint: "profile-fp", // this device's own senderKey
+      sdp: { type: "offer", sdp: "OFFER_FROM_P" },
+      ecdhPubkey: "ecdh-p-wire"
+    };
+    decryptMessage.mockResolvedValueOnce(JSON.stringify(offerControl));
+
+    let joinerCaptured;
+    startAsJoiner.mockImplementation((opts) => {
+      joinerCaptured = opts;
+      return { __fakePc: true };
+    });
+
+    await chat.captured.onMessage("ENCRYPTED_MESH_OFFER");
+
+    await vi.waitFor(() => expect(startAsJoiner).toHaveBeenCalledTimes(1));
+    expect(joinerCaptured.offerSdp).toEqual({ type: "offer", sdp: "OFFER_FROM_P" });
+
+    await joinerCaptured.onLocalAnswerReady({ type: "answer", sdp: "ANSWER_FROM_M" });
+
+    await vi.waitFor(() => expect(chat.channel.send).toHaveBeenCalledTimes(2)); // identity-announce (setup) + this answer
+    const { body } = decodeSent(chat.channel.send.mock.calls[1][0]);
+    expect(body).toEqual({
+      type: "mesh-relay-answer",
+      groupId: "group-1",
+      relayId: "rid-9",
+      fromFingerprint: "profile-fp",
+      toFingerprint: "p-fp",
+      sdp: { type: "answer", sdp: "ANSWER_FROM_M" },
+      ecdhPubkey: "ECDH_PUB_WIRE"
+    });
+
+    const newChannel = fakeChannel();
+    joinerCaptured.onChannelOpen(newChannel);
+    await vi.waitFor(() => expect(newChannel.send).toHaveBeenCalled());
+    const announced = decodeSent(newChannel.send.mock.calls[0][0]);
+    expect(announced.body).toEqual({ type: "identity-announce" });
+  });
+
+  it("completes the initiator side on an incoming mesh-relay-answer: applies it to the pending connection and announces identity once its channel opens", async () => {
+    const chat = await verifiedGroupChat("group-1");
+    getGroup.mockResolvedValue({ groupId: "group-1", name: "Друзі", memberFingerprints: ["peer-fp"] });
+    updateGroupMembers.mockResolvedValue(undefined);
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({
+      type: "group-member-joined", groupId: "group-1", memberFingerprint: "new-member-fp", memberNickname: "Марія"
+    }));
+
+    let meshCaptured;
+    startAsInitiator.mockImplementation((opts) => {
+      meshCaptured = opts;
+      return { __fakePc: true };
+    });
+    await chat.captured.onMessage("ENCRYPTED_GMJ");
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalledTimes(2)); // 1 for establishedProfileChat's own connection + 1 for this mesh attempt
+    await meshCaptured.onLocalOfferReady({ type: "offer", sdp: "MESH_OFFER" });
+    await vi.waitFor(() => expect(chat.channel.send).toHaveBeenCalledTimes(2));
+    const { body: sentOffer } = decodeSent(chat.channel.send.mock.calls[1][0]);
+
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({
+      type: "mesh-relay-answer",
+      groupId: "group-1",
+      relayId: sentOffer.relayId,
+      fromFingerprint: "new-member-fp",
+      toFingerprint: "profile-fp",
+      sdp: { type: "answer", sdp: "ANSWER_BACK" },
+      ecdhPubkey: "ecdh-m-wire"
+    }));
+
+    await chat.captured.onMessage("ENCRYPTED_MESH_ANSWER");
+
+    await vi.waitFor(() => expect(applyRemoteAnswer).toHaveBeenCalledWith({ __fakePc: true }, { type: "answer", sdp: "ANSWER_BACK" }));
+
+    const newChannel = fakeChannel();
+    meshCaptured.onChannelOpen(newChannel);
+    await vi.waitFor(() => expect(newChannel.send).toHaveBeenCalled());
+    const announced = decodeSent(newChannel.send.mock.calls[0][0]);
+    expect(announced.body).toEqual({ type: "identity-announce" });
+  });
+});
