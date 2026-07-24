@@ -95,6 +95,21 @@ describe("applyDesignSettings", () => {
   });
 });
 
+describe("Section RF15: layout width settings", () => {
+  it("applyDesignSettings sets --content-max-width/--sidebar-width in px when overridden", () => {
+    setDesignSetting("contentMaxWidth", 1600);
+    setDesignSetting("sidebarWidth", 260);
+    applyDesignSettings(document);
+    expect(document.documentElement.style.getPropertyValue("--content-max-width")).toBe("1600px");
+    expect(document.documentElement.style.getPropertyValue("--sidebar-width")).toBe("260px");
+  });
+
+  it("rejects a sidebar width outside the safe range", () => {
+    expect(setDesignSetting("sidebarWidth", 10)).toBe(false);
+    expect(setDesignSetting("sidebarWidth", 5000)).toBe(false);
+  });
+});
+
 describe("DESIGN_SETTINGS registry shape", () => {
   it("every entry has the fields the UI needs to render itself structurally", () => {
     for (const entry of DESIGN_SETTINGS) {

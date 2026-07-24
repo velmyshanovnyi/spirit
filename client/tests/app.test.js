@@ -1008,6 +1008,20 @@ describe("Section RF14: design settings panel", () => {
     expect(document.documentElement.style.getPropertyValue("--accent")).toBe("");
     expect(document.documentElement.style.getPropertyValue("--radius")).toBe("");
   });
+
+  it("Section RF15: page/sidebar width settings apply as px custom properties", () => {
+    initApp(document, { locale: "uk" });
+    const widthInput = document.querySelector('[data-design-setting-key="contentMaxWidth"]');
+    widthInput.value = "1600";
+    widthInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+    const sidebarInput = document.querySelector('[data-design-setting-key="sidebarWidth"]');
+    sidebarInput.value = "260";
+    sidebarInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+    expect(document.documentElement.style.getPropertyValue("--content-max-width")).toBe("1600px");
+    expect(document.documentElement.style.getPropertyValue("--sidebar-width")).toBe("260px");
+  });
 });
 
 describe("settings menu replacing the top nav (Section H2)", () => {

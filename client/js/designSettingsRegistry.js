@@ -102,6 +102,26 @@ export const DESIGN_SETTINGS = [
     cssVar: "--font-size-base",
     min: 11,
     max: 22
+  },
+  {
+    key: "contentMaxWidth",
+    category: "layout",
+    label: "Максимальна ширина сторінки (px)",
+    description: "На широких екранах увесь вміст (шапка, сайдбар, основна панель) центрується в межах цієї ширини замість розтягування на весь монітор.",
+    type: "length",
+    cssVar: "--content-max-width",
+    min: 800,
+    max: 2400
+  },
+  {
+    key: "sidebarWidth",
+    category: "layout",
+    label: "Ширина бічної панелі (px)",
+    description: "Ширина сайдбара з чатами й папками зліва. Занадто мале значення може обрізати текст у списку контактів.",
+    type: "length",
+    cssVar: "--sidebar-width",
+    min: 200,
+    max: 500
   }
 ];
 

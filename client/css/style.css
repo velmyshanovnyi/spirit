@@ -24,6 +24,11 @@
      settings panel, client/js/designSettingsRegistry.js. */
   --font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-size-base: 15px;
+  /* Section RF15 (specs/ui/settings-panel.md, width extension): also
+     theme-independent -- user-tunable via the settings panel,
+     client/js/designSettingsRegistry.js. */
+  --content-max-width: 1400px;
+  --sidebar-width: 300px;
 }
 
 :root[data-theme="dark"] {
@@ -93,10 +98,10 @@ body {
      header/page -- not the same thing once the header's content padding
      already lines up with the sidebar's left edge (see the padding rule
      below). */
-  grid-template-columns: 300px 1fr auto;
+  grid-template-columns: var(--sidebar-width) 1fr auto;
   align-items: center;
   gap: 12px;
-  padding: 10px max(16px, calc((100% - 1400px) / 2 + 16px));
+  padding: 10px max(16px, calc((100% - var(--content-max-width)) / 2 + 16px));
   background: color-mix(in srgb, var(--card-bg) 85%, transparent);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
@@ -156,7 +161,7 @@ body {
 .app-body {
   display: flex;
   align-items: flex-start;
-  max-width: 1400px;
+  max-width: var(--content-max-width);
   margin: 0 auto;
 }
 
@@ -172,8 +177,8 @@ body.conversation-toolbar-visible .app-body {
 }
 
 #app-sidebar {
-  width: 300px;
-  flex: 0 0 300px;
+  width: var(--sidebar-width);
+  flex: 0 0 var(--sidebar-width);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -863,7 +868,7 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 6px max(16px, calc((100% - 1400px) / 2 + 16px));
+  padding: 6px max(16px, calc((100% - var(--content-max-width)) / 2 + 16px));
   background: var(--card-bg);
   border-bottom: 1px solid var(--border);
 }

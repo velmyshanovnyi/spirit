@@ -2485,7 +2485,8 @@ export function initApp(doc, options) {
     const categoryLabels = {
       colors: t("design.category.colors"),
       shape: t("design.category.shape"),
-      typography: t("design.category.typography")
+      typography: t("design.category.typography"),
+      layout: t("design.category.layout")
     };
     const computed = doc.defaultView.getComputedStyle(doc.documentElement);
     let lastCategory = null;
