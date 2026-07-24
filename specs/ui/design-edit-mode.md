@@ -161,7 +161,39 @@ RF14-16) -- НЕ прив'язано до акаунта:
         як `"left"` активна кнопка (перший елемент `options`), узгоджено
         з тим, що стилі за замовчуванням і так дають сайдбар зліва;
         (в) 331/331, без регресій у наявних RF14-16 тестах.
-- [ ] **Stage RF18 -- бік панелі розмови**
+- [x] **Stage RF18 -- бік панелі розмови**
+  - [x] **Tests**: `client/tests/designSettingsRegistry.test.js`, новий
+        `describe("Section RF18: layout edit mode -- conversation toolbar
+        side swap")` (3 тести, той самий шаблон, що й RF17: default
+        `null`/зліва; валідний/невалідний `setDesignSetting`;
+        `applyDesignSettings` виставляє/знімає `data-toolbar-side`).
+        `client/tests/app.test.js`, новий UI-тест: клік "Справа"/"Зліва"
+        перемикає атрибут і підсвітку активної кнопки. Жодних змін у
+        існуючих тестах не знадобилось -- RF17's generic choice-рендер і
+        "renders one input..." лічильник уже узагальнені на будь-яку
+        кількість `choice`-записів. Разом: 335/335 (309 у `app.test.js`
+        + 26 у `designSettingsRegistry.test.js`).
+  - [x] **Impl**: `client/js/designSettingsRegistry.js` -- новий запис
+        `toolbarSide` (той самий `type: "choice"`, `options`, категорія
+        `layout`) -- ЖОДНИХ змін у `app.js`'s рендер/обробниках не
+        знадобилось (RF17 вже зробила `type==="choice"` повністю
+        generic-ним, підтверджено відсутністю рядка `"sidebarSide"` у
+        `app.js`). `client/css/style.css` --
+        `:root[data-toolbar-side="right"]` перемикає `order` на
+        `.conversation-toolbar-left`/`.conversation-toolbar-right` (той
+        самий `order`-прийом, DOM-порядок не чіпається).
+  - [x] **Exec review**: самоперевірка -- (а) `.conversation-toolbar` --
+        звичайний flex-рядок (`justify-content: space-between`), `order`
+        працює без побічних ефектів; (б) generic-рендер з RF17
+        підтвердив свою цінність буквально без жодної зміни в `app.js`
+        для цієї стадії -- сама архітектурна ставка (реюзабельний
+        `"choice"`-тип) себе виправдала; (в) 335/335, живо перевірено на
+        `spirit.kibr.com.ua` (клік/CSS/getBoundingClientRect
+        підтверджують реальне переміщення) -- `spirit.kolo.media` у
+        поточній браузерній сесії застряг на артефакті кешу ES-модулів
+        інструмента (не пов'язано з кодом, задокументовано в RF17,
+        актуально й тут), деплой на обидва хости ідентичний і
+        підтверджений прямим `fetch`.
 - [ ] **Stage RF19 -- порядок елементів шапки**
 
 (Деталізація Tests/Impl по кожній стадії -- у момент старту роботи над
