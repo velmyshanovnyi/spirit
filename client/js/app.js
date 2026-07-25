@@ -1203,7 +1203,7 @@ export function initApp(doc, options) {
     const targetFingerprint = row?.dataset.contactFingerprint;
     if (!targetFingerprint) return;
     const contact = await getContact(targetFingerprint);
-    await initiateChatSession({ pushToContact: contact ?? null });
+    await initiateChatSession({ pushToContact: contact ?? null, expectedFingerprint: targetFingerprint });
   });
 
   // Sidebar search (UI redesign follow-up to SD1): plain client-side
@@ -3127,6 +3127,20 @@ export function initApp(doc, options) {
         setStatus(t("status.announceFailed"));
         return;
       }
+      // Section B5 (specs/reviews/spirit-evaluation-triage.md): when the
+      // user dialed a SPECIFIC known contact, whoever answers must actually
+      // BE that contact -- previously the expected fingerprint was read
+      // from the DOM at dial time, used only for push targeting, and then
+      // discarded; whatever fingerprint the announce carried was accepted
+      // unconditionally and just relabeled "новий контакт" if it differed.
+      // A generic "Ініціювати чат"/quick-chat session has no expected
+      // fingerprint (null) and is unaffected -- anyone who answers there is
+      // legitimately a first meeting.
+      const expected = getActivePeer()?.expectedFingerprint;
+      if (expected && expected !== verified.fingerprint) {
+        setStatus(t("status.peerIdentityMismatch"));
+        return;
+      }
       state.peerFingerprint = verified.fingerprint;
       state.peerIdentityPublicKey = verified.identityPublicKey;
       let continuity = "";
@@ -4658,7 +4672,7 @@ export function initApp(doc, options) {
    * zero-click "Швидкий анонімний чат" (Section F3, specs/ui/ephemeral-spirit-mode.md)
    * -- both need an already-established state.senderKey/identityKeyPair.
    */
-  async function initiateChatSession({ pushToContact = null } = {}) {
+  async function initiateChatSession({ pushToContact = null, expectedFingerprint = null } = {}) {
     const serverUrl = el("server-url").value;
     const rtcConfig = currentRtcConfig();
     const senderKey = state.senderKey;
@@ -4703,6 +4717,12 @@ export function initApp(doc, options) {
     state.peerFingerprint = null;
     hideSafetyNumberHint();
     state.sessionEcdhWires = null;
+    // Section B5 (specs/reviews/spirit-evaluation-triage.md): when the user
+    // clicked a SPECIFIC known contact's "message" button (as opposed to a
+    // generic "Ініціювати чат"/quick-chat with no particular target),
+    // record who they actually meant to dial -- checked against whoever's
+    // identity-announce actually arrives, below.
+    ensureActivePeer().expectedFingerprint = expectedFingerprint;
     const announce = makeIdentityAnnouncer();
     startInitiatorSession({
       senderKey,

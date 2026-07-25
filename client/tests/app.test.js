@@ -3104,6 +3104,74 @@ describe("identity announce in chat flows (Section 12)", () => {
     expect(document.getElementById("chat-log").textContent).not.toContain("текст після фейкового announce");
   });
 
+  it("Section B5 (specs/reviews/spirit-evaluation-triage.md): rejects an incoming announce whose fingerprint does NOT match the contact the user actually dialed", async () => {
+    // The audit's finding: clicking a specific known contact's "message"
+    // button reads its fingerprint from the DOM row, but that value was
+    // previously used ONLY for push notification targeting -- whatever
+    // fingerprint later showed up in the identity-announce was accepted
+    // unconditionally and just relabeled "новий контакт", with no
+    // comparison against who was actually dialed.
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: { __tag: "id-priv" }, publicKey: fakePublicKey("id-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    const dialedFingerprint = "a".repeat(64);
+    listContacts.mockResolvedValue([
+      { fingerprint: dialedFingerprint, identityPubkeyWire: "W1", firstSeen: 1, deviceList: null, pushSubscription: null }
+    ]);
+    getContact.mockResolvedValue({
+      fingerprint: dialedFingerprint,
+      identityPubkeyWire: "W1",
+      firstSeen: 1,
+      deviceList: null,
+      pushSubscription: null
+    });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+    // Answers with a COMPLETELY DIFFERENT fingerprint than the one dialed --
+    // e.g. a compromised/malicious relay or signaling node substituting a
+    // different peer mid-handshake.
+    const incoming = { type: "identity-announce", identityPubkey: "IMPOSTOR", signature: "SIG" };
+    decryptMessage.mockResolvedValue(JSON.stringify(incoming));
+    verifyIdentityAnnounce.mockResolvedValue({
+      identityPublicKey: {},
+      identityPubkeyWire: "IMPOSTOR",
+      fingerprint: "b".repeat(64) // != dialedFingerprint
+    });
+
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+
+    location.hash = "#/contacts";
+    window.dispatchEvent(new Event("hashchange"));
+    await vi.waitFor(() => expect(listContacts).toHaveBeenCalled());
+    document.querySelector("#contacts-list .list-row [data-i18n='contacts.message']").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+
+    captured.onChannelOpen(fakeChannel());
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+    await captured.onMessage("ENCRYPTED_IMPOSTOR_ANNOUNCE");
+
+    await vi.waitFor(() =>
+      expect(document.getElementById("connection-status").textContent).toMatch(/не той|не збіга|mismatch/i)
+    );
+    // Never treated as verified, never persisted as a (re-labeled) contact.
+    expect(rememberContact).not.toHaveBeenCalled();
+  });
+
   it("appends incoming chat text normally once the peer identity is verified", async () => {
     createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
     encryptMessage.mockResolvedValue("X");
