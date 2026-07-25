@@ -4676,7 +4676,18 @@ export function initApp(doc, options) {
     const groupLog = el("group-chat-log");
     if (groupLog) groupLog.hidden = true;
     const oneToOneLog = el("chat-log");
-    if (oneToOneLog) oneToOneLog.hidden = false;
+    if (oneToOneLog) {
+      oneToOneLog.hidden = false;
+      // Section C2 (specs/reviews/spirit-evaluation-triage.md): this fires
+      // on every genuinely NEW 1:1 session start (initiator or joiner), never
+      // on a mid-session reconnect of the SAME connection (that reopens the
+      // channel directly, without going through here) -- so clearing here
+      // can't lose an in-progress conversation, only stale text left behind
+      // by whichever session was open before this one. A KNOWN contact's
+      // prior history is re-populated afterward, once identity-announce
+      // verifies them, by the existing history-replay code below.
+      oneToOneLog.innerHTML = "";
+    }
     router.navigate("conversation");
     renderEphemeralBanner();
     renderInviteBar();

@@ -2717,6 +2717,41 @@ describe("btn-send", () => {
     expect(channel.send.mock.calls.length).toBe(sendCountBefore); // queued, not sent to the dead channel
   });
 
+  it("Section C2 (specs/reviews/spirit-evaluation-triage.md): starting a brand-new session clears the previous conversation's visible text instead of leaving it behind", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    encryptMessage.mockResolvedValue("ENCRYPTED_PAYLOAD");
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+
+    startAsInitiator.mockImplementation(() => ({ __fakePc: true }));
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalledTimes(1));
+
+    document.getElementById("message-input").value = "перша розмова, приватне";
+    document.getElementById("btn-send").click();
+    await vi.waitFor(() => expect(document.getElementById("chat-log").textContent).toContain("перша розмова, приватне"));
+
+    // A brand-new session starts (e.g. the user clicked "Ініціювати чат"
+    // again to talk to someone else) -- the OLD conversation's text must
+    // not still be sitting there once the new lobby opens, before this
+    // new peer has said anything.
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalledTimes(2));
+
+    expect(document.getElementById("chat-log").textContent).not.toContain("перша розмова, приватне");
+  });
+
   it("sends the message on Enter, same as clicking Надіслати (bug report 2026-07-17)", async () => {
     generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
     fingerprint.mockResolvedValue("sender-fp");
