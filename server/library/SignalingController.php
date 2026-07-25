@@ -74,6 +74,7 @@ class SignalingController
         // protection on admin_login) via the same per-IP throttle.
         if ($action === 'admin_login' || $action === 'admin_get_config') {
             if (!$this->rateLimiter->checkAndRecordRequest($clientIp)) {
+                $this->logSecurityEvent('rate_limited', $clientIp, $action);
                 return $this->error(429, 'Too Many Requests');
             }
             return $this->handleAdmin($action, $input);
@@ -85,6 +86,7 @@ class SignalingController
         }
 
         if (!$this->inviteManager->isSenderAllowed($senderKey, $this->config['GLOBAL_ACCESS'], $this->config['WHITE_LIST'])) {
+            $this->logSecurityEvent('access_denied_not_whitelisted', $clientIp, $action);
             return $this->error(403, 'Access Denied: Public key not in white-list');
         }
 
@@ -99,11 +101,12 @@ class SignalingController
         // unrelated database.json lock below (which fetch_proof's network
         // fetch must NOT be serialized behind).
         if (!$this->rateLimiter->checkAndRecordRequest($clientIp)) {
+            $this->logSecurityEvent('rate_limited', $clientIp, $action);
             return $this->error(429, 'Too Many Requests');
         }
 
         if ($action === 'fetch_proof') {
-            return $this->handleFetchProof($input);
+            return $this->handleFetchProof($input, $clientIp);
         }
 
         // Stricter bucket only for room-creating actions, and only checked
@@ -113,6 +116,7 @@ class SignalingController
         if (in_array($action, ['create_invite', 'create_offer'], true)
             && !$this->rateLimiter->checkAndRecordRoomCreation($clientIp)
         ) {
+            $this->logSecurityEvent('room_creation_rate_limited', $clientIp, $action);
             return $this->error(429, 'Too Many Requests');
         }
 
@@ -138,6 +142,7 @@ class SignalingController
             // database.json (the documented load-or-abort contract) and
             // lock-acquisition failures -- never caught-and-saved with an
             // empty state, per Storage's contract.
+            $this->logSecurityEvent('storage_error: ' . $e->getMessage(), $clientIp, $action);
             return $this->error(500, 'Internal Server Error');
         }
     }
@@ -315,7 +320,7 @@ class SignalingController
         }
     }
 
-    private function handleFetchProof(array $input): array
+    private function handleFetchProof(array $input, string $clientIp): array
     {
         if (!($this->config['ENABLE_PROOF_PROXY'] ?? false)) {
             return $this->error(403, 'fetch_proof is disabled on this node');
@@ -331,7 +336,13 @@ class SignalingController
         if (!$result['ok']) {
             // Explicit flag rather than matching on the message text -- a
             // future wording edit shouldn't silently reclassify a rejection
-            // as an upstream failure or vice versa.
+            // as an upstream failure or vice versa. A "reject" (403) means
+            // the target itself was refused (private/reserved IP, bad
+            // scheme) -- Section C5's "rejected SSRF" event; a plain
+            // upstream failure (502) is not logged as a security event.
+            if ($result['reject']) {
+                $this->logSecurityEvent('ssrf_rejected: ' . $result['error'], $clientIp, 'fetch_proof');
+            }
             return $this->error($result['reject'] ? 403 : 502, $result['error']);
         }
 
@@ -641,6 +652,21 @@ class SignalingController
     private function error(int $status, string $message): array
     {
         return ['status' => $status, 'body' => ['error' => $message]];
+    }
+
+    /**
+     * Section C5 (specs/reviews/spirit-evaluation-triage.md): the operator
+     * previously had no visibility into 429/403/corrupted-database/
+     * rejected-SSRF events -- error_log() is the only sink available on
+     * typical shared PHP hosting (no metrics/log-aggregation service), and
+     * matches PHP's default error_log destination so it lands wherever the
+     * host already routes application errors. Never logs request bodies
+     * (sdp_data/ecdh_pubkey are session key material) -- only the event
+     * type, client IP, and action name.
+     */
+    private function logSecurityEvent(string $event, string $clientIp, ?string $action = null): void
+    {
+        error_log(sprintf('[spirit-signaling] %s ip=%s action=%s', $event, $clientIp, $action ?? '-'));
     }
 
     private function withLock(callable $fn)
