@@ -81,7 +81,7 @@
       </div>
     </div>
     <div class="conversation-toolbar-right">
-      <div id="connection-status" class="status" data-i18n="conn.none">не з'єднано</div>
+      <div id="connection-status" class="status" aria-live="polite" data-i18n="conn.none">не з'єднано</div>
       <div id="invite-bar" hidden>
         <button id="btn-invite-from-chat" type="button" class="btn-icon" aria-label="Запросити" data-i18n-title="btn.copyInvite" title="Скопіювати запрошення">🔗</button>
       </div>
@@ -134,7 +134,7 @@
 
     <div id="proofs-check-block">
       <div class="btn-row"><button id="btn-check-proofs-now" type="button" data-i18n="btn.checkProofsNow">Перевірити зараз</button></div>
-      <div id="proofs-check-status" class="status"></div>
+      <div id="proofs-check-status" class="status" aria-live="polite"></div>
     </div>
     <div id="contacts-list" class="list-area"></div>
     <p id="contacts-empty" class="hint-text" data-i18n="contacts.empty">Поки що немає жодного контакту</p>
@@ -177,7 +177,7 @@
             <input id="portable-password-input" type="password" autocomplete="current-password">
           </label>
           <div class="btn-row"><button id="btn-login-portable" type="button" class="btn-primary" data-i18n="btn.login">Увійти</button></div>
-          <div id="portable-login-status" class="status"></div>
+          <div id="portable-login-status" class="status" aria-live="polite"></div>
         </div>
 
         <p class="hint-text"><button id="link-toggle-recovery-restore" type="button" class="btn-link" data-i18n="recovery.restoreToggle">Відновити через довірених контактів</button></p>
@@ -193,7 +193,7 @@
             <input id="recovery-restore-passphrase" type="password" autocomplete="new-password">
           </label>
           <div class="btn-row"><button id="btn-recover-from-shares" type="button" class="btn-primary" data-i18n="btn.recoverFromShares">Відновити</button></div>
-          <div id="recovery-restore-status" class="status"></div>
+          <div id="recovery-restore-status" class="status" aria-live="polite"></div>
         </div>
 
         <div id="account-create-mode">
@@ -218,7 +218,7 @@
 
           <p class="hint-text"><button id="link-switch-to-login" type="button" class="btn-link" data-i18n="account.switchToLogin">Вже маєте акаунт? Увійти</button></p>
         </div>
-        <div id="profile-status" class="status"></div>
+        <div id="profile-status" class="status" aria-live="polite"></div>
 
         <div id="backup-step" hidden class="subgroup">
           <h3 data-i18n="backup.heading">Резервна копія ключа</h3>
@@ -270,7 +270,7 @@
           </label>
           <div class="btn-row"><button id="btn-join-as-device" type="button" data-i18n="btn.joinAsDevice">Приєднати цей пристрій</button></div>
         </div>
-        <div id="device-link-status" class="status"></div>
+        <div id="device-link-status" class="status" aria-live="polite"></div>
       </section>
 
       <section class="card">
@@ -279,7 +279,7 @@
           <input id="google-client-id" type="text">
         </label>
         <div class="btn-row"><button id="btn-google-verify" type="button" data-i18n="btn.googleVerify">Підтвердити через Google</button></div>
-        <div id="google-verify-status" class="status"></div>
+        <div id="google-verify-status" class="status" aria-live="polite"></div>
       </section>
 
       <section id="notifications-card" class="card" hidden>
@@ -288,7 +288,7 @@
           <input id="notifications-enabled" type="checkbox">
           <span data-i18n="notifications.enableLabel">Показувати системні сповіщення, коли Spirit закритий</span>
         </label>
-        <div id="notifications-status" class="status"></div>
+        <div id="notifications-status" class="status" aria-live="polite"></div>
       </section>
 
       <section id="recovery-card" class="card" hidden>
@@ -305,7 +305,7 @@
           <input id="recovery-setup-passphrase" type="password" autocomplete="current-password">
         </label>
         <div class="btn-row"><button id="btn-setup-recovery" type="button" data-i18n="btn.setupRecovery">Налаштувати відновлення</button></div>
-        <div id="recovery-status" class="status"></div>
+        <div id="recovery-status" class="status" aria-live="polite"></div>
         <div id="recovery-text-export" hidden></div>
         <p class="hint" data-i18n="recovery.qrHint">
           Кожен рядок вище -- окремий QR-код лише з часткою для ЦЬОГО контакту. Показуйте (або
@@ -325,7 +325,7 @@
           <input id="proof-url-input" type="text">
         </label>
         <div class="btn-row"><button id="btn-add-proof" type="button" class="btn-primary" data-i18n="btn.addProof">Додати</button></div>
-        <div id="proofs-status" class="status"></div>
+        <div id="proofs-status" class="status" aria-live="polite"></div>
         <h3 data-i18n="proofs.myProofs">Мої докази</h3>
         <div id="own-proofs-list" class="list-area"></div>
       </section>
@@ -389,7 +389,7 @@
           </label>
           <div class="btn-row"><button id="btn-admin-login" type="button" data-i18n="admin.loginBtn">Увійти</button></div>
         </div>
-        <div id="admin-status" class="status"></div>
+        <div id="admin-status" class="status" aria-live="polite"></div>
         <div id="admin-config-list" class="list-area" hidden></div>
       </section>
 
@@ -449,12 +449,12 @@
              enterConversationLobby() ever navigates away from this screen,
              so it needs its own visible target here too, not only on the
              conversation screen this button jumps to on success. -->
-        <div id="room-status" class="status"></div>
+        <div id="room-status" class="status" aria-live="polite"></div>
 
         <p class="hint-text" data-i18n="room.inviteHint">Надішліть це посилання співрозмовнику — за клацанням Room ID і token заповняться автоматично.</p>
         <div class="btn-row"><button id="btn-copy-invite" type="button" data-i18n="btn.copyInvite">Скопіювати запрошення</button></div>
         <div id="invite-link-display" class="secret-output"></div>
-        <div id="invite-status" class="status"></div>
+        <div id="invite-status" class="status" aria-live="polite"></div>
       </section>
     </section>
 
@@ -478,7 +478,7 @@
           <button id="btn-file-reject" type="button" data-i18n="fileTransfer.reject">Відхилити</button>
         </div>
         <div id="file-transfers" class="list-area"></div>
-        <div id="video-status" class="status"></div>
+        <div id="video-status" class="status" aria-live="polite"></div>
 
         <!-- Section GC3 (specs/phase4/group-chats.md), design point 5: a
              group conversation is routed into this SAME screen (state.activeGroupId)
@@ -486,15 +486,15 @@
              are shown instead of the plain 1:1 #chat-log while a group is open,
              toggled by openGroupConversation()/enterConversationLobby(). -->
         <h3 id="group-conversation-heading" hidden></h3>
-        <div id="group-chat-log" class="chat-log" hidden></div>
-        <div id="chat-log" class="chat-log"></div>
+        <div id="group-chat-log" class="chat-log" hidden aria-live="polite"></div>
+        <div id="chat-log" class="chat-log" aria-live="polite"></div>
         <!-- Section RF8 (bug report): connection-status moved into the
              fixed top toolbar (Section RF6), far from the input a failed
              send actually happens in -- a send blocked by "no active
              connection" was easy to miss up there while the typed message
              just silently didn't appear below. This mirrors that same
              failure right next to the input itself. -->
-        <div id="chat-send-status" class="status" hidden></div>
+        <div id="chat-send-status" class="status" aria-live="polite" hidden></div>
         <div class="chat-input-row">
           <label for="file-input" class="btn-icon" aria-label="Надіслати файл" data-i18n-title="fileTransfer.pick" title="Надіслати файл">📎</label>
           <input id="file-input" type="file" hidden>
@@ -517,7 +517,7 @@
         </label>
         <div id="group-contacts-list" class="list-area"></div>
         <div class="btn-row"><button id="btn-create-group" type="button" class="btn-primary" data-i18n="btn.createGroup">Створити групу</button></div>
-        <div id="group-status" class="status"></div>
+        <div id="group-status" class="status" aria-live="polite"></div>
         <div id="group-invite-links" class="secret-output" hidden></div>
 
         <h3 data-i18n="groups.existing">Мої групи</h3>
@@ -545,7 +545,7 @@
         </label>
         <label for="import-file-input" class="btn-icon" data-i18n="import.pick">Імпортувати контакти</label>
         <input id="import-file-input" type="file" accept=".json,.vcf,.txt" hidden>
-        <div id="import-status" class="status"></div>
+        <div id="import-status" class="status" aria-live="polite"></div>
 
         <h3 data-i18n="import.pendingHeading">Очікують на зіставлення</h3>
         <div id="import-pending-list" class="list-area"></div>
