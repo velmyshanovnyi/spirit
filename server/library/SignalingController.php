@@ -90,6 +90,14 @@ class SignalingController
 
         // General per-IP throttle applies to every action, including
         // fetch_proof, before that action's own (stateless) handling.
+        // Section C4 (specs/reviews/spirit-evaluation-triage.md):
+        // check-and-record used to be two unsynchronized steps (load, then
+        // save) so two concurrent requests from the same IP could both read
+        // the "not yet over limit" count and both proceed -- RateLimiter
+        // itself now holds an flock across its own read-modify-write (see
+        // RateLimiter.php) to close that race without piggybacking on the
+        // unrelated database.json lock below (which fetch_proof's network
+        // fetch must NOT be serialized behind).
         if (!$this->rateLimiter->checkAndRecordRequest($clientIp)) {
             return $this->error(429, 'Too Many Requests');
         }
@@ -108,21 +116,23 @@ class SignalingController
             return $this->error(429, 'Too Many Requests');
         }
 
-        // Section SR2: PoW gate on create_invite, checked BEFORE the room is
-        // actually created (and before the general withLock/dispatch below)
-        // -- an additional gate on top of, not a replacement for, the
-        // general per-IP RateLimiter throttle already applied above. A
-        // failed check here is 400 (bad/missing proof-of-work), never 429
-        // (this isn't a rate-limit rejection).
-        if ($action === 'create_invite') {
-            $powError = $this->checkPow($input, $senderKey);
-            if ($powError !== null) {
-                return $powError;
-            }
-        }
-
         try {
-            return $this->withLock(fn () => $this->dispatchAction($action, $input, $senderKey));
+            return $this->withLock(function () use ($action, $input, $senderKey) {
+                // Section C4: PoW anti-replay MUTATES shared state
+                // (PowNonceStore) via check-then-mark, so it has the exact
+                // same TOCTOU shape as the invite-token check B1 fixed --
+                // moved inside the same database.json lock as
+                // dispatchAction so a nonce can't be spent twice by two
+                // concurrent create_invite requests racing each other.
+                if ($action === 'create_invite') {
+                    $powError = $this->checkPow($input, $senderKey);
+                    if ($powError !== null) {
+                        return $powError;
+                    }
+                }
+
+                return $this->dispatchAction($action, $input, $senderKey);
+            });
         } catch (\RuntimeException $e) {
             // Covers Storage::load() throwing on a corrupted/unreadable
             // database.json (the documented load-or-abort contract) and

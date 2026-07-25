@@ -59,20 +59,42 @@ class RateLimiter
         );
     }
 
+    // Section C4 (specs/reviews/spirit-evaluation-triage.md): checkAndRecord
+    // used to load(), decide $allowed, then save() as three unsynchronized
+    // steps -- two concurrent requests from the same IP could both load the
+    // same under-the-limit count before either saved, so both would pass
+    // regardless of maxCount. Held for the whole load-decide-save sequence
+    // below, so concurrent requests for the SAME ip+bucket are serialized
+    // and the count they each observe is never stale.
     private function checkAndRecord(string $ip, string $bucket, int $windowSeconds, int $maxCount): bool
     {
-        $now = time();
-        $data = $this->load();
+        $handle = fopen($this->rateLimitFile, 'c+');
+        if ($handle === false) {
+            // Same fail-open rationale as load()/save() below: a
+            // rate-limit-file problem shouldn't take the whole node down.
+            return true;
+        }
+        try {
+            if (!flock($handle, LOCK_EX)) {
+                return true;
+            }
 
-        $timestamps = $this->filterWindow($data['ips'][$ip][$bucket] ?? [], $now, $windowSeconds);
-        $allowed = count($timestamps) < $maxCount;
-        $timestamps[] = $now;
-        $data['ips'][$ip][$bucket] = $timestamps;
+            $now = time();
+            $data = $this->loadFromHandle($handle);
 
-        $this->gcStaleEntries($data, $now);
-        $this->save($data);
+            $timestamps = $this->filterWindow($data['ips'][$ip][$bucket] ?? [], $now, $windowSeconds);
+            $allowed = count($timestamps) < $maxCount;
+            $timestamps[] = $now;
+            $data['ips'][$ip][$bucket] = $timestamps;
 
-        return $allowed;
+            $this->gcStaleEntries($data, $now);
+            $this->saveToHandle($handle, $data);
+
+            return $allowed;
+        } finally {
+            flock($handle, LOCK_UN);
+            fclose($handle);
+        }
     }
 
     private function filterWindow(array $timestamps, int $now, int $windowSeconds): array
@@ -118,13 +140,16 @@ class RateLimiter
      * and far lower stakes than losing session state. Failing closed here
      * (throwing, like Storage does) would instead take the whole signaling
      * node down over a non-essential bookkeeping file.
+     *
+     * Reads from an already-`flock`'d handle (opened 'c+' by
+     * checkAndRecord) rather than a fresh file_get_contents, so the read is
+     * part of the same locked critical section as the eventual write --
+     * see the Section C4 note on checkAndRecord above.
      */
-    private function load(): array
+    private function loadFromHandle($handle): array
     {
-        if (!file_exists($this->rateLimitFile)) {
-            return ['ips' => []];
-        }
-        $content = @file_get_contents($this->rateLimitFile);
+        rewind($handle);
+        $content = stream_get_contents($handle);
         if ($content === false || $content === '') {
             return ['ips' => []];
         }
@@ -132,21 +157,17 @@ class RateLimiter
         return is_array($data) && isset($data['ips']) && is_array($data['ips']) ? $data : ['ips' => []];
     }
 
-    private function save(array $data): bool
+    private function saveToHandle($handle, array $data): bool
     {
         $json = json_encode($data, JSON_PRETTY_PRINT);
         if ($json === false) {
             return false;
         }
-        $tmpFile = $this->rateLimitFile . '.tmp.' . bin2hex(random_bytes(8));
-        if (file_put_contents($tmpFile, $json, LOCK_EX) === false) {
-            @unlink($tmpFile);
+        rewind($handle);
+        if (fwrite($handle, $json) === false) {
             return false;
         }
-        if (!rename($tmpFile, $this->rateLimitFile)) {
-            @unlink($tmpFile);
-            return false;
-        }
+        ftruncate($handle, ftell($handle));
         return true;
     }
 }
