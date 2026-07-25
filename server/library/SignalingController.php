@@ -210,6 +210,13 @@ class SignalingController
                 }
                 $db['sessions'][$roomId]['offer'] = $sdpData;
                 $db['sessions'][$roomId]['offer_ecdh_pubkey'] = $ecdhPubkey;
+                // Section B2 (specs/reviews/spirit-evaluation-triage.md):
+                // timestamp used to be written ONCE at create_invite and
+                // never touched again, so the fixed TTL killed a room even
+                // while a real handshake was actively in progress. Refreshed
+                // on every action below that proves the room is genuinely
+                // still in use (not merely a background GC sweep).
+                $db['sessions'][$roomId]['timestamp'] = time();
                 if (!$this->storage->save($db)) {
                     return $this->error(500, 'Internal Server Error: failed to persist offer');
                 }
@@ -231,6 +238,13 @@ class SignalingController
                 if ($session['offer'] === null) {
                     return $this->error(404, 'Offer not published yet');
                 }
+                // Section B2: the joiner polling this while waiting for the
+                // offer to appear is exactly the "real activity" the fixed
+                // TTL didn't account for -- refresh here too.
+                $db['sessions'][$roomId]['timestamp'] = time();
+                if (!$this->storage->save($db)) {
+                    return $this->error(500, 'Internal Server Error: failed to persist activity timestamp');
+                }
                 return $this->success(['offer' => $session['offer'], 'ecdh_pubkey' => $session['offer_ecdh_pubkey']]);
 
             case 'submit_answer':
@@ -247,6 +261,7 @@ class SignalingController
                 }
                 $db['sessions'][$roomId]['answer'] = $sdpData;
                 $db['sessions'][$roomId]['answer_ecdh_pubkey'] = $ecdhPubkey;
+                $db['sessions'][$roomId]['timestamp'] = time(); // Section B2
                 $this->inviteManager->markInviteUsed($db, $roomId);
                 if (!$this->storage->save($db)) {
                     return $this->error(500, 'Internal Server Error: failed to persist answer');
@@ -275,6 +290,13 @@ class SignalingController
                 $session = $db['sessions'][$roomId];
                 if (!hash_equals((string) $session['initiator'], $senderKey)) {
                     return $this->error(403, 'Access Denied: not this room\'s initiator');
+                }
+                // Section B2: the initiator polling this while waiting for
+                // an answer is real, ongoing activity -- refresh the TTL
+                // clock rather than letting it die mid-poll regardless.
+                $db['sessions'][$roomId]['timestamp'] = time();
+                if (!$this->storage->save($db)) {
+                    return $this->error(500, 'Internal Server Error: failed to persist activity timestamp');
                 }
                 return $this->success(['answer' => $session['answer'], 'ecdh_pubkey' => $session['answer_ecdh_pubkey']]);
 
