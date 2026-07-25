@@ -16,60 +16,69 @@
 
 const STORAGE_PREFIX = "spirit.designSettings.";
 
+// Section C6 (specs/reviews/spirit-evaluation-triage.md): same fix as
+// settingsRegistry.js -- label/description/optionLabels/item.label used to
+// be hardcoded Ukrainian literals. Every entry now carries labelKey/
+// descriptionKey (and choice entries optionLabelKeys, order items
+// labelKey) pointing into i18n.js's MESSAGES
+// (designSettings.<key>.label / .description; choice options share
+// designSettings.side.left/right rather than a per-key option key, since
+// every current choice entry is a left/right toggle), resolved via t() in
+// renderDesignSettings() in app.js.
 export const DESIGN_SETTINGS = [
   {
     key: "accentColor",
     category: "colors",
-    label: "Акцентний колір",
-    description: "Колір кнопок, посилань та активних елементів по всьому інтерфейсу.",
+    labelKey: "designSettings.accentColor.label",
+    descriptionKey: "designSettings.accentColor.description",
     type: "color",
     cssVar: "--accent"
   },
   {
     key: "backgroundColor",
     category: "colors",
-    label: "Колір фону сторінки",
-    description: "Основний фоновий колір за картками та панелями.",
+    labelKey: "designSettings.backgroundColor.label",
+    descriptionKey: "designSettings.backgroundColor.description",
     type: "color",
     cssVar: "--bg"
   },
   {
     key: "cardBackgroundColor",
     category: "colors",
-    label: "Колір фону карток",
-    description: "Фон карток, шапки сайту та бічної панелі.",
+    labelKey: "designSettings.cardBackgroundColor.label",
+    descriptionKey: "designSettings.cardBackgroundColor.description",
     type: "color",
     cssVar: "--card-bg"
   },
   {
     key: "textColor",
     category: "colors",
-    label: "Колір основного тексту",
-    description: "Колір звичайного тексту -- заголовків, підписів, повідомлень у чаті.",
+    labelKey: "designSettings.textColor.label",
+    descriptionKey: "designSettings.textColor.description",
     type: "color",
     cssVar: "--text"
   },
   {
     key: "mutedTextColor",
     category: "colors",
-    label: "Колір приглушеного тексту",
-    description: "Колір другорядного тексту -- підказок, часток, статусів.",
+    labelKey: "designSettings.mutedTextColor.label",
+    descriptionKey: "designSettings.mutedTextColor.description",
     type: "color",
     cssVar: "--muted"
   },
   {
     key: "borderColor",
     category: "colors",
-    label: "Колір рамок",
-    description: "Колір розділових ліній і рамок навколо полів/карток.",
+    labelKey: "designSettings.borderColor.label",
+    descriptionKey: "designSettings.borderColor.description",
     type: "color",
     cssVar: "--border"
   },
   {
     key: "cornerRadius",
     category: "shape",
-    label: "Округлення карток (px)",
-    description: "Радіус заокруглення великих елементів -- карток, модальних вікон.",
+    labelKey: "designSettings.cornerRadius.label",
+    descriptionKey: "designSettings.cornerRadius.description",
     type: "length",
     cssVar: "--radius",
     min: 0,
@@ -78,8 +87,8 @@ export const DESIGN_SETTINGS = [
   {
     key: "cornerRadiusSmall",
     category: "shape",
-    label: "Округлення кнопок і полів (px)",
-    description: "Радіус заокруглення дрібніших елементів -- кнопок, полів вводу, бейджів.",
+    labelKey: "designSettings.cornerRadiusSmall.label",
+    descriptionKey: "designSettings.cornerRadiusSmall.description",
     type: "length",
     cssVar: "--radius-sm",
     min: 0,
@@ -88,16 +97,16 @@ export const DESIGN_SETTINGS = [
   {
     key: "fontFamily",
     category: "typography",
-    label: "Шрифт інтерфейсу",
-    description: "CSS-стек шрифтів (через кому), яким набирається весь текст інтерфейсу.",
+    labelKey: "designSettings.fontFamily.label",
+    descriptionKey: "designSettings.fontFamily.description",
     type: "text",
     cssVar: "--font-family"
   },
   {
     key: "fontSizeBase",
     category: "typography",
-    label: "Базовий розмір шрифту (px)",
-    description: "Базовий розмір тексту, від якого відносно масштабуються заголовки й дрібніші елементи.",
+    labelKey: "designSettings.fontSizeBase.label",
+    descriptionKey: "designSettings.fontSizeBase.description",
     type: "length",
     cssVar: "--font-size-base",
     min: 11,
@@ -106,8 +115,8 @@ export const DESIGN_SETTINGS = [
   {
     key: "contentMaxWidth",
     category: "layout",
-    label: "Максимальна ширина сторінки (px)",
-    description: "На широких екранах увесь вміст (шапка, сайдбар, основна панель) центрується в межах цієї ширини замість розтягування на весь монітор.",
+    labelKey: "designSettings.contentMaxWidth.label",
+    descriptionKey: "designSettings.contentMaxWidth.description",
     type: "length",
     cssVar: "--content-max-width",
     min: 800,
@@ -116,8 +125,8 @@ export const DESIGN_SETTINGS = [
   {
     key: "sidebarWidth",
     category: "layout",
-    label: "Ширина бічної панелі (px)",
-    description: "Ширина сайдбара з чатами й папками зліва. Занадто мале значення може обрізати текст у списку контактів.",
+    labelKey: "designSettings.sidebarWidth.label",
+    descriptionKey: "designSettings.sidebarWidth.description",
     type: "length",
     cssVar: "--sidebar-width",
     min: 200,
@@ -126,76 +135,76 @@ export const DESIGN_SETTINGS = [
   {
     key: "sidebarSide",
     category: "layout",
-    label: "Бік бічної панелі",
-    description: "На якому боці екрана розташований сайдбар із чатами й папками.",
+    labelKey: "designSettings.sidebarSide.label",
+    descriptionKey: "designSettings.sidebarSide.description",
     type: "choice",
     options: ["left", "right"],
-    optionLabels: { left: "Зліва", right: "Справа" },
+    optionLabelKeys: { left: "designSettings.side.left", right: "designSettings.side.right" },
     rootAttribute: "sidebarSide"
   },
   {
     key: "toolbarSide",
     category: "layout",
-    label: "Бік панелі розмови",
-    description: "На якому боці панелі розмови розташована назва чату (зліва) відносно статусу з'єднання й запрошення (справа).",
+    labelKey: "designSettings.toolbarSide.label",
+    descriptionKey: "designSettings.toolbarSide.description",
     type: "choice",
     options: ["left", "right"],
-    optionLabels: { left: "Зліва", right: "Справа" },
+    optionLabelKeys: { left: "designSettings.side.left", right: "designSettings.side.right" },
     rootAttribute: "toolbarSide"
   },
   {
     key: "headerControlsOrder",
     category: "layout",
-    label: "Порядок елементів у шапці",
-    description: "У якому порядку розташовані кнопки в правій частині шапки сайту.",
+    labelKey: "designSettings.headerControlsOrder.label",
+    descriptionKey: "designSettings.headerControlsOrder.description",
     type: "order",
     // Array order here IS the stylesheet default -- matches client/index.html's
     // actual DOM order for these elements exactly, so "no override" naturally
     // renders identically to this list, no special-casing needed on reset.
     items: [
-      { key: "headerCallControls", label: "Дзвінок / камера / мікрофон", selector: "#header-call-controls" },
-      { key: "langSelect", label: "Вибір мови", selector: "#lang-select" },
-      { key: "themeToggle", label: "Перемикач теми", selector: "#theme-toggle" },
-      { key: "settingsGear", label: "Шестерня налаштувань", selector: ".settings-wrap" }
+      { key: "headerCallControls", labelKey: "designSettings.headerControlsOrder.item.headerCallControls", selector: "#header-call-controls" },
+      { key: "langSelect", labelKey: "designSettings.headerControlsOrder.item.langSelect", selector: "#lang-select" },
+      { key: "themeToggle", labelKey: "designSettings.headerControlsOrder.item.themeToggle", selector: "#theme-toggle" },
+      { key: "settingsGear", labelKey: "designSettings.headerControlsOrder.item.settingsGear", selector: ".settings-wrap" }
     ]
   },
   {
     key: "callControls",
     category: "visibility",
-    label: "Кнопки відеодзвінка в шапці",
-    description: "Іконки дзвінка/камери/мікрофона, що з'являються в шапці під час розмови.",
+    labelKey: "designSettings.callControls.label",
+    descriptionKey: "designSettings.callControls.description",
     type: "boolean",
     selector: "#header-call-controls"
   },
   {
     key: "sidebarSearch",
     category: "visibility",
-    label: "Пошук у бічній панелі",
-    description: "Поле пошуку контактів, груп і папок над списком чатів.",
+    labelKey: "designSettings.sidebarSearch.label",
+    descriptionKey: "designSettings.sidebarSearch.description",
     type: "boolean",
     selector: ".sidebar-search"
   },
   {
     key: "sidebarFilters",
     category: "visibility",
-    label: "Фільтри списку чатів",
-    description: "Чипи \"Усі\"/\"Верифіковані\"/\"Групи\" над списком контактів.",
+    labelKey: "designSettings.sidebarFilters.label",
+    descriptionKey: "designSettings.sidebarFilters.description",
     type: "boolean",
     selector: ".sidebar-filters"
   },
   {
     key: "folderTree",
     category: "visibility",
-    label: "Дерево папок",
-    description: "Список папок для сортування чатів у бічній панелі.",
+    labelKey: "designSettings.folderTree.label",
+    descriptionKey: "designSettings.folderTree.description",
     type: "boolean",
     selector: "#folder-tree"
   },
   {
     key: "proofsCheckBlock",
     category: "visibility",
-    label: "Блок перевірки доказів ідентичності",
-    description: "Кнопка \"Перевірити зараз\" і статус останньої перевірки доказів у бічній панелі.",
+    labelKey: "designSettings.proofsCheckBlock.label",
+    descriptionKey: "designSettings.proofsCheckBlock.description",
     type: "boolean",
     selector: "#proofs-check-block"
   }

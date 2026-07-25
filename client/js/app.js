@@ -174,6 +174,15 @@ export function initApp(doc, options) {
     langSelect.addEventListener("change", () => {
       setLocale(langSelect.value);
       applyTranslations(doc);
+      // Section C6 (specs/reviews/spirit-evaluation-triage.md):
+      // renderSettingsRegistry()/renderDesignSettings() read entry.labelKey/
+      // descriptionKey through t() at render time, but applyTranslations()
+      // above only touches elements with a data-i18n attribute -- these two
+      // panels are built imperatively and carry none, so without this call
+      // they'd keep showing the PREVIOUS locale's text until the user
+      // happened to edit or reset a field.
+      renderSettingsRegistry();
+      renderDesignSettings();
     });
   }
 
@@ -2455,7 +2464,7 @@ export function initApp(doc, options) {
       const label = doc.createElement("label");
       label.className = "field";
       const labelText = doc.createElement("span");
-      labelText.textContent = entry.label;
+      labelText.textContent = t(entry.labelKey);
       label.appendChild(labelText);
       const input = doc.createElement("input");
       input.type = "number";
@@ -2467,7 +2476,7 @@ export function initApp(doc, options) {
       row.appendChild(label);
       const description = doc.createElement("p");
       description.className = "hint-text";
-      description.textContent = entry.description;
+      description.textContent = t(entry.descriptionKey);
       row.appendChild(description);
       const resetBtn = doc.createElement("button");
       resetBtn.type = "button";
@@ -2531,7 +2540,7 @@ export function initApp(doc, options) {
       const label = doc.createElement("label");
       label.className = "field";
       const labelText = doc.createElement("span");
-      labelText.textContent = entry.label;
+      labelText.textContent = t(entry.labelKey);
       label.appendChild(labelText);
 
       const stored = getDesignSetting(entry.key);
@@ -2546,7 +2555,7 @@ export function initApp(doc, options) {
         for (const option of entry.options) {
           const optionBtn = doc.createElement("button");
           optionBtn.type = "button";
-          optionBtn.textContent = entry.optionLabels[option] || option;
+          optionBtn.textContent = entry.optionLabelKeys[option] ? t(entry.optionLabelKeys[option]) : option;
           optionBtn.className = option === currentValue ? "chip chip-active" : "chip";
           optionBtn.dataset.designChoiceKey = entry.key;
           optionBtn.dataset.designChoiceValue = option;
@@ -2557,7 +2566,7 @@ export function initApp(doc, options) {
 
         const description = doc.createElement("p");
         description.className = "hint-text";
-        description.textContent = entry.description;
+        description.textContent = t(entry.descriptionKey);
         row.appendChild(description);
 
         const resetBtn = doc.createElement("button");
@@ -2579,7 +2588,7 @@ export function initApp(doc, options) {
           const itemRow = doc.createElement("div");
           itemRow.className = "order-list-item";
           const itemLabel = doc.createElement("span");
-          itemLabel.textContent = item.label;
+          itemLabel.textContent = t(item.labelKey);
           itemRow.appendChild(itemLabel);
           const upBtn = doc.createElement("button");
           upBtn.type = "button";
@@ -2606,7 +2615,7 @@ export function initApp(doc, options) {
 
         const description = doc.createElement("p");
         description.className = "hint-text";
-        description.textContent = entry.description;
+        description.textContent = t(entry.descriptionKey);
         row.appendChild(description);
 
         const resetBtn = doc.createElement("button");
@@ -2643,7 +2652,7 @@ export function initApp(doc, options) {
 
       const description = doc.createElement("p");
       description.className = "hint-text";
-      description.textContent = entry.description;
+      description.textContent = t(entry.descriptionKey);
       row.appendChild(description);
 
       const resetBtn = doc.createElement("button");

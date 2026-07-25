@@ -1375,6 +1375,30 @@ describe("theme and language switchers (Section U2)", () => {
     expect(document.getElementById("account-heading").textContent).toBe("Konto");
   });
 
+  // Section C6 (specs/reviews/spirit-evaluation-triage.md): settingsRegistry.js/
+  // designSettingsRegistry.js labels were converted to i18n keys, but the
+  // renderers that read them are only invoked on init/edit/reset -- NOT
+  // on a language switch, so they were still showing stale-locale text
+  // until the user happened to touch a field.
+  it("a language switch re-renders SETTINGS/DESIGN_SETTINGS labels too, not just data-i18n static text", async () => {
+    initApp(document, { locale: "uk" });
+
+    const list = document.getElementById("settings-registry-list");
+    const firstLabel = list.querySelector(".settings-row .field span");
+    expect(firstLabel.textContent).toBe("Таймаут ICE-з'єднання (мс)");
+
+    const designList = document.getElementById("design-settings-list");
+    const firstDesignLabel = designList.querySelector(".settings-row .field span");
+    expect(firstDesignLabel.textContent).toBe("Акцентний колір");
+
+    const langSelect = document.getElementById("lang-select");
+    langSelect.value = "en";
+    langSelect.dispatchEvent(new Event("change"));
+
+    expect(list.querySelector(".settings-row .field span").textContent).toBe("ICE connection timeout (ms)");
+    expect(designList.querySelector(".settings-row .field span").textContent).toBe("Accent color");
+  });
+
   it("a language switch must NOT clobber runtime content (fingerprint, live status)", async () => {
     generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
     fingerprint.mockResolvedValue("live-fingerprint");

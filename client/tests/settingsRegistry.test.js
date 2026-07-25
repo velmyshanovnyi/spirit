@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from "vitest";
 import { SETTINGS, getSetting, setSetting, resetSetting, resetAllSettings } from "../js/settingsRegistry.js";
+import { t, setLocale } from "../js/i18n.js";
 
 beforeEach(() => {
   localStorage.clear();
@@ -70,8 +71,8 @@ describe("SETTINGS registry shape", () => {
     for (const entry of SETTINGS) {
       expect(entry.key).toBeTruthy();
       expect(entry.category).toBeTruthy();
-      expect(entry.label).toBeTruthy();
-      expect(entry.description).toBeTruthy();
+      expect(entry.labelKey).toBeTruthy();
+      expect(entry.descriptionKey).toBeTruthy();
       expect(entry.type).toBe("number");
       expect(typeof entry.default).toBe("number");
       expect(typeof entry.min).toBe("number");
@@ -82,5 +83,21 @@ describe("SETTINGS registry shape", () => {
   it("has no duplicate keys", () => {
     const keys = SETTINGS.map((entry) => entry.key);
     expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  // Section C6 (specs/reviews/spirit-evaluation-triage.md): labels/
+  // descriptions used to be hardcoded Ukrainian strings baked directly into
+  // the registry -- unreachable from the language switcher. Every entry's
+  // labelKey/descriptionKey must resolve to an actual (non-key-echoing)
+  // translation in both en and uk.
+  it("every labelKey/descriptionKey resolves to a real translation in en and uk", () => {
+    for (const locale of ["en", "uk"]) {
+      setLocale(locale);
+      for (const entry of SETTINGS) {
+        expect(t(entry.labelKey)).not.toBe(entry.labelKey);
+        expect(t(entry.descriptionKey)).not.toBe(entry.descriptionKey);
+      }
+    }
+    setLocale("en");
   });
 });

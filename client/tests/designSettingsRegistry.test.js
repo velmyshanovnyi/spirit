@@ -8,6 +8,7 @@ import {
   resetAllDesignSettings,
   applyDesignSettings
 } from "../js/designSettingsRegistry.js";
+import { t, setLocale } from "../js/i18n.js";
 
 beforeEach(() => {
   localStorage.clear();
@@ -234,19 +235,22 @@ describe("DESIGN_SETTINGS registry shape", () => {
     for (const entry of DESIGN_SETTINGS) {
       expect(entry.key).toBeTruthy();
       expect(entry.category).toBeTruthy();
-      expect(entry.label).toBeTruthy();
-      expect(entry.description).toBeTruthy();
+      expect(entry.labelKey).toBeTruthy();
+      expect(entry.descriptionKey).toBeTruthy();
       expect(["color", "length", "text", "boolean", "choice", "order"]).toContain(entry.type);
       if (entry.type === "boolean") {
         expect(entry.selector).toBeTruthy();
       } else if (entry.type === "choice") {
         expect(Array.isArray(entry.options) && entry.options.length >= 2).toBe(true);
         expect(entry.rootAttribute).toBeTruthy();
+        for (const option of entry.options) {
+          expect(entry.optionLabelKeys[option]).toBeTruthy();
+        }
       } else if (entry.type === "order") {
         expect(Array.isArray(entry.items) && entry.items.length >= 2).toBe(true);
         for (const item of entry.items) {
           expect(item.key).toBeTruthy();
-          expect(item.label).toBeTruthy();
+          expect(item.labelKey).toBeTruthy();
           expect(item.selector).toBeTruthy();
         }
       } else {
@@ -258,5 +262,30 @@ describe("DESIGN_SETTINGS registry shape", () => {
   it("has no duplicate keys", () => {
     const keys = DESIGN_SETTINGS.map((entry) => entry.key);
     expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  // Section C6 (specs/reviews/spirit-evaluation-triage.md): same fix as
+  // SETTINGS -- labels/descriptions (plus choice optionLabels and order
+  // item labels) used to be hardcoded Ukrainian strings, unreachable from
+  // the language switcher.
+  it("every labelKey/descriptionKey (and choice/order sub-labels) resolves to a real translation in en and uk", () => {
+    for (const locale of ["en", "uk"]) {
+      setLocale(locale);
+      for (const entry of DESIGN_SETTINGS) {
+        expect(t(entry.labelKey)).not.toBe(entry.labelKey);
+        expect(t(entry.descriptionKey)).not.toBe(entry.descriptionKey);
+        if (entry.type === "choice") {
+          for (const option of entry.options) {
+            expect(t(entry.optionLabelKeys[option])).not.toBe(entry.optionLabelKeys[option]);
+          }
+        }
+        if (entry.type === "order") {
+          for (const item of entry.items) {
+            expect(t(item.labelKey)).not.toBe(item.labelKey);
+          }
+        }
+      }
+    }
+    setLocale("en");
   });
 });

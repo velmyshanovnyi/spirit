@@ -16,12 +16,18 @@
 
 const STORAGE_PREFIX = "spirit.settings.";
 
+// Section C6 (specs/reviews/spirit-evaluation-triage.md): label/description
+// used to be hardcoded Ukrainian literals baked into this registry --
+// unreachable from the language switcher regardless of the user's chosen
+// locale. Every entry now carries labelKey/descriptionKey pointing into
+// i18n.js's MESSAGES (settings.<key>.label / settings.<key>.description);
+// renderSettingsRegistry() in app.js resolves them via t() at render time.
 export const SETTINGS = [
   {
     key: "iceTimeoutMs",
     category: "connection",
-    label: "Таймаут ICE-з'єднання (мс)",
-    description: "Скільки часу чекати встановлення WebRTC-з'єднання (збір ICE-кандидатів), перш ніж показати помилку.",
+    labelKey: "settings.iceTimeoutMs.label",
+    descriptionKey: "settings.iceTimeoutMs.description",
     type: "number",
     default: 15000,
     min: 1000,
@@ -30,8 +36,8 @@ export const SETTINGS = [
   {
     key: "answerWaitTimeoutMs",
     category: "connection",
-    label: "Таймаут очікування відповіді (мс)",
-    description: "Скільки часу ініціатор чату чекає, поки співрозмовник прийме запрошення, перш ніж повідомити про тайм-аут.",
+    labelKey: "settings.answerWaitTimeoutMs.label",
+    descriptionKey: "settings.answerWaitTimeoutMs.description",
     type: "number",
     default: 5 * 60 * 1000,
     min: 5000,
@@ -40,8 +46,8 @@ export const SETTINGS = [
   {
     key: "proofRecheckIntervalMs",
     category: "identity",
-    label: "Інтервал автоперевірки доказів (мс)",
-    description: "Як часто у фоні (поки вкладка відкрита) автоматично перевіряються опубліковані докази ідентичності контактів.",
+    labelKey: "settings.proofRecheckIntervalMs.label",
+    descriptionKey: "settings.proofRecheckIntervalMs.description",
     type: "number",
     default: 24 * 60 * 60 * 1000,
     min: 60 * 1000,
@@ -50,8 +56,8 @@ export const SETTINGS = [
   {
     key: "proofFailureThreshold",
     category: "identity",
-    label: "Поріг послідовних невдач перевірки",
-    description: "Скільки послідовних невдалих перевірок доказу поспіль, перш ніж показати його як \"не вдалося підтвердити\" в UI.",
+    labelKey: "settings.proofFailureThreshold.label",
+    descriptionKey: "settings.proofFailureThreshold.description",
     type: "number",
     default: 3,
     min: 1,
@@ -60,8 +66,8 @@ export const SETTINGS = [
   {
     key: "fileSizeWarningBytes",
     category: "fileTransfer",
-    label: "Поріг попередження про розмір файлу (байти)",
-    description: "Розмір файлу, починаючи з якого перед надсиланням показується попередження (файл усе одно надсилається, це не жорсткий ліміт).",
+    labelKey: "settings.fileSizeWarningBytes.label",
+    descriptionKey: "settings.fileSizeWarningBytes.description",
     type: "number",
     default: 100 * 1024 * 1024,
     min: 1024 * 1024,
@@ -70,8 +76,8 @@ export const SETTINGS = [
   {
     key: "fileChunkSize",
     category: "fileTransfer",
-    label: "Розмір частини файлу (байти)",
-    description: "На частини якого розміру розбивається файл перед надсиланням через DataChannel. Більші частини -- менше накладних витрат, але довша затримка перед тим, як приймач побачить прогрес.",
+    labelKey: "settings.fileChunkSize.label",
+    descriptionKey: "settings.fileChunkSize.description",
     type: "number",
     default: 16 * 1024,
     min: 4 * 1024,
@@ -80,8 +86,8 @@ export const SETTINGS = [
   {
     key: "bufferedAmountHighThresholdBytes",
     category: "fileTransfer",
-    label: "Поріг зворотного тиску каналу (байти)",
-    description: "Коли скільки байтів чекає відправки в DataChannel, передача файлу призупиняється, поки черга не звільниться -- захищає від переповнення внутрішнього буфера WebRTC на великих файлах.",
+    labelKey: "settings.bufferedAmountHighThresholdBytes.label",
+    descriptionKey: "settings.bufferedAmountHighThresholdBytes.description",
     type: "number",
     default: 1024 * 1024,
     min: 64 * 1024,
@@ -90,8 +96,8 @@ export const SETTINGS = [
   {
     key: "maxRecentAccounts",
     category: "accounts",
-    label: "Кількість останніх акаунтів",
-    description: "Скільки останніх акаунтів пам'ятається локально в цьому браузері для швидкого вибору на екрані входу.",
+    labelKey: "settings.maxRecentAccounts.label",
+    descriptionKey: "settings.maxRecentAccounts.description",
     type: "number",
     default: 10,
     min: 1,
@@ -100,8 +106,8 @@ export const SETTINGS = [
   {
     key: "floatingVideoDefaultWidth",
     category: "ui",
-    label: "Ширина плаваючого відео за замовчуванням (px)",
-    description: "Початкова ширина плаваючого вікна відеодзвінка -- лише поки ви жодного разу не змінювали розмір самостійно (після цього запам'ятовується ваш власний розмір).",
+    labelKey: "settings.floatingVideoDefaultWidth.label",
+    descriptionKey: "settings.floatingVideoDefaultWidth.description",
     type: "number",
     default: 320,
     min: 160,
@@ -110,8 +116,8 @@ export const SETTINGS = [
   {
     key: "floatingVideoDefaultHeight",
     category: "ui",
-    label: "Висота плаваючого відео за замовчуванням (px)",
-    description: "Початкова висота плаваючого вікна відеодзвінка -- лише поки ви жодного разу не змінювали розмір самостійно.",
+    labelKey: "settings.floatingVideoDefaultHeight.label",
+    descriptionKey: "settings.floatingVideoDefaultHeight.description",
     type: "number",
     default: 240,
     min: 120,
@@ -120,8 +126,8 @@ export const SETTINGS = [
   {
     key: "pushTtlSeconds",
     category: "notifications",
-    label: "Час життя push-сповіщення (сек)",
-    description: "Як довго push-сервіс намагається доставити сповіщення офлайн-отримувачу, перш ніж відмовитись від спроби.",
+    labelKey: "settings.pushTtlSeconds.label",
+    descriptionKey: "settings.pushTtlSeconds.description",
     type: "number",
     default: 86400,
     min: 60,
