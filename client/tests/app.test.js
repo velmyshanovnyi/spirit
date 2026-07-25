@@ -2115,6 +2115,29 @@ describe("portable cross-node login (Section H4)", () => {
 });
 
 describe("btn-google-verify", () => {
+  // Section C1 (specs/reviews/spirit-evaluation-triage.md): the GSI script
+  // is now lazily injected on first click rather than loaded unconditionally
+  // in <head> -- jsdom never actually fetches it, so tests must find the
+  // injected <script> tag and fire its onload manually to unblock the
+  // click handler's await.
+  async function resolveGoogleGsiLoad() {
+    // document.head is NOT reset between tests (only body.innerHTML is,
+    // in the top-level beforeEach) -- a prior test's script tag can still
+    // be sitting there, so take the LAST matching one (this test's own),
+    // not the first.
+    const script = await vi.waitFor(() => {
+      const all = document.head.querySelectorAll('script[src="https://accounts.google.com/gsi/client"]');
+      if (all.length === 0) throw new Error("GSI script not injected yet");
+      return all[all.length - 1];
+    });
+    script.onload();
+  }
+
+  it("does not inject the Google Sign-In script until the button is actually clicked", async () => {
+    initApp(document, { locale: "uk" });
+    expect(document.head.querySelector('script[src="https://accounts.google.com/gsi/client"]')).toBeNull();
+  });
+
   it("refuses to start Google verification before an account exists", async () => {
     initApp(document, { locale: "uk" });
     document.getElementById("btn-google-verify").click();
@@ -2135,6 +2158,7 @@ describe("btn-google-verify", () => {
     await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
 
     document.getElementById("btn-google-verify").click();
+    await resolveGoogleGsiLoad();
     await vi.waitFor(() =>
       expect(document.getElementById("google-verify-status").textContent).toMatch(/user@gmail\.com/)
     );
@@ -2157,6 +2181,7 @@ describe("btn-google-verify", () => {
     await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
 
     document.getElementById("btn-google-verify").click();
+    await resolveGoogleGsiLoad();
     await vi.waitFor(() =>
       expect(document.getElementById("google-verify-status").textContent).toMatch(/Nonce mismatch/)
     );

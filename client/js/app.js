@@ -4604,6 +4604,32 @@ export function initApp(doc, options) {
     router.navigate(postIdentityRoute());
   });
 
+  // Section C1 (specs/reviews/spirit-evaluation-triage.md): the Google GSI
+  // script used to load unconditionally on every page visit, regardless of
+  // whether the user ever touches Google verification -- a third-party
+  // request Google sees on every single load. Lazily injected here, on the
+  // FIRST click of "Підтвердити через Google" only, and cached (module-scope
+  // promise, not per-call) so a second click doesn't inject a second
+  // <script> tag or re-fetch.
+  let googleGsiLoadPromise = null;
+  function ensureGoogleGsiLoaded() {
+    if (doc.defaultView.google?.accounts?.id) return Promise.resolve();
+    if (googleGsiLoadPromise) return googleGsiLoadPromise;
+    googleGsiLoadPromise = new Promise((resolve, reject) => {
+      const script = doc.createElement("script");
+      script.src = "https://accounts.google.com/gsi/client";
+      script.async = true;
+      script.defer = true;
+      script.onload = () => resolve();
+      script.onerror = () => {
+        googleGsiLoadPromise = null; // allow retry on the next click
+        reject(new Error("Failed to load the Google Sign-In script"));
+      };
+      doc.head.appendChild(script);
+    });
+    return googleGsiLoadPromise;
+  }
+
   withBusyButton(el("btn-google-verify"), async () => {
     if (!state.senderKey) {
       setGoogleStatus(t("status.createAccountFirst"));
@@ -4620,6 +4646,7 @@ export function initApp(doc, options) {
     // the popup is open -- matches the pattern already used in btn-initiate.
     const senderKey = state.senderKey;
     try {
+      await ensureGoogleGsiLoaded();
       // The identity fingerprint doubles as the OIDC nonce, cryptographically
       // binding the returned ID token to this specific identity key
       // (docs/oauth-verification.md).
