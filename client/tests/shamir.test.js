@@ -49,6 +49,23 @@ describe("GF(256) arithmetic", () => {
   });
 });
 
+describe("Section A2 (specs/reviews/spirit-evaluation-triage.md): splitSecret's share shape carries threshold/totalShares", () => {
+  // recoveryShare.js's encodeShareAsText/buildRecoveryShareAnnounce read
+  // share.threshold/share.totalShares directly off whatever splitSecret
+  // returns -- without these fields every real share text-encodes as
+  // "spirit-share:1.undefined.undefined.<base64>" and never decodes.
+  it("every returned share carries its own threshold and totalShares, not just {x, y}", () => {
+    const secret = randomBytes(16);
+    const shares = splitSecret(secret, { threshold: 3, shares: 5 });
+    for (const share of shares) {
+      expect(share.threshold).toBe(3);
+      expect(share.totalShares).toBe(5);
+      expect(typeof share.x).toBe("number");
+      expect(share.y).toBeInstanceOf(Uint8Array);
+    }
+  });
+});
+
 describe("splitSecret / combineShares round-trip", () => {
   it("recovers exact original bytes from exactly threshold shares", () => {
     const secret = randomBytes(32);

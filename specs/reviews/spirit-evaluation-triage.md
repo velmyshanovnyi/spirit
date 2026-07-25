@@ -54,7 +54,7 @@
   - [ ] **Impl**: TBD
   - [ ] **Exec review**: TBD
 
-- [ ] **A2. Соціальне відновлення (Shamir) повністю нефункціональне — `splitSecret` не повертає `threshold`/`totalShares`.**
+- [x] **A2. Соціальне відновлення (Shamir) повністю нефункціональне — `splitSecret` не повертає `threshold`/`totalShares`. ВИПРАВЛЕНО (коміт нижче).**
   Підтверджено читанням коду напряму: `client/js/shamir.js:143`
   (`splitSecret`) повертає `xs.map((x, i) => ({ x, y: shareYs[i] }))` —
   РІВНО два поля, `x` і `y`. Але `client/js/recoveryShare.js`
@@ -70,10 +70,33 @@
   повертати `{x, y, threshold, totalShares}` (значення `threshold`/
   `shares`-параметрів уже є в області видимості функції). Заразом варто
   додати 4-байтову контрольну суму в текстовий формат (§4 звіту,
-  "Частки Шаміра не автентифіковані") — та сама секція коду.
-  - [ ] **Tests**: TBD (юніт-тест на `splitSecret`'s повне поле поверненого об'єкта; round-trip тест `decodeShareFromText(encodeShareAsText(splitSecret(...)[0]))` має повертати НЕ `null`)
-  - [ ] **Impl**: TBD
-  - [ ] **Exec review**: TBD
+  "Частки Шаміра не автентифіковані") — контрольну суму НЕ додано цим
+  фіксом (окрема зміна wire-формату, свідомо не змішана з терміновим
+  фіксом одного бага — "один бег-фікс = один коміт").
+  - [x] **Tests**: `client/tests/shamir.test.js` — новий тест підтверджує
+        кожна повернена частка несе власні `threshold`/`totalShares`
+        (не лише `{x,y}`). `client/tests/recoveryShare.test.js` — 2 нових
+        тести, що вперше проганяють РЕАЛЬНИЙ `splitSecret()` (не
+        заготовлений вручну `SHARE`-мок, який маскував баг) через повний
+        цикл `encodeShareAsText`→`decodeShareFromText` і
+        `buildRecoveryShareAnnounce`→`parseRecoveryShareAnnounce`→
+        `combineShares`. Підтверджено RED до фіксу (реальний вивід
+        `"spirit-share:1.undefined.undefined...."`, точно як описано в
+        оцінці). Разом: 34/34 у двох файлах, 344/344 разом з `app.test.js`
+        (`splitSecret` там не мокнутий, використовується напряму).
+  - [x] **Impl**: `client/js/shamir.js:143` — `splitSecret` тепер повертає
+        `{x, y, threshold, totalShares: shares}` замість `{x, y}` (значення
+        вже були в області видимості функції як параметри `threshold`/
+        `shares`).
+  - [x] **Exec review**: самоперевірка — (а) жоден наявний виклик
+        `combineShares` не постраждав (вона читає лише `share.x`/`share.y`,
+        нові поля ігнорує); (б) `client/tests/app.test.js`'s допоміжна
+        функція (рядок ~1940) й далі вручну підставляє `threshold`/
+        `totalShares` при виклику `encodeShareAsText` — тепер це
+        надлишково (значення вже коректні від `splitSecret`), але
+        нешкідливо, не займано в цьому фіксі; (в) 344/344 у трьох
+        файлах (`app.test.js`+`shamir.test.js`+`recoveryShare.test.js`),
+        без регресій.
 
 - [ ] **A3. Повідомлення, набране до завершення нового рукостискання, іде ПОПЕРЕДНЬОМУ співрозмовнику.**
   Підтверджено читанням коду напряму (і власним досвідом сьогоднішньої

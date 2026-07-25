@@ -140,7 +140,14 @@ export function splitSecret(secretBytes, { threshold, shares }) {
     }
   }
 
-  return xs.map((x, i) => ({ x, y: shareYs[i] }));
+  // Section A2 (specs/reviews/spirit-evaluation-triage.md): every consumer
+  // of a share -- encodeShareAsText/buildRecoveryShareAnnounce in
+  // recoveryShare.js -- reads share.threshold/share.totalShares directly.
+  // Omitting them here (as this function previously did) meant every real
+  // share text-encoded as "spirit-share:1.undefined.undefined...." and
+  // never decoded -- masked because the test suite's own SHARE fixture
+  // added these fields by hand instead of sourcing them from this function.
+  return xs.map((x, i) => ({ x, y: shareYs[i], threshold, totalShares: shares }));
 }
 
 /**
