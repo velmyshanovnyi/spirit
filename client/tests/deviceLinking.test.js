@@ -13,7 +13,8 @@ import {
   revokeDevice,
   isDeviceCertificateAllowed,
   acceptNewerDeviceList,
-  appendDeviceToList
+  appendDeviceToList,
+  deriveLinkVerificationCode
 } from "../js/deviceLinking.js";
 import { hasStoredProfile, loadPermanentProfile } from "../js/profile.js";
 import { get } from "../js/db.js";
@@ -141,6 +142,20 @@ describe("device linking protocol (link request / grant / apply)", () => {
     // The wire form must be the device's actual SPKI.
     const spki = new Uint8Array(await crypto.subtle.exportKey("spki", device.publicKey));
     expect(request.devicePubkey).toBe(btoa(String.fromCharCode(...spki)));
+  });
+
+  // Section B6 (specs/reviews/spirit-evaluation-triage.md): an optional
+  // extra factor alongside the mandatory SAS confirmation below -- NOT a
+  // replacement for it (a PIN echoed back over the same channel an active
+  // MITM controls offers no protection on its own).
+  it("createLinkRequest carries an optional pin when provided, omits it when not", async () => {
+    const device = await generateDeviceKeyPair();
+
+    const withoutPin = await createLinkRequest(device.publicKey);
+    expect(withoutPin.pin).toBeUndefined();
+
+    const withPin = await createLinkRequest(device.publicKey, { pin: "1234" });
+    expect(withPin.pin).toBe("1234");
   });
 
   it("createLinkGrant signs a certificate binding the requested device key and carries identity + contacts", async () => {
@@ -350,5 +365,39 @@ describe("verifyDeviceCertificate (malformed input)", () => {
         signature: "AAAA"
       })
     ).toBe(false);
+  });
+});
+
+// Section B6 (specs/reviews/spirit-evaluation-triage.md): the actual fix --
+// linking used to hand over the raw identity private key to ANY device
+// that produced a well-formed request over the invite-token'd channel,
+// with no human confirmation step. deriveLinkVerificationCode() is the
+// short authentication string (SAS) both the primary and the new device
+// compute independently from the channel's own ECDH public keys (already
+// exchanged in plaintext via signaling, so no new secret to leak) --
+// app.js now REQUIRES the human to compare this code on both screens and
+// click "confirm" before createLinkGrant() is ever called (see app.test.js
+// for the full flow-level assertion; this file only tests the pure
+// function).
+describe("deriveLinkVerificationCode", () => {
+  it("is deterministic and order-independent (primary/joiner get the same code regardless of who is A or B)", async () => {
+    const code1 = await deriveLinkVerificationCode("wire-aaaa", "wire-bbbb");
+    const code2 = await deriveLinkVerificationCode("wire-bbbb", "wire-aaaa");
+    expect(code1).toBe(code2);
+    expect(code1).toMatch(/^\d{6}$/);
+  });
+
+  it("changes if EITHER wire value changes -- an active MITM substituting either ECDH pubkey changes the code", async () => {
+    const base = await deriveLinkVerificationCode("wire-aaaa", "wire-bbbb");
+    const mitmOnA = await deriveLinkVerificationCode("wire-attacker", "wire-bbbb");
+    const mitmOnB = await deriveLinkVerificationCode("wire-aaaa", "wire-attacker");
+    expect(mitmOnA).not.toBe(base);
+    expect(mitmOnB).not.toBe(base);
+  });
+
+  it("is stable across repeated calls with the same inputs", async () => {
+    const a = await deriveLinkVerificationCode("wire-x", "wire-y");
+    const b = await deriveLinkVerificationCode("wire-x", "wire-y");
+    expect(a).toBe(b);
   });
 });

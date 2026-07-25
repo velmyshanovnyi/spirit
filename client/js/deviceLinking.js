@@ -218,12 +218,58 @@ export async function appendDeviceToList(identityRawPrivateKey, currentList, cer
  * First message of the linking handshake, sent by the NEW device over the
  * already-established E2EE channel: announces the device public key the
  * primary should certify. Possession of the invite token (shared
- * out-of-band, docs/accounts.md) is what authorizes this request -- the
- * channel itself carries no other authentication of the new device.
+ * out-of-band, docs/accounts.md) alone used to be treated as sufficient
+ * authorization for the primary to hand over the raw identity key --
+ * Section B6 (specs/reviews/spirit-evaluation-triage.md) closes that: the
+ * primary now REQUIRES the human to compare deriveLinkVerificationCode()
+ * on both screens before sending a grant (app.js), and MAY additionally
+ * require `pin` (out-of-band-shared, e.g. read aloud) to match before even
+ * showing that confirmation -- optional, and not a substitute for the SAS
+ * check, since a PIN echoed back over a channel an active MITM controls
+ * offers no protection on its own.
  */
-export async function createLinkRequest(devicePublicKey) {
+export async function createLinkRequest(devicePublicKey, { pin } = {}) {
   const spki = await crypto.subtle.exportKey("spki", devicePublicKey);
-  return { type: "device-link-request", devicePubkey: bytesToBase64(new Uint8Array(spki)) };
+  const request = { type: "device-link-request", devicePubkey: bytesToBase64(new Uint8Array(spki)) };
+  if (pin !== undefined) request.pin = pin;
+  return request;
+}
+
+/**
+ * Section B6: a short authentication string (SAS) both sides of the
+ * linking channel can compute independently from the channel's OWN ECDH
+ * public keys (state.sessionEcdhWires in app.js) -- already exchanged in
+ * plaintext via signaling, so this derives no new secret and leaks
+ * nothing beyond what a passive observer of the signaling traffic already
+ * sees. Order-independent (sorted before hashing) so it doesn't matter
+ * which side is "local" vs "peer".
+ *
+ * KNOWN LIMITATION (exec-review finding F1, specs/reviews/spirit-evaluation-triage.md):
+ * this code is NOT a full defense against a live, on-path signaling MITM.
+ * Real ZRTP/Signal-style SAS safety relies on one side COMMITTING (hashing)
+ * to its key before seeing the peer's -- here, the primary publishes its
+ * real ECDH key in the offer unconditionally as the very first protocol
+ * step (createOffer, before any joiner exists), so a MITM that intercepts
+ * both legs can choose its own key AFTER learning the target hash and grind
+ * ~2^20 keypairs (this code's ~6-digit space) to find one producing a
+ * matching SAS on both screens -- well within a few minutes on ordinary
+ * hardware, comfortably inside the default answer-wait timeout. This DOES
+ * close the simpler, more common attack the audit described (an attacker
+ * who merely obtained/guessed the invite token asynchronously, with no live
+ * signaling position, can no longer get an automatic grant) -- it does NOT
+ * close a fully active, real-time, resourced signaling attacker. Closing
+ * that requires a commit-then-reveal round added to the linking protocol
+ * (the responding side publishes a hash of its key before the primary
+ * reveals its own), which needs a signaling-protocol change and is tracked
+ * as future work, not implemented here.
+ */
+export async function deriveLinkVerificationCode(wireA, wireB) {
+  const [first, second] = [wireA, wireB].sort();
+  const combined = new TextEncoder().encode(`spirit-link-sas-v1|${first}|${second}`);
+  const digest = await crypto.subtle.digest("SHA-256", combined);
+  const bytes = new Uint8Array(digest);
+  const num = ((bytes[0] << 16) | (bytes[1] << 8) | bytes[2]) % 1000000;
+  return String(num).padStart(6, "0");
 }
 
 /**

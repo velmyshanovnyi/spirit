@@ -260,7 +260,21 @@
           <label class="field"><span data-i18n="label.linkPassphrase">Passphrase профілю:</span>
             <input id="link-passphrase" type="password" autocomplete="current-password">
           </label>
+          <!-- Section B6 (specs/reviews/spirit-evaluation-triage.md): optional
+               extra factor, NOT a substitute for the mandatory SAS confirmation
+               below -- see deviceLinking.js's deriveLinkVerificationCode(). -->
+          <label class="field"><span data-i18n="label.linkPin">PIN (необов'язково):</span>
+            <input id="link-pin" type="text" autocomplete="off">
+          </label>
           <div class="btn-row"><button id="btn-link-device" type="button" data-i18n="btn.linkDevice">Прив'язати новий пристрій</button></div>
+          <div id="link-verification-block" hidden>
+            <p data-i18n="devices.verifyHint">Порівняйте цей код з тим, що показано на новому пристрої, перш ніж підтвердити:</p>
+            <div id="link-verification-code" class="verification-code"></div>
+            <div class="btn-row">
+              <button id="btn-confirm-device-link" type="button" data-i18n="btn.confirmDeviceLink">Коди збігаються -- підтвердити</button>
+              <button id="btn-reject-device-link" type="button" class="btn-link" data-i18n="btn.rejectDeviceLink">Скасувати</button>
+            </div>
+          </div>
         </div>
         <div class="subgroup">
           <h3 data-i18n="devices.new">На новому пристрої</h3>
@@ -268,7 +282,14 @@
           <label class="field"><span data-i18n="label.deviceLocalPassphrase">Passphrase для цього пристрою:</span>
             <input id="device-local-passphrase" type="password" autocomplete="new-password">
           </label>
+          <label class="field"><span data-i18n="label.deviceLinkPin">PIN з основного пристрою (необов'язково):</span>
+            <input id="device-link-pin" type="text" autocomplete="off">
+          </label>
           <div class="btn-row"><button id="btn-join-as-device" type="button" data-i18n="btn.joinAsDevice">Приєднати цей пристрій</button></div>
+          <div id="device-verification-block" hidden>
+            <p data-i18n="devices.verifyHint">Порівняйте цей код з тим, що показано на новому пристрої, перш ніж підтвердити:</p>
+            <div id="device-verification-code" class="verification-code"></div>
+          </div>
         </div>
         <div id="device-link-status" class="status" aria-live="polite"></div>
       </section>

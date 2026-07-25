@@ -20,7 +20,8 @@ import {
   createLinkGrant,
   applyLinkGrant,
   appendDeviceToList,
-  acceptNewerDeviceList
+  acceptNewerDeviceList,
+  deriveLinkVerificationCode
 } from "./deviceLinking.js";
 import { listKeys, get, put } from "./db.js";
 import { createIdentityAnnounce, verifyIdentityAnnounce } from "./identityAnnounce.js";
@@ -426,6 +427,18 @@ export function initApp(doc, options) {
   function resetActiveConnection() {
     if (state.activeConnectionId) state.peers.delete(state.activeConnectionId);
     state.activeConnectionId = null;
+    // Section B6 exec-review finding F2: a pending device-link verification
+    // prompt is scoped to the connection it was shown for -- if the human
+    // leaves it unconfirmed and a NEW connection replaces the active one
+    // (e.g. starting an ordinary chat), the stale "confirm" handler must not
+    // silently send the raw identity key over the NEW session instead of
+    // the one whose SAS code was actually compared.
+    const verificationBlock = el("link-verification-block");
+    if (verificationBlock && !verificationBlock.hidden) {
+      verificationBlock.hidden = true;
+      el("btn-confirm-device-link").onclick = null;
+      el("btn-reject-device-link").onclick = null;
+    }
   }
 
   // Section GC0: transparent proxy so every existing direct read/write of
@@ -4942,6 +4955,9 @@ export function initApp(doc, options) {
     // hand over AND makes linking require passphrase confirmation.
     const identityRaw = await exportRawIdentity(activeProfileId, passphrase);
     el("link-passphrase").value = "";
+    // Section B6: optional extra factor, checked before the SAS confirmation
+    // is even shown -- empty means no PIN required.
+    const configuredPin = el("link-pin").value.trim();
 
     const serverUrl = el("server-url").value;
     const rtcConfig = currentRtcConfig();
@@ -4963,6 +4979,14 @@ export function initApp(doc, options) {
       serverUrl,
       rtcConfig,
       channelOptions: {
+        // Section B6 (specs/reviews/spirit-evaluation-triage.md): a
+        // well-formed device-link-request used to get an automatic grant
+        // (the raw identity private key) with zero human confirmation --
+        // possession of the invite token alone was treated as sufficient
+        // authorization. Now: an optional PIN gate, then a MANDATORY SAS
+        // (deriveLinkVerificationCode) the human must visually compare
+        // against the new device's screen and explicitly confirm before
+        // createLinkGrant() is ever called.
         onDecryptedMessage: async (text) => {
           let message;
           try {
@@ -4972,15 +4996,43 @@ export function initApp(doc, options) {
           }
           if (!message || message.type !== "device-link-request") return;
 
-          const contacts = await snapshotContacts();
-          const grant = await createLinkGrant(identityRaw, message, { contacts });
-          state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify(grant)));
-          // Record the new device in the own signed device list (Section 13):
-          // contacts receiving the updated list will accept the new device.
-          const currentOwnList = (await get("profile", ownDeviceListKey(activeProfileId))) ?? null;
-          const updatedOwnList = await appendDeviceToList(identityRaw, currentOwnList, grant.certificate);
-          await put("profile", ownDeviceListKey(activeProfileId), updatedOwnList);
-          setDeviceLinkStatus(t("link.done"));
+          if (configuredPin && message.pin !== configuredPin) {
+            setDeviceLinkStatus(t("link.pinMismatch"));
+            return;
+          }
+
+          // Section B6 exec-review finding F2: capture the connection this
+          // SAS code actually describes -- resetActiveConnection() clears the
+          // block on any connection change, but this is a defense-in-depth
+          // check against the click handler ever firing against a DIFFERENT
+          // channel/sessionKey than the one whose code the human compared.
+          const linkConnectionId = state.activeConnectionId;
+          const linkChannel = state.channel;
+          const linkSessionKey = state.sessionKey;
+
+          const code = await deriveLinkVerificationCode(
+            state.sessionEcdhWires.localEcdhWire,
+            state.sessionEcdhWires.peerEcdhWire
+          );
+          el("link-verification-code").textContent = code;
+          el("link-verification-block").hidden = false;
+
+          el("btn-confirm-device-link").onclick = async () => {
+            el("link-verification-block").hidden = true;
+            if (state.activeConnectionId !== linkConnectionId) return; // stale -- session changed since this code was shown
+            const contacts = await snapshotContacts();
+            const grant = await createLinkGrant(identityRaw, message, { contacts });
+            linkChannel.send(await encryptMessage(linkSessionKey, JSON.stringify(grant)));
+            // Record the new device in the own signed device list (Section 13):
+            // contacts receiving the updated list will accept the new device.
+            const currentOwnList = (await get("profile", ownDeviceListKey(activeProfileId))) ?? null;
+            const updatedOwnList = await appendDeviceToList(identityRaw, currentOwnList, grant.certificate);
+            await put("profile", ownDeviceListKey(activeProfileId), updatedOwnList);
+            setDeviceLinkStatus(t("link.done"));
+          };
+          el("btn-reject-device-link").onclick = () => {
+            el("link-verification-block").hidden = true;
+          };
         }
       }
     });
@@ -4994,6 +5046,7 @@ export function initApp(doc, options) {
     }
 
     const devicePair = await generateDeviceKeyPair();
+    const pin = el("device-link-pin").value.trim();
 
     // The request can only go out once BOTH the channel is open and the
     // session key is derived; those two complete in either order.
@@ -5001,9 +5054,17 @@ export function initApp(doc, options) {
     const maybeSendLinkRequest = async () => {
       if (linkRequestSent || !state.channel || !state.sessionKey) return;
       linkRequestSent = true;
-      const request = await createLinkRequest(devicePair.publicKey);
+      const request = pin ? await createLinkRequest(devicePair.publicKey, { pin }) : await createLinkRequest(devicePair.publicKey);
       state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify(request)));
       setDeviceLinkStatus(t("device.waitingGrant"));
+      // Section B6: show this device's own SAS code so the human can compare
+      // it against the primary's screen before the primary confirms anything.
+      const code = await deriveLinkVerificationCode(
+        state.sessionEcdhWires.localEcdhWire,
+        state.sessionEcdhWires.peerEcdhWire
+      );
+      el("device-verification-code").textContent = code;
+      el("device-verification-block").hidden = false;
     };
 
     await startJoinerSession({

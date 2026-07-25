@@ -1010,6 +1010,22 @@ button:disabled {
   font-style: italic;
 }
 
+/* Section B6 (specs/reviews/spirit-evaluation-triage.md): the device-linking
+   SAS code both sides must visually compare -- large and monospaced so a
+   digit transposition is easy to catch at a glance. */
+.verification-code {
+  font-family: monospace;
+  font-size: 28px;
+  font-weight: bold;
+  letter-spacing: 4px;
+  text-align: center;
+  padding: 8px;
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
 /* A button styled to read as an inline text link (account create/login
    toggle, de-emphasized quick-chat entry -- Section F2/F3, specs/ui/ephemeral-spirit-mode.md). */
 .btn-link {

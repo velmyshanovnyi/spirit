@@ -33,7 +33,8 @@ vi.mock("../js/deviceLinking.js", () => ({
   createLinkGrant: vi.fn(),
   applyLinkGrant: vi.fn(),
   appendDeviceToList: vi.fn(),
-  acceptNewerDeviceList: vi.fn()
+  acceptNewerDeviceList: vi.fn(),
+  deriveLinkVerificationCode: vi.fn()
 }));
 vi.mock("../js/db.js", () => ({
   listKeys: vi.fn().mockResolvedValue([]),
@@ -176,7 +177,8 @@ import {
   createLinkGrant,
   applyLinkGrant,
   appendDeviceToList,
-  acceptNewerDeviceList
+  acceptNewerDeviceList,
+  deriveLinkVerificationCode
 } from "../js/deviceLinking.js";
 import { createIdentityAnnounce, verifyIdentityAnnounce } from "../js/identityAnnounce.js";
 import {
@@ -314,9 +316,19 @@ const HTML = `
     <div>Ваш ID: <span id="pub-key-display" data-i18n="id.none">не згенеровано</span></div>
     <input id="session-ttl-hours" type="number" value="24">
     <input id="link-passphrase" type="password">
+    <input id="link-pin" type="text">
     <button id="btn-link-device" type="button">Прив'язати новий пристрій</button>
+    <div id="link-verification-block" hidden>
+      <div id="link-verification-code"></div>
+      <button id="btn-confirm-device-link" type="button">Коди збігаються -- підтвердити</button>
+      <button id="btn-reject-device-link" type="button">Скасувати</button>
+    </div>
     <input id="device-local-passphrase" type="password">
+    <input id="device-link-pin" type="text">
     <button id="btn-join-as-device" type="button">Приєднати цей пристрій</button>
+    <div id="device-verification-block" hidden>
+      <div id="device-verification-code"></div>
+    </div>
     <div id="device-link-status"></div>
     <input id="google-client-id" type="text" value="test-client-id">
     <button id="btn-google-verify" type="button">Підтвердити через Google</button>
@@ -4245,6 +4257,9 @@ describe("device-list transport (Section 13)", () => {
     captured.onChannelOpen(channel);
     await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
     await captured.onMessage("ENCRYPTED_REQUEST");
+    // Section B6: the grant is no longer sent automatically -- must confirm.
+    await vi.waitFor(() => expect(document.getElementById("link-verification-block").hidden).toBe(false));
+    document.getElementById("btn-confirm-device-link").click();
 
     await vi.waitFor(() => expect(appendDeviceToList).toHaveBeenCalledWith(identityRaw, heldOwnList, certificate));
     expect(exportRawIdentity).toHaveBeenCalledWith("profile-fp", "my passphrase");
@@ -4444,7 +4459,12 @@ describe("device linking UI", () => {
       expect(exportRawIdentity).not.toHaveBeenCalled();
     });
 
-    it("unlocks the raw identity, creates an invite, and answers a link request with an encrypted grant", async () => {
+    // Section B6 (specs/reviews/spirit-evaluation-triage.md): a well-formed
+    // device-link-request over the invite-token'd channel used to get an
+    // automatic grant (the raw identity private key) with zero human
+    // confirmation. It must now show a SAS code and WAIT for an explicit
+    // "confirm" click before createLinkGrant()/send ever happen.
+    it("shows the verification code and waits for explicit confirmation before granting -- does NOT auto-send", async () => {
       const identityRaw = new Uint8Array([7, 7, 7]);
       exportRawIdentity.mockResolvedValue(identityRaw);
       createPermanentProfile.mockResolvedValue({
@@ -4461,6 +4481,7 @@ describe("device linking UI", () => {
         ecdhPubkey: "peer-ecdh-b64"
       });
       deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+      deriveLinkVerificationCode.mockResolvedValue("246810");
       const linkRequest = { type: "device-link-request", devicePubkey: "DEV_PUB" };
       decryptMessage.mockResolvedValue(JSON.stringify(linkRequest));
       const grant = { type: "device-link-grant", certificate: {}, identityPrivateKey: "RAW_B64", contacts: [] };
@@ -4484,7 +4505,6 @@ describe("device linking UI", () => {
       await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
 
       expect(exportRawIdentity).toHaveBeenCalledWith("profile-fp", "my passphrase");
-      // The secret must not linger in the DOM afterwards.
       expect(document.getElementById("link-passphrase").value).toBe("");
       expect(createInvite).toHaveBeenCalled();
       expect(document.getElementById("room-id").value).toBe("room1");
@@ -4494,11 +4514,183 @@ describe("device linking UI", () => {
 
       // Simulate the new device's encrypted link request arriving.
       await captured.onMessage("ENCRYPTED_REQUEST_PAYLOAD");
+      await vi.waitFor(() => expect(document.getElementById("link-verification-code").textContent).toBe("246810"));
+
+      // The block must be visible and NOTHING sent yet.
+      expect(document.getElementById("link-verification-block").hidden).toBe(false);
+      expect(createLinkGrant).not.toHaveBeenCalled();
+      expect(channel.send).not.toHaveBeenCalled();
+      // Exec-review finding F3: the SAS must be derived from THIS session's
+      // real ECDH wires (own exported pubkey + the peer's wire pubkey from
+      // pollForAnswer), not constants or the same value twice -- a bug that
+      // fed the same wire in twice or ignored the peer's actual key would
+      // make both screens agree unconditionally, silently reinstating B6.
+      expect(deriveLinkVerificationCode).toHaveBeenCalledWith("ECDH_PUB_WIRE", "peer-ecdh-b64");
+
+      document.getElementById("btn-confirm-device-link").click();
       await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith("ENCRYPTED_GRANT"));
 
       expect(createLinkGrant).toHaveBeenCalledWith(identityRaw, linkRequest, { contacts: [] });
       expect(encryptMessage).toHaveBeenCalledWith({ __tag: "session-key" }, JSON.stringify(grant));
       expect(document.getElementById("device-link-status").textContent).toMatch(/прив'язано/);
+      expect(document.getElementById("link-verification-block").hidden).toBe(true);
+    });
+
+    it("rejecting the confirmation never calls createLinkGrant or sends anything", async () => {
+      const identityRaw = new Uint8Array([7, 7, 7]);
+      exportRawIdentity.mockResolvedValue(identityRaw);
+      createPermanentProfile.mockResolvedValue({
+        privateKey: { __tag: "profile-priv" },
+        publicKey: fakePublicKey("profile-pub"),
+        vaultKey: { __tag: "vault-key" }
+      });
+      fingerprint.mockResolvedValue("profile-fp");
+      generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+      createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+      createOffer.mockResolvedValue(undefined);
+      pollForAnswer.mockResolvedValue({
+        answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+        ecdhPubkey: "peer-ecdh-b64"
+      });
+      deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+      deriveLinkVerificationCode.mockResolvedValue("246810");
+      const linkRequest = { type: "device-link-request", devicePubkey: "DEV_PUB" };
+      decryptMessage.mockResolvedValue(JSON.stringify(linkRequest));
+
+      const channel = fakeChannel();
+      let captured;
+      startAsInitiator.mockImplementation((opts) => {
+        captured = opts;
+        return { __fakePc: true };
+      });
+
+      initApp(document, { locale: "uk" });
+      document.getElementById("btn-create-profile").click();
+      document.getElementById("profile-passphrase").value = "pass";
+      document.getElementById("btn-profile-confirm").click();
+      await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001profile-fp"));
+      document.getElementById("link-passphrase").value = "my passphrase";
+      document.getElementById("btn-link-device").click();
+      await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+
+      captured.onChannelOpen(channel);
+      await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+      await captured.onMessage("ENCRYPTED_REQUEST_PAYLOAD");
+      await vi.waitFor(() => expect(document.getElementById("link-verification-block").hidden).toBe(false));
+
+      document.getElementById("btn-reject-device-link").click();
+
+      expect(document.getElementById("link-verification-block").hidden).toBe(true);
+      expect(createLinkGrant).not.toHaveBeenCalled();
+      expect(channel.send).not.toHaveBeenCalled();
+    });
+
+    // Exec-review finding F2: a pending verification prompt is scoped to the
+    // connection it was shown for. Leaving it unconfirmed and starting a
+    // DIFFERENT connection (an ordinary chat, via btn-join) must not leave a
+    // stale "confirm" handler that would send the raw identity key over the
+    // new, unrelated session.
+    it("starting a different connection while the SAS prompt is pending clears it instead of leaving a stale confirm handler", async () => {
+      const identityRaw = new Uint8Array([7, 7, 7]);
+      exportRawIdentity.mockResolvedValue(identityRaw);
+      createPermanentProfile.mockResolvedValue({
+        privateKey: { __tag: "profile-priv" },
+        publicKey: fakePublicKey("profile-pub"),
+        vaultKey: { __tag: "vault-key" }
+      });
+      fingerprint.mockResolvedValue("profile-fp");
+      generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+      createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+      createOffer.mockResolvedValue(undefined);
+      pollForAnswer.mockResolvedValue({
+        answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+        ecdhPubkey: "peer-ecdh-b64"
+      });
+      deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+      deriveLinkVerificationCode.mockResolvedValue("246810");
+      const linkRequest = { type: "device-link-request", devicePubkey: "DEV_PUB" };
+      decryptMessage.mockResolvedValue(JSON.stringify(linkRequest));
+
+      const channel = fakeChannel();
+      let captured;
+      startAsInitiator.mockImplementation((opts) => {
+        captured = opts;
+        return { __fakePc: true };
+      });
+
+      initApp(document, { locale: "uk" });
+      document.getElementById("btn-create-profile").click();
+      document.getElementById("profile-passphrase").value = "pass";
+      document.getElementById("btn-profile-confirm").click();
+      await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001profile-fp"));
+      document.getElementById("link-passphrase").value = "my passphrase";
+      document.getElementById("btn-link-device").click();
+      await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+
+      captured.onChannelOpen(channel);
+      await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+      await captured.onMessage("ENCRYPTED_REQUEST_PAYLOAD");
+      await vi.waitFor(() => expect(document.getElementById("link-verification-block").hidden).toBe(false));
+
+      // The human never confirms -- instead a completely different chat
+      // session is started, replacing the active connection.
+      document.getElementById("room-id").value = "room2";
+      document.getElementById("invite-token").value = "tok2";
+      document.getElementById("btn-join").click();
+
+      expect(document.getElementById("link-verification-block").hidden).toBe(true);
+      // Even if something still clicked the (now hidden) confirm button, the
+      // stale onclick handler must have been cleared, not fired.
+      expect(createLinkGrant).not.toHaveBeenCalled();
+    });
+
+    it("an optional PIN mismatch is rejected without ever showing the verification code", async () => {
+      const identityRaw = new Uint8Array([7, 7, 7]);
+      exportRawIdentity.mockResolvedValue(identityRaw);
+      createPermanentProfile.mockResolvedValue({
+        privateKey: { __tag: "profile-priv" },
+        publicKey: fakePublicKey("profile-pub"),
+        vaultKey: { __tag: "vault-key" }
+      });
+      fingerprint.mockResolvedValue("profile-fp");
+      generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+      createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+      createOffer.mockResolvedValue(undefined);
+      pollForAnswer.mockResolvedValue({
+        answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+        ecdhPubkey: "peer-ecdh-b64"
+      });
+      deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+      const linkRequest = { type: "device-link-request", devicePubkey: "DEV_PUB", pin: "0000" };
+      decryptMessage.mockResolvedValue(JSON.stringify(linkRequest));
+
+      const channel = fakeChannel();
+      let captured;
+      startAsInitiator.mockImplementation((opts) => {
+        captured = opts;
+        return { __fakePc: true };
+      });
+
+      initApp(document, { locale: "uk" });
+      document.getElementById("btn-create-profile").click();
+      document.getElementById("profile-passphrase").value = "pass";
+      document.getElementById("btn-profile-confirm").click();
+      await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001profile-fp"));
+      document.getElementById("link-passphrase").value = "my passphrase";
+      document.getElementById("link-pin").value = "1234";
+      document.getElementById("btn-link-device").click();
+      await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+
+      captured.onChannelOpen(channel);
+      await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+      await captured.onMessage("ENCRYPTED_REQUEST_PAYLOAD");
+
+      await vi.waitFor(() =>
+        expect(document.getElementById("device-link-status").textContent).toMatch(/PIN/)
+      );
+      expect(document.getElementById("link-verification-block").hidden).toBe(true);
+      expect(createLinkGrant).not.toHaveBeenCalled();
+      expect(channel.send).not.toHaveBeenCalled();
     });
   });
 
@@ -4519,6 +4711,7 @@ describe("device linking UI", () => {
       getOffer.mockResolvedValue({ offer: JSON.stringify({ type: "offer", sdp: "OFFER_SDP" }), ecdhPubkey: "peer-ecdh-b64" });
       submitAnswer.mockResolvedValue(undefined);
       deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+      deriveLinkVerificationCode.mockResolvedValue("246810");
       const linkRequest = { type: "device-link-request", devicePubkey: "DEV_PUB" };
       createLinkRequest.mockResolvedValue(linkRequest);
       encryptMessage.mockResolvedValue("ENCRYPTED_REQUEST");
@@ -4554,6 +4747,12 @@ describe("device linking UI", () => {
       // Once both the channel and session key exist, the link request goes out encrypted.
       await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith("ENCRYPTED_REQUEST"));
       expect(createLinkRequest).toHaveBeenCalledWith(devicePair.publicKey);
+      // The new device shows its own SAS code too, so the human can compare
+      // it against the primary's screen (Section B6).
+      await vi.waitFor(() => expect(document.getElementById("device-verification-code").textContent).toBe("246810"));
+      expect(document.getElementById("device-verification-block").hidden).toBe(false);
+      // Exec-review finding F3 (joiner side): same real-wire requirement.
+      expect(deriveLinkVerificationCode).toHaveBeenCalledWith("ECDH_PUB_WIRE", "peer-ecdh-b64");
 
       // The primary's grant arrives; it must be applied with the local passphrase and OUR device key.
       await captured.onMessage("ENCRYPTED_GRANT_PAYLOAD");
