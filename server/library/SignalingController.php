@@ -254,15 +254,28 @@ class SignalingController
                 return $this->success([]);
 
             case 'check_answer':
-                $fields = $this->requireFields($input, ['room_id']);
+                // Section B1 (specs/reviews/spirit-evaluation-triage.md):
+                // previously accepted ANY sender_key (or none at all) for a
+                // known room_id, letting anyone who merely saw the invite
+                // link poll the joiner's SDP answer -- which carries their
+                // real public/local IP -- for the room's whole lifetime.
+                // invite_token can't be reused here (submit_answer already
+                // marked it used by the time an answer exists to check), so
+                // this is instead scoped to the room's recorded initiator:
+                // only the sender_key that originally called create_invite
+                // for this room_id may poll its answer.
+                $fields = $this->requireFields($input, ['room_id', 'sender_key']);
                 if ($fields === null) {
                     return $this->error(400, 'Bad Request: Missing arguments');
                 }
-                [$roomId] = $fields;
+                [$roomId, $senderKey] = $fields;
                 if (!isset($db['sessions'][$roomId])) {
                     return $this->error(404, 'Room expired or closed');
                 }
                 $session = $db['sessions'][$roomId];
+                if (!hash_equals((string) $session['initiator'], $senderKey)) {
+                    return $this->error(403, 'Access Denied: not this room\'s initiator');
+                }
                 return $this->success(['answer' => $session['answer'], 'ecdh_pubkey' => $session['answer_ecdh_pubkey']]);
 
             default:
