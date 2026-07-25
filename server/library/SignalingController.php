@@ -595,16 +595,27 @@ class SignalingController
         return $baseParts['scheme'] . '://' . $baseParts['host'] . $portPart . $baseDir . $location;
     }
 
+    // Section C3 (specs/reviews/spirit-evaluation-triage.md): requireFields
+    // previously accepted a string field of ANY length -- a handful of
+    // requests with a multi-megabyte sdp_data grew database.json past
+    // available memory, after which every subsequent request (including
+    // ones that would have GC'd it) failed with 500. 64KiB is generous for
+    // every real field here (a real WebRTC SDP with many ICE candidates is
+    // typically well under 10KB; room_id/invite_token/sender_key/
+    // ecdh_pubkey are all far smaller fixed-ish sizes) while still closing
+    // off multi-megabyte abuse.
+    private const MAX_FIELD_LENGTH = 65536;
+
     /**
      * Returns validated string values for $fieldNames in order, or null if
-     * any is missing/empty -- callers destructure only on non-null.
+     * any is missing/empty/too long -- callers destructure only on non-null.
      */
     private function requireFields(array $input, array $fieldNames): ?array
     {
         $values = [];
         foreach ($fieldNames as $name) {
             $value = $input[$name] ?? null;
-            if (!is_string($value) || $value === '') {
+            if (!is_string($value) || $value === '' || strlen($value) > self::MAX_FIELD_LENGTH) {
                 return null;
             }
             $values[] = $value;
