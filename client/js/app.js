@@ -4639,6 +4639,18 @@ export function initApp(doc, options) {
     // does nothing from their point of view.
     enterConversationLobby({ ownsInvite: true });
 
+    // Section A3 (specs/reviews/spirit-evaluation-triage.md): without this,
+    // starting a second session while the first is still active reused the
+    // SAME state.peers entry (ensureActivePeer's proxy-write semantics) --
+    // only peerFingerprint/sessionEcdhWires got cleared below, so
+    // state.channel/state.sessionKey still resolved to the PREVIOUS peer
+    // until the new handshake completed. A message typed in that window
+    // encrypted under the old sessionKey and sent down the old channel --
+    // to the previous conversation partner, while the UI already showed the
+    // new one. Deleting the old entry outright (mirrors startTaggedGroupInvite's
+    // GC2 pattern of never reusing an entry for a genuinely new session)
+    // means the proxy fields below lazily create a truly fresh entry.
+    resetActiveConnection();
     state.peerFingerprint = null;
     hideSafetyNumberHint();
     state.sessionEcdhWires = null;
@@ -4764,6 +4776,9 @@ export function initApp(doc, options) {
       setStatus(t("status.createAccountFirst"));
       return;
     }
+    // Section A3: same fix as initiateChatSession above -- never reuse a
+    // still-active previous connection's entry for a new session.
+    resetActiveConnection();
     state.peerFingerprint = null;
     hideSafetyNumberHint();
     state.sessionEcdhWires = null;
@@ -5236,6 +5251,12 @@ export function initApp(doc, options) {
         renderNotificationsCard();
     renderRecoveryCard();
 
+        // Section A3: defensive consistency with initiateChatSession/btn-join
+        // -- unreachable in practice here (guarded above by `if
+        // (state.senderKey) return`, so no prior connection can exist yet
+        // on this fresh zero-click load), but keeps this call site from
+        // silently diverging if that guard ever changes.
+        resetActiveConnection();
         state.peerFingerprint = null;
         hideSafetyNumberHint();
         state.sessionEcdhWires = null;

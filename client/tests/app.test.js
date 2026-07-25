@@ -2484,6 +2484,64 @@ describe("btn-send", () => {
     expect(channel.send).not.toHaveBeenCalledWith("привіт");
   });
 
+  it("Section A3 (specs/reviews/spirit-evaluation-triage.md): starting a second session never leaves the PREVIOUS peer's channel/sessionKey reachable for a message typed before the new handshake completes", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key-A" });
+
+    const channelA = fakeChannel();
+    let capturedOpts;
+    startAsInitiator.mockImplementation((opts) => {
+      capturedOpts = opts;
+      return { __fakePc: true };
+    });
+
+    const { state } = initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+
+    // First session: fully established, real channel + session key (peer A).
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalledTimes(1));
+    capturedOpts.onChannelOpen(channelA);
+    await capturedOpts.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP_A" });
+    await vi.waitFor(() => expect(state.channel).toBe(channelA));
+    const firstConnectionId = state.activeConnectionId;
+    expect(state.peers.size).toBe(1);
+
+    // Second session started (e.g. user clicked "Ініціювати чат" again to
+    // talk to someone new) -- the NEW handshake is deliberately left
+    // incomplete (no onChannelOpen/onLocalOfferReady called yet) to probe
+    // the exact window the bug lived in.
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalledTimes(2));
+
+    // The old connection must be gone, not just "inactive" -- a fresh
+    // connectionId, and the old one no longer in state.peers at all.
+    expect(state.activeConnectionId).not.toBe(firstConnectionId);
+    expect(state.peers.has(firstConnectionId)).toBe(false);
+    expect(state.peers.size).toBe(1);
+    // No channel/session key exists yet for the still-incomplete new
+    // session -- state.channel/state.sessionKey must NOT still resolve to
+    // peer A's now-torn-down connection.
+    expect(state.channel).toBeNull();
+    expect(state.sessionKey).toBeNull();
+
+    document.getElementById("message-input").value = "секрет для нового співрозмовника";
+    document.getElementById("btn-send").click();
+
+    // Must queue (no live channel yet), never reach peer A's channel.
+    await vi.waitFor(() => expect(document.getElementById("chat-send-status").hidden).toBe(false));
+    expect(channelA.send).not.toHaveBeenCalledWith(expect.stringContaining("R1:"));
+  });
+
   it("Section RF9: sends a message queued before any connection existed, in order, the moment a peer connects", async () => {
     generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
     fingerprint.mockResolvedValue("sender-fp");
