@@ -214,6 +214,26 @@ describe("vault key and history isolation after restore/adopt", () => {
     await expect(listMessages(adopted.vaultKey, adopted.profileId, CONTACT)).resolves.toEqual([]);
   });
 
+  it("Section A1 (specs/reviews/spirit-evaluation-triage.md): re-adopting the SAME identity with the SAME passphrase preserves history instead of silently wiping it", async () => {
+    // Reproduces the real portable-login flow: deriveAccountMaterial(name,
+    // password) yields the same scalar every time, and adoptScalarIdentity
+    // is called with that SAME password as the local passphrase on every
+    // login -- not just on first adoption. Previously this unconditionally
+    // generated a fresh salt and deleted every local history row under this
+    // profileId on EVERY plain re-login, not just when the passphrase (or
+    // the underlying identity) genuinely changed.
+    const created = await createPermanentProfile("same pass");
+    await appendMessage(created.vaultKey, created.profileId, CONTACT, { direction: "out", text: "still here", timestamp: 1000 });
+    const raw = await exportPrivateKeyRaw(created.privateKey);
+
+    const reLoggedIn = await adoptIdentity(raw, "same pass");
+
+    expect(reLoggedIn.profileId).toBe(created.profileId);
+    await assertVaultKeyWorks(reLoggedIn);
+    const history = await listMessages(reLoggedIn.vaultKey, reLoggedIn.profileId, CONTACT);
+    expect(history.map((m) => m.text)).toEqual(["still here"]);
+  });
+
   it("a DIFFERENT profile's history is isolated, not visible and not fatal to another profile", async () => {
     const first = await createPermanentProfile("pass one");
     await appendMessage(first.vaultKey, first.profileId, CONTACT, { direction: "out", text: "first's", timestamp: 1000 });

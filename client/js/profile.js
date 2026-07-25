@@ -186,6 +186,34 @@ export async function exportRawIdentity(profileId, passphrase) {
 export async function adoptIdentity(rawPrivateKey, localPassphrase) {
   const keyPair = await reconstructKeyPairFromRaw(rawPrivateKey);
   const profileId = await fingerprint(keyPair.publicKey);
+
+  // Section A1 (specs/reviews/spirit-evaluation-triage.md): this used to
+  // unconditionally persistRawIdentity below -- a FRESH salt and a wipe of
+  // this profileId's local history -- on every single call, including a
+  // plain repeat login to an already-adopted profile (e.g. the portable-
+  // login flow calls adoptScalarIdentity -> adoptIdentity on EVERY login,
+  // not just the first). If a local record already exists for this exact
+  // profileId AND localPassphrase actually decrypts it (i.e. nothing about
+  // the identity or the local passphrase has changed since it was last
+  // adopted here), this is just a return visit: reuse the existing salt/
+  // record and keep the history it protects, instead of silently deleting
+  // it. Falls through to the original fresh-salt/wipe behavior when there
+  // is no existing record, or when the passphrase genuinely differs (the
+  // existing history is undecryptable under a new key either way, so
+  // wiping it there is correct, not a bug -- see the sibling "clears its
+  // now-undecryptable history rows" test).
+  const existing = await get("profile", accountRecordKey(profileId));
+  if (existing) {
+    const salt = base64ToBytes(existing.salt);
+    const vaultKey = await deriveVaultKey(localPassphrase, salt);
+    try {
+      await decryptForVault(vaultKey, existing.encryptedPrivateKey);
+      return { ...keyPair, vaultKey, profileId };
+    } catch {
+      // Different passphrase (or a corrupted record) -- fall through.
+    }
+  }
+
   const vaultKey = await persistRawIdentity(rawPrivateKey, localPassphrase, profileId);
   // Same contract as create/load: the session vault key comes along, so a
   // just-linked or just-restored device can write history immediately.
