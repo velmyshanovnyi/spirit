@@ -121,8 +121,9 @@ vi.mock("../js/webrtc.js", () => ({
   // Real (non-mocked) implementation -- Section P1(a) coverage below asserts
   // on its actual output as it flows into startAsInitiator/startAsJoiner
   // calls, mirroring buildRtcConfig's own unit tests in rtcConfig.test.js.
-  buildRtcConfig: vi.fn((stunUrl, { forceTurnRelay = false } = {}) => {
+  buildRtcConfig: vi.fn((stunUrl, { forceTurnRelay = false, turnUrl = "", turnUsername = "", turnCredential = "" } = {}) => {
     const config = { iceServers: [{ urls: stunUrl }] };
+    if (turnUrl) config.iceServers.push({ urls: turnUrl, username: turnUsername, credential: turnCredential });
     if (forceTurnRelay) config.iceTransportPolicy = "relay";
     return config;
   })
@@ -342,6 +343,9 @@ const HTML = `
   <section data-screen="server">
     <input id="server-url" type="text" value="http://node.example/index.php">
     <input id="stun-url" type="text" value="stun:stun.example:19302">
+    <input id="turn-url" type="text" value="">
+    <input id="turn-username" type="text" value="">
+    <input id="turn-credential" type="password" value="">
     <input id="force-turn-relay" type="checkbox">
     <input id="signaling-node-name" type="text">
     <button id="btn-save-signaling-node" type="button">Зберегти</button>

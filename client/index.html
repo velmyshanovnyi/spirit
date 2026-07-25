@@ -344,15 +344,29 @@
         <label class="field"><span data-i18n="label.stun">STUN:</span>
           <input id="stun-url" type="text" value="stun:stun.l.google.com:19302">
         </label>
+        <!-- Section B3 (specs/reviews/spirit-evaluation-triage.md): a
+             turn: URI has no userinfo component -- long-term TURN
+             credentials (RFC 5766) need their own fields, they can't be
+             typed into the STUN field above. Optional: buildRtcConfig
+             only adds a TURN iceServers entry when turn-url is non-empty. -->
+        <label class="field"><span data-i18n="label.turnUrl">TURN (опційно):</span>
+          <input id="turn-url" type="text" placeholder="turn:example.org:3478">
+        </label>
+        <label class="field"><span data-i18n="label.turnUsername">TURN логін:</span>
+          <input id="turn-username" type="text" autocomplete="off">
+        </label>
+        <label class="field"><span data-i18n="label.turnCredential">TURN пароль:</span>
+          <input id="turn-credential" type="password" autocomplete="off">
+        </label>
         <label class="field checkbox-field">
           <input id="force-turn-relay" type="checkbox">
           <span data-i18n="server.forceTurnRelay">Форсувати TURN-релей</span>
         </label>
         <p class="hint" data-i18n="server.forceTurnRelayHint">
           Приховує вашу реальну IP-адресу від співрозмовника ціною затримки. Потребує
-          справжнього TURN-сервера (з логіном/паролем) у полі STUN вище — звичайний
-          публічний STUN (як Google) не вміє ретранслювати трафік і з'єднання просто не
-          встановиться.
+          справжнього TURN-сервера з логіном і паролем у трьох полях TURN вище —
+          звичайний публічний STUN (як Google) не вміє ретранслювати трафік і
+          з'єднання просто не встановиться.
         </p>
 
         <!-- specs/phase4/multi-node-ui.md: localStorage-backed list of saved

@@ -307,7 +307,7 @@
         `save()`-виклики в раніше беззаписних гілках не ламають нічого).
         `spirit.kolo.media` перевірено окремо на відсутність помилок.
 
-- [ ] **B3. TURN технічно неможливо налаштувати -- немає полів username/credential.**
+- [x] **B3. TURN технічно неможливо налаштувати -- немає полів username/credential. ВИПРАВЛЕНО (коміт нижче).**
   Підтверджено: `client/js/webrtc.js`'s `buildRtcConfig(stunUrl, {forceTurnRelay})`
   будує лише `{iceServers:[{urls: stunUrl}]}` (+ `iceTransportPolicy`),
   жодного `credential`/`username` поля ніде в клієнті (грепом по всьому
@@ -319,9 +319,43 @@
   формулювання. Форсування `iceTransportPolicy:"relay"` над
   чисто-STUN-списком гарантовано ламає з'єднання (немає relay-кандидатів
   узагалі).
-  - [ ] **Tests**: TBD
-  - [ ] **Impl**: TBD (нові поля username/credential у формі "Сервер", `buildRtcConfig`, і виправлення формулювання в `metadata-resistant-transport.md`)
-  - [ ] **Exec review**: TBD
+  - [x] **Tests**: `client/tests/rtcConfig.test.js`, новий
+        `describe("Section B3: TURN server with username/credential")`
+        (3 тести: TURN-запис додається другим у `iceServers` лише коли
+        `turnUrl` непорожній; поєднання з `forceTurnRelay`). Наявний
+        мок `buildRtcConfig` у `app.test.js` оновлено під нову сигнатуру
+        (той самий коментар про "дзеркалить реальну реалізацію" уже
+        існував). 311/310+1 flaky (непов'язаний, підтверджено чистим
+        ізольовано) в `app.test.js`, 18/18 у `rtcConfig.test.js`+`i18n.test.js`.
+  - [x] **Impl**: `client/js/webrtc.js`'s `buildRtcConfig` -- нові опційні
+        `turnUrl`/`turnUsername`/`turnCredential`, додають ДРУГИЙ запис
+        у `iceServers` лише коли `turnUrl` непорожній. `client/index.html`
+        -- три нових поля (`#turn-url`/`#turn-username`/`#turn-credential`)
+        на екрані «Сервер», окремі від `#stun-url`; виправлено підказку
+        (більше не радить неможливе "вписати логін/пароль у поле STUN").
+        `client/js/app.js` -- нова `currentRtcConfig()`-функція замінює
+        ІДЕНТИЧНИЙ рядок `buildRtcConfig(el("stun-url").value, {...})`,
+        скопійований у 8 різних місць (сам звіт відзначав цю дуплікацію
+        окремо, §3.2) -- усі 8 замінено одним викликом. "Збережені
+        вузли" (`specs/phase4/multi-node-ui.md`) розширено новими TURN-
+        полями в тому самому localStorage-записі (задокументовано:
+        TURN-пароль там у відкритому вигляді, той самий рівень довіри,
+        що й решта preset'у). `client/js/i18n.js` -- `label.turnUrl`/
+        `label.turnUsername`/`label.turnCredential` у 11 локалях (усі
+        перекладені, не англійський fallback), і виправлено сам текст
+        `server.forceTurnRelayHint` у ВСІХ 11 локалях (раніше скрізь
+        радив неможливе). `docs/metadata-resistant-transport.md` --
+        виправлено неточне твердження ("поле вже покриває це технічно"),
+        зазначено, що воно СПРАВДІ вірне лише ТЕПЕР, після цього фіксу.
+  - [x] **Exec review**: самоперевірка -- (а) `turnUrl`-порожній -- ЖОДНОГО
+        другого запису в `iceServers` (не порожній об'єкт з
+        порожніми username/credential) -- підтверджено тестом; (б) усі
+        8 викликів `buildRtcConfig` у `app.js` тепер ідентично проходять
+        через `currentRtcConfig()` -- підтверджено грепом
+        (`buildRtcConfig(el("stun-url")` більше не зустрічається,
+        лишився лише в самому визначенні `currentRtcConfig`); (в) 11/11
+        локалей перевірено Node-скриптом на відсутність дублікатів і
+        коректність кожного перекладу.
 
 - [ ] **B4. Немає обробників стану WebRTC-з'єднання -- зникнення співрозмовника непомітне.**
   Підтверджено грепом: нуль згадок `connectionState`/`iceConnectionState`/

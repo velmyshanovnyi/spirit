@@ -5,8 +5,17 @@ const DATA_CHANNEL_LABEL = "spirit-chat-stream";
 // When forceTurnRelay is off (default), the returned object omits
 // iceTransportPolicy entirely -- NOT "all" -- so existing behavior for every
 // user who never touches the new toggle is byte-for-byte unchanged.
-export function buildRtcConfig(stunUrl, { forceTurnRelay = false } = {}) {
+// Section B3 (specs/reviews/spirit-evaluation-triage.md): turn: URIs have
+// no userinfo component -- there was previously no way to configure a real
+// TURN server's long-term credentials at all, so "force TURN relay" always
+// broke every connection (no TURN candidates could ever be gathered).
+// turnUrl/turnUsername/turnCredential add a SECOND iceServers entry
+// alongside the STUN one, only when a TURN URL is actually given.
+export function buildRtcConfig(stunUrl, { forceTurnRelay = false, turnUrl = "", turnUsername = "", turnCredential = "" } = {}) {
   const config = { iceServers: [{ urls: stunUrl }] };
+  if (turnUrl) {
+    config.iceServers.push({ urls: turnUrl, username: turnUsername, credential: turnCredential });
+  }
   if (forceTurnRelay) config.iceTransportPolicy = "relay";
   return config;
 }

@@ -2386,6 +2386,14 @@ export function initApp(doc, options) {
       name,
       serverUrl: el("server-url").value,
       stunUrl: el("stun-url").value,
+      // Section B3: saved alongside the rest of this preset for convenience
+      // (same "manual apply, no auto-reconnect" philosophy as the other
+      // fields) -- note this means a TURN password ends up in plaintext
+      // localStorage, same trust tier as everything else this feature
+      // already persists there (device-local convenience, not a vault).
+      turnUrl: el("turn-url").value,
+      turnUsername: el("turn-username").value,
+      turnCredential: el("turn-credential").value,
       forceTurnRelay: el("force-turn-relay").checked
     });
     saveSignalingNodes(nodes);
@@ -2403,6 +2411,9 @@ export function initApp(doc, options) {
         // note): no auto-reconnect of any in-progress session.
         el("server-url").value = node.serverUrl;
         el("stun-url").value = node.stunUrl;
+        el("turn-url").value = node.turnUrl ?? "";
+        el("turn-username").value = node.turnUsername ?? "";
+        el("turn-credential").value = node.turnCredential ?? "";
         el("force-turn-relay").checked = !!node.forceTurnRelay;
       }
       return;
@@ -2742,6 +2753,20 @@ export function initApp(doc, options) {
   }
   win.__spiritAppHashListener = onScreenChange;
   win.addEventListener("hashchange", onScreenChange);
+
+  // Section B3 (specs/reviews/spirit-evaluation-triage.md): reads the
+  // current STUN/TURN/force-relay form fields into a buildRtcConfig call --
+  // was previously the same 1-line expression copy-pasted at 8 separate
+  // call sites (each only reading stun-url/force-turn-relay), now also
+  // reading the new turn-url/turn-username/turn-credential fields.
+  function currentRtcConfig() {
+    return buildRtcConfig(el("stun-url").value, {
+      forceTurnRelay: el("force-turn-relay").checked,
+      turnUrl: el("turn-url").value,
+      turnUsername: el("turn-username").value,
+      turnCredential: el("turn-credential").value
+    });
+  }
 
   function armIceTimeout() {
     let settled = false;
@@ -3585,7 +3610,7 @@ export function initApp(doc, options) {
     const announce = makeEntryIdentityAnnouncer(entry);
     state.pendingMeshRelays.set(relayId, { connectionId, ecdhKeyPair, announce });
 
-    const rtcConfig = buildRtcConfig(el("stun-url").value, { forceTurnRelay: el("force-turn-relay").checked });
+    const rtcConfig = currentRtcConfig();
     entry.pc = startAsInitiator({
       rtcConfig,
       ...wireMeshRelayChannelCallbacks(connectionId, { afterChannelOpen: announce }),
@@ -3652,7 +3677,7 @@ export function initApp(doc, options) {
 
     const ecdhKeyPair = await generateEcdhKeyPair();
     const announce = makeEntryIdentityAnnouncer(entry);
-    const rtcConfig = buildRtcConfig(el("stun-url").value, { forceTurnRelay: el("force-turn-relay").checked });
+    const rtcConfig = currentRtcConfig();
     entry.pc = startAsJoiner({
       rtcConfig,
       offerSdp: control.sdp,
@@ -4611,7 +4636,7 @@ export function initApp(doc, options) {
    */
   async function initiateChatSession({ pushToContact = null } = {}) {
     const serverUrl = el("server-url").value;
-    const rtcConfig = buildRtcConfig(el("stun-url").value, { forceTurnRelay: el("force-turn-relay").checked });
+    const rtcConfig = currentRtcConfig();
     const senderKey = state.senderKey;
 
     const ecdhKeyPair = await generateEcdhKeyPair();
@@ -4716,7 +4741,7 @@ export function initApp(doc, options) {
       return createInvite(serverUrl, senderKey, { onPowStart: () => setGroupStatus(t("status.solvingPow")) });
     }
 
-    const rtcConfig = buildRtcConfig(el("stun-url").value, { forceTurnRelay: el("force-turn-relay").checked });
+    const rtcConfig = currentRtcConfig();
     const ecdhKeyPair = await generateEcdhKeyPair();
     const { roomId, inviteToken } = await createInvite(serverUrl, senderKey, {
       onPowStart: () => setGroupStatus(t("status.solvingPow"))
@@ -4793,7 +4818,7 @@ export function initApp(doc, options) {
       roomId: el("room-id").value,
       inviteToken: el("invite-token").value,
       serverUrl: el("server-url").value,
-      rtcConfig: buildRtcConfig(el("stun-url").value, { forceTurnRelay: el("force-turn-relay").checked }),
+      rtcConfig: currentRtcConfig(),
       channelOptions: {
         afterChannelOpen: () => {
           announce();
@@ -4828,7 +4853,7 @@ export function initApp(doc, options) {
     el("link-passphrase").value = "";
 
     const serverUrl = el("server-url").value;
-    const rtcConfig = buildRtcConfig(el("stun-url").value, { forceTurnRelay: el("force-turn-relay").checked });
+    const rtcConfig = currentRtcConfig();
     const senderKey = randomSenderKey();
 
     const ecdhKeyPair = await generateEcdhKeyPair();
@@ -4895,7 +4920,7 @@ export function initApp(doc, options) {
       roomId: el("room-id").value,
       inviteToken: el("invite-token").value,
       serverUrl: el("server-url").value,
-      rtcConfig: buildRtcConfig(el("stun-url").value, { forceTurnRelay: el("force-turn-relay").checked }),
+      rtcConfig: currentRtcConfig(),
       onSessionReady: maybeSendLinkRequest,
       channelOptions: {
         afterChannelOpen: maybeSendLinkRequest,
@@ -5269,7 +5294,7 @@ export function initApp(doc, options) {
         roomId: invitedRoomId,
         inviteToken: invitedToken,
         serverUrl: el("server-url").value,
-        rtcConfig: buildRtcConfig(el("stun-url").value, { forceTurnRelay: el("force-turn-relay").checked }),
+        rtcConfig: currentRtcConfig(),
         channelOptions: {
           afterChannelOpen: () => {
             announce();
