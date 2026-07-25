@@ -256,7 +256,16 @@
         ініціатор (`sender_key`, з яким сам викликав `create_invite`)
         і далі отримує відповідь без жодної додаткової дії на клієнті;
         (в) чужий/відсутній `sender_key` -- `403`, той самий код, що й
-        `get_offer`/`submit_answer` для невалідного токена.
+        `get_offer`/`submit_answer` для невалідного токена; (г)
+        задеплоєно на обидва хости, живо підтверджено ТОЧНИМ PoC зі
+        звіту на `spirit.kibr.com.ua` (реальний room_id/sender_key через
+        справжній `create_invite` у браузері): `sender_key:
+        "attacker-not-a-participant"` → `403 Access Denied: not this
+        room's initiator` (раніше -- `200` з реальною SDP-відповіддю);
+        легітимний `sender_key` ініціатора → `200 success`; відсутній
+        `sender_key` узагалі → `400 Missing arguments`. `spirit.kolo.media`
+        підтверджено окремо (та сама `400`-поведінка на відсутньому
+        `sender_key`).
 
 - [ ] **B2. TTL кімнати (300с) ніколи не оновлюється активністю -- лише час створення.**
   Підтверджено: `server/config.php` -- `SESSION_TTL_SECONDS => 300`;
