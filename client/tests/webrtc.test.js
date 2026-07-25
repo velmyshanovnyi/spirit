@@ -39,6 +39,8 @@ class FakeRTCPeerConnection {
     });
     this.addTrack = vi.fn();
     this.ontrack = null;
+    this.onconnectionstatechange = null;
+    this.connectionState = "new";
   }
 }
 FakeRTCPeerConnection.instances = [];
@@ -100,6 +102,28 @@ describe("startAsInitiator", () => {
 
     channel.onclose();
     expect(onChannelClose).toHaveBeenCalled();
+  });
+
+  // Section B4 (specs/reviews/spirit-evaluation-triage.md): the client had
+  // zero listeners for connectionState/iceConnectionState anywhere -- a
+  // peer that vanished without a clean DataChannel close (network drop,
+  // tab closed, NAT rebind) left the UI silently showing "connected"
+  // forever, per the evaluation's own live three-minute observation.
+  it("Section B4: reports connectionState changes via onConnectionStateChange", async () => {
+    FakeRTCPeerConnection.instances = [];
+    const onConnectionStateChange = vi.fn();
+
+    startAsInitiator({ RTCPeerConnectionImpl: FakeRTCPeerConnection, onConnectionStateChange });
+    await flushMicrotasks();
+    const pc = FakeRTCPeerConnection.instances[0];
+
+    pc.connectionState = "disconnected";
+    pc.onconnectionstatechange();
+    expect(onConnectionStateChange).toHaveBeenCalledWith("disconnected");
+
+    pc.connectionState = "failed";
+    pc.onconnectionstatechange();
+    expect(onConnectionStateChange).toHaveBeenCalledWith("failed");
   });
 
   it("reports failures instead of leaving a silent unhandled rejection", async () => {
@@ -304,6 +328,23 @@ describe("startAsJoiner", () => {
 
     incomingChannel.onclose();
     expect(onChannelClose).toHaveBeenCalled();
+  });
+
+  it("Section B4: reports connectionState changes via onConnectionStateChange", async () => {
+    FakeRTCPeerConnection.instances = [];
+    const onConnectionStateChange = vi.fn();
+
+    startAsJoiner({
+      offerSdp: { type: "offer", sdp: "OFFER_SDP" },
+      RTCPeerConnectionImpl: FakeRTCPeerConnection,
+      onConnectionStateChange
+    });
+    await flushMicrotasks();
+    const pc = FakeRTCPeerConnection.instances[0];
+
+    pc.connectionState = "closed";
+    pc.onconnectionstatechange();
+    expect(onConnectionStateChange).toHaveBeenCalledWith("closed");
   });
 
   it("reports failures instead of leaving a silent unhandled rejection (e.g. malformed remote SDP)", async () => {

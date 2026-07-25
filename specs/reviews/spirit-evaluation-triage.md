@@ -363,17 +363,56 @@
         `iceTransportPolicy:"relay"`; три нових поля й виправлена
         підказка присутні на екрані «Сервер».
 
-- [ ] **B4. Немає обробників стану WebRTC-з'єднання -- зникнення співрозмовника непомітне.**
+- [x] **B4. Немає обробників стану WebRTC-з'єднання -- зникнення співрозмовника непомітне. ВИПРАВЛЕНО (коміт нижче).**
   Підтверджено грепом: нуль згадок `connectionState`/`iceConnectionState`/
   `onconnectionstatechange`/`oniceconnectionstatechange`/`restartIce`/
   `negotiationneeded` у клієнті. Єдиний сигнал розриву -- `channel.onclose`,
   який НЕ спрацьовує при простому зникненні мережі/закритті вкладки без
   явного закриття DataChannel. `armIceTimeout` знімається на завершенні
-  ICE-GATHERING (мілісекунди), не на відкритті каналу -- отalready
-  не детектор невдалого з'єднання, попри назву й коментарі поруч.
-  - [ ] **Tests**: TBD
-  - [ ] **Impl**: TBD (обробники `oniceconnectionstatechange`/`onconnectionstatechange`, UI-індикація "співрозмовник відпав")
-  - [ ] **Exec review**: TBD
+  ICE-gathering (мілісекунди), не на відкритті каналу -- не детектор
+  невдалого з'єднання, попри назву й коментарі поруч (це лишається
+  так, як і було -- окрема, вже коректно задокументована річ, не
+  чіпається цим фіксом).
+  - [x] **Tests**: `client/tests/webrtc.test.js` -- 2 нових тести (по
+        одному на `startAsInitiator`/`startAsJoiner`): `onConnectionStateChange`
+        реально викликається з поточним `pc.connectionState` при
+        спрацюванні `pc.onconnectionstatechange`. `client/tests/app.test.js`
+        -- новий тест, що явно НЕ викликає `onChannelClose` (симулює
+        РІВНО той пропуск, що знайшов звіт -- зникнення без чистого
+        закриття каналу), лише `onConnectionStateChange("disconnected")`:
+        перевіряє, що статус оновлюється (`/втрачено/`) і повідомлення,
+        набране після цього, ставиться в чергу, а не йде в мертвий
+        канал. 312/312 -- 1 (той самий відомий flaky ICE-timeout timer-
+        тест, підтверджений чистим ізольовано, непов'язаний). 30/30 у
+        `webrtc.test.js`+`i18n.test.js`.
+  - [x] **Impl**: `client/js/webrtc.js` -- новий `onConnectionStateChange`
+        callback у `startAsInitiator`/`startAsJoiner`, підключений через
+        `pc.onconnectionstatechange = () => onConnectionStateChange?.(pc.connectionState)`.
+        `client/js/app.js`'s `wireChannelCallbacks` -- логіку розриву
+        з'єднання (раніше жорстко всередині `onChannelClose`) винесено
+        в спільну `handleConnectionTornDown(statusKey)` (той самий
+        stale-write guard, що й `onChannelOpen`), яку тепер викликають
+        ОБИДВА шляхи: `onChannelClose` (чисте закриття, `status.closed`)
+        і новий `onConnectionStateChange` при `disconnected`/`failed`/
+        `closed` (`status.peerConnectionLost`, новий, відмінний від
+        `status.closed` статус-текст). `client/js/i18n.js` --
+        `status.peerConnectionLost` у 11 локалях (усі перекладені).
+  - [x] **Exec review**: самоперевірка -- (а) `connectionState`
+        (агрегований ICE+DTLS стан), не `iceConnectionState` окремо --
+        простіший, рекомендований сучасний API, покриває той самий
+        клас подій, що перелічені в звіті; (б) обидва шляхи розриву
+        (`onChannelClose`/`onConnectionStateChange`) можуть теоретично
+        спрацювати для ОДНІЄЇ й тієї самої події (channel закривається
+        приблизно одночасно з переходом `connectionState` у `closed`) --
+        свідомо НЕ додано дедуплікацію: обидва виклики `handleConnectionTornDown`
+        ідемпотентні (повторне `state.channel = null` тощо нешкідливе),
+        у гіршому разі статус-текст оновлюється двічі поспіль без
+        функціональної шкоди; (в) `restartIce`/`negotiationneeded`
+        (автоматичне відновлення з'єднання) НЕ реалізовано цим фіксом
+        -- звіт просив ЛИШЕ виявлення розриву ("зникнення непомітне"),
+        не автоматичне перепідключення -- свідомо звужений обсяг,
+        задокументовано тут; (г) 311/312 (1 відомий flaky, підтверджено
+        чистим ізольовано), 30/30 у `webrtc.test.js`+`i18n.test.js`.
 
 - [ ] **B5. Немає перевірки очікуваного відбитка при дзвінку відомому контакту.**
   Звіт: коли користувач клікає конкретний контакт, `state.peerFingerprint`

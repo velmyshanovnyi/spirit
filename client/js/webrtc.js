@@ -32,6 +32,7 @@ export function startAsInitiator({
   onChannelOpen,
   onMessage,
   onChannelClose,
+  onConnectionStateChange,
   onError,
   onRemoteTrack,
   RTCPeerConnectionImpl = globalThis.RTCPeerConnection
@@ -43,6 +44,14 @@ export function startAsInitiator({
   // Wired at pc-creation time, not lazily when THIS side starts a call --
   // the peer may add media tracks first (Section V1, specs/ui/video-call.md).
   pc.ontrack = (event) => onRemoteTrack?.(event.streams[0]);
+
+  // Section B4 (specs/reviews/spirit-evaluation-triage.md): connectionState
+  // is the aggregate ICE+DTLS summary ("new"/"connecting"/"connected"/
+  // "disconnected"/"failed"/"closed") -- the client previously had ZERO
+  // listeners for this or iceConnectionState anywhere, so a peer that
+  // vanished without a clean DataChannel close (network drop, tab closed,
+  // NAT rebind) left the UI showing "connected" forever.
+  pc.onconnectionstatechange = () => onConnectionStateChange?.(pc.connectionState);
 
   pc.onicecandidate = (event) => {
     if (event.candidate === null) {
@@ -69,6 +78,7 @@ export function startAsJoiner({
   onChannelOpen,
   onMessage,
   onChannelClose,
+  onConnectionStateChange,
   onError,
   onRemoteTrack,
   RTCPeerConnectionImpl = globalThis.RTCPeerConnection
@@ -80,6 +90,9 @@ export function startAsJoiner({
   };
 
   pc.ontrack = (event) => onRemoteTrack?.(event.streams[0]);
+
+  // Section B4: same rationale as startAsInitiator above.
+  pc.onconnectionstatechange = () => onConnectionStateChange?.(pc.connectionState);
 
   pc.onicecandidate = (event) => {
     if (event.candidate === null) {

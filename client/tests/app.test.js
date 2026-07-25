@@ -2650,6 +2650,48 @@ describe("btn-send", () => {
     expect(encryptMessage).toHaveBeenCalledWith({ __tag: "ratchet-message-key" }, "друге, під час обриву");
   });
 
+  it("Section B4 (specs/reviews/spirit-evaluation-triage.md): a peer that vanishes WITHOUT a clean channel close (connectionState only) still surfaces a status update and queues further messages", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({
+      answer: JSON.stringify({ type: "answer", sdp: "ANSWER_SDP" }),
+      ecdhPubkey: "peer-ecdh-b64"
+    });
+    encryptMessage.mockResolvedValue("ENCRYPTED_PAYLOAD");
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+
+    const channel = fakeChannel();
+    let capturedOpts;
+    startAsInitiator.mockImplementation((opts) => {
+      capturedOpts = opts;
+      return { __fakePc: true };
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+
+    capturedOpts.onChannelOpen(channel);
+    await capturedOpts.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+
+    // The peer's tab closes / network drops -- webrtc.js's onconnectionstatechange
+    // fires with NO corresponding channel.onclose (exactly the gap the
+    // evaluation's live 3-minute observation found: nothing else in the
+    // client ever listened for this).
+    capturedOpts.onConnectionStateChange("disconnected");
+
+    expect(document.getElementById("connection-status").textContent).toMatch(/втрачено/);
+    const sendCountBefore = channel.send.mock.calls.length;
+    document.getElementById("message-input").value = "після зникнення співрозмовника";
+    document.getElementById("btn-send").click();
+    expect(channel.send.mock.calls.length).toBe(sendCountBefore); // queued, not sent to the dead channel
+  });
+
   it("sends the message on Enter, same as clicking Надіслати (bug report 2026-07-17)", async () => {
     generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
     fingerprint.mockResolvedValue("sender-fp");

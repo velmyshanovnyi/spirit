@@ -3751,6 +3751,42 @@ export function initApp(doc, options) {
     // resurrect a phantom state.peers entry the same way the ratchet
     // writeback could (see serializedChainStep above).
     const ownerConnectionIdAtWireTime = state.activeConnectionId;
+
+    // Shared teardown for both a clean DataChannel close and a
+    // connectionState reaching disconnected/failed/closed (Section B4) --
+    // same stale-write guard as onChannelOpen above, so a callback that
+    // fires after this session was already superseded/logged out of
+    // doesn't resurrect or clobber a different, later connection.
+    function handleConnectionTornDown(statusKey) {
+      if (ownerConnectionIdAtWireTime !== null && state.activeConnectionId !== ownerConnectionIdAtWireTime) return;
+      setStatus(t(statusKey));
+      // Section RF9: without this, sendChatMessage's "is there a live
+      // connection" check would keep seeing a truthy (but dead) channel
+      // reference after a drop, and try to .send() on a closed
+      // RTCDataChannel instead of queuing -- this is what makes
+      // reconnect-and-resync share the exact same queuing path as
+      // "never connected yet".
+      state.channel = null;
+      for (const id of ["btn-start-call", "btn-toggle-camera", "btn-toggle-mic"]) {
+        el(id).disabled = true;
+      }
+      if (state.localMediaPreviewTimeoutId) {
+        clearTimeout(state.localMediaPreviewTimeoutId);
+        state.localMediaPreviewTimeoutId = null;
+      }
+      if (state.localStream) {
+        for (const track of state.localStream.getTracks()) track.stop();
+        state.localStream = null;
+      }
+      state.localTracksAddedToPeer = false;
+      updateCallButtonStates();
+      // Section RF5: hides the small remote-video corner overlay again --
+      // otherwise it'd sit there as an empty dark box once the stream
+      // that was filling it is gone.
+      el("video-remote").hidden = true;
+      el("video-remote").srcObject = null;
+    }
+
     return {
       onChannelOpen: (channel) => {
         // Skip if the session this callback belongs to was already torn
@@ -3835,32 +3871,20 @@ export function initApp(doc, options) {
         return task;
       },
       onChannelClose: () => {
-        setStatus(t("status.closed"));
-        // Section RF9: without this, sendChatMessage's "is there a live
-        // connection" check would keep seeing a truthy (but dead) channel
-        // reference after a drop, and try to .send() on a closed
-        // RTCDataChannel instead of queuing -- this is what makes
-        // reconnect-and-resync share the exact same queuing path as
-        // "never connected yet".
-        state.channel = null;
-        for (const id of ["btn-start-call", "btn-toggle-camera", "btn-toggle-mic"]) {
-          el(id).disabled = true;
+        handleConnectionTornDown("status.closed");
+      },
+      // Section B4 (specs/reviews/spirit-evaluation-triage.md): the client
+      // previously had ZERO listeners for connectionState/iceConnectionState
+      // anywhere -- a peer that vanished without a clean DataChannel close
+      // (network drop, tab closed, NAT rebind) left the UI showing
+      // "peer verified" and an enabled Send button indefinitely, per the
+      // evaluation's own live three-minute observation. connectionState
+      // reaching any of these three values means the connection is gone
+      // regardless of whether the channel itself ever fires onclose.
+      onConnectionStateChange: (connectionState) => {
+        if (connectionState === "disconnected" || connectionState === "failed" || connectionState === "closed") {
+          handleConnectionTornDown("status.peerConnectionLost");
         }
-        if (state.localMediaPreviewTimeoutId) {
-          clearTimeout(state.localMediaPreviewTimeoutId);
-          state.localMediaPreviewTimeoutId = null;
-        }
-        if (state.localStream) {
-          for (const track of state.localStream.getTracks()) track.stop();
-          state.localStream = null;
-        }
-        state.localTracksAddedToPeer = false;
-        updateCallButtonStates();
-        // Section RF5: hides the small remote-video corner overlay again --
-        // otherwise it'd sit there as an empty dark box once the stream
-        // that was filling it is gone.
-        el("video-remote").hidden = true;
-        el("video-remote").srcObject = null;
       },
       onError: (err) => {
         disarmIceTimeout(); // the local-description IIFE failed before onLocalOfferReady/onLocalAnswerReady
