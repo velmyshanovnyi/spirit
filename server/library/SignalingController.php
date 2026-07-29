@@ -81,7 +81,16 @@ class SignalingController
         }
 
         $senderKey = $input['sender_key'] ?? null;
-        if (!is_string($senderKey) || $senderKey === '') {
+        // Section G2 (specs/reviews/spirit-evaluation-triage.md): sender_key
+        // is read directly here, BEFORE any dispatchAction case's
+        // requireFields() call -- C3's MAX_FIELD_LENGTH cap therefore never
+        // applied to it. A multi-megabyte sender_key on create_invite would
+        // sail past this check, past isSenderAllowed()'s (cheap, but
+        // pointless against a huge string) comparison, and get written
+        // straight into database.json via InviteManager::createInvite's
+        // 'initiator' => $senderKey -- the exact unbounded-growth problem C3
+        // was meant to close, just via a different field.
+        if (!is_string($senderKey) || $senderKey === '' || strlen($senderKey) > self::MAX_FIELD_LENGTH) {
             return $this->error(400, 'Bad Request: Missing arguments');
         }
 
