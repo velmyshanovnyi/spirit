@@ -6666,6 +6666,31 @@ describe("identity verification proofs (Section E)", () => {
     expect(unverifiedRow.hidden).toBe(false);
   });
 
+  // Section G4 (specs/reviews/spirit-evaluation-triage.md): renderFolderTree
+  // interpolates the folder id directly into an HTML attribute
+  // (`data-folder-id="${n.id}"`) with no escaping -- safe ONLY because
+  // randomFolderId() is guaranteed to produce `[a-z0-9]+` (no quote
+  // characters that could break out of the attribute). This test locks that
+  // format as an explicit, checked contract: a future change widening the
+  // character set (or accepting an externally-supplied id, e.g. a synced
+  // folder from another device) would break this test before it could
+  // break attribute safety.
+  it("a newly created folder's id is always [a-z0-9]+ -- the contract the unescaped data-folder-id attribute interpolation relies on", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    listContacts.mockResolvedValue([]);
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+
+    document.querySelector("#folder-tree [data-folder-edit-toggle]").click();
+    document.querySelector("#folder-tree [data-add-folder]").click();
+    const folderRow = document.querySelector("#folder-tree .folder-row");
+
+    expect(folderRow.dataset.folderId).toMatch(/^[a-z0-9]+$/);
+  });
+
   it("dragging a contact onto a folder assigns it there; clicking the folder filters the sidebar list to just that folder", async () => {
     generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
     fingerprint.mockResolvedValue("sender-fp");

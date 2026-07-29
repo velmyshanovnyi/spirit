@@ -1364,6 +1364,16 @@ export function initApp(doc, options) {
     }
     return null;
   }
+  // Section G4 (specs/reviews/spirit-evaluation-triage.md): CONTRACT --
+  // this must always produce only `[a-z0-9]+`. renderFolderTree() below
+  // interpolates the result directly into an HTML attribute
+  // (`data-folder-id="${n.id}"`) with no escaping; a value containing `"`
+  // would break out of the attribute. Locked by a test in app.test.js
+  // ("a newly created folder's id is always [a-z0-9]+ ..."). If this ever
+  // needs to accept an id from an EXTERNAL source (e.g. a folder synced
+  // from another device), validate/regenerate it against this pattern
+  // before it reaches renderFolderTree, or switch that template to an
+  // escaping helper -- don't just relax this format silently.
   function randomFolderId() {
     return "fd" + Math.random().toString(36).slice(2, 10);
   }

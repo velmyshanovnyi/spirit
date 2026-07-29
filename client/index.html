@@ -3,18 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Section G3 (specs/reviews/spirit-evaluation-triage.md): no
+       'unsafe-inline' in script-src -- the former inline theme-prepaint
+       script was moved to js/themePrepaint.js for exactly this reason.
+       connect-src is intentionally '*': the signaling/STUN/TURN server URLs
+       are user-configured (docs/decisions.md D1/D2), not fixed origins this
+       policy could name in advance. style-src keeps 'unsafe-inline' for the
+       same reason design-settings overrides apply as inline styles. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src *; frame-src https://accounts.google.com; object-src 'none'; base-uri 'self'; form-action 'self'">
   <title>Spirit</title>
   <link rel="stylesheet" href="css/style.css">
-  <script>
-    // Pre-paint theme (before CSS applies) to avoid a light->dark flash.
-    try {
-      var stored = localStorage.getItem("spirit.theme");
-      document.documentElement.dataset.theme =
-        stored === "light" || stored === "dark"
-          ? stored
-          : (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-    } catch (e) { document.documentElement.dataset.theme = "light"; }
-  </script>
+  <script src="js/themePrepaint.js"></script>
 </head>
 <body>
   <header class="app-header">

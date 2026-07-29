@@ -40,6 +40,19 @@ describe("createGroup", () => {
     expect(g1.groupId).not.toBe(g2.groupId);
     expect(await listGroups()).toHaveLength(2);
   });
+
+  // Section G4 (specs/reviews/spirit-evaluation-triage.md): app.js interpolates
+  // groupId directly into an HTML attribute/CSS-selector template literal
+  // (data-folder-id, [data-add-member-select="..."]) with no escaping --
+  // safe ONLY because groupId is guaranteed to be lowercase hex. This test
+  // locks that guarantee as an explicit, checked contract rather than an
+  // implicit assumption: a future change to randomGroupId() that widens the
+  // character set (or accepts an externally-supplied id) would break this
+  // test BEFORE it could break attribute/selector safety.
+  it("groupId is always lowercase hex -- the contract app.js's unescaped attribute/selector interpolation relies on", async () => {
+    const group = await createGroup({ name: "Format check", memberFingerprints: [FP_A] });
+    expect(group.groupId).toMatch(/^[0-9a-f]{32}$/);
+  });
 });
 
 describe("getGroup", () => {

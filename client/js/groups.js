@@ -7,6 +7,14 @@ import { get, put, remove, listKeys } from "./db.js";
  * groupId (same entropy/format as connectionId/randomFileId in app.js:
  * 16 random bytes, hex-encoded).
  */
+// Section G4 (specs/reviews/spirit-evaluation-triage.md): CONTRACT -- this
+// must always produce only lowercase hex `[0-9a-f]+`. app.js interpolates
+// groupId directly, unescaped, into an HTML attribute
+// (data-add-member-select) and CSS-selector template literals; a value
+// containing `"` would break out of both. Locked by a test in
+// groups.test.js. If this ever needs to accept an externally-supplied
+// groupId, validate it against this pattern first -- don't relax the
+// format silently.
 function randomGroupId() {
   return [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
