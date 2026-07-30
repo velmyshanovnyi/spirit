@@ -354,6 +354,12 @@ const HTML = `
 
   <section data-screen="server">
     <input id="server-url" type="text" value="http://node.example/index.php">
+    <select id="stun-preset">
+      <option value="google">Google</option>
+      <option value="cloudflare">Cloudflare</option>
+      <option value="mozilla">Mozilla</option>
+      <option value="custom">Custom</option>
+    </select>
     <input id="stun-url" type="text" value="stun:stun.example:19302">
     <input id="turn-url" type="text" value="">
     <input id="turn-username" type="text" value="">
@@ -741,6 +747,63 @@ describe("force-turn-relay toggle (Section P1(a), specs/phase5/security-hardenin
       iceServers: [{ urls: "stun:stun.example:19302" }],
       iceTransportPolicy: "relay"
     });
+  });
+});
+
+// Section C8 (specs/reviews/spirit-evaluation-triage.md): the STUN field
+// used to be a bare text input hardcoded to Google's default value with no
+// alternative offered. #stun-preset lets the user pick a known public STUN
+// server from a dropdown (auto-fills #stun-url) or "custom" to type their
+// own -- #stun-url itself remains the single source of truth
+// currentRtcConfig() reads, so this is purely a convenience layer on top.
+describe("STUN preset selector (Section C8)", () => {
+  it("selecting a preset fills stun-url with that preset's URI", () => {
+    initApp(document, { locale: "uk" });
+    const preset = document.getElementById("stun-preset");
+    const stunUrl = document.getElementById("stun-url");
+
+    preset.value = "cloudflare";
+    preset.dispatchEvent(new Event("change"));
+    expect(stunUrl.value).toBe("stun:stun.cloudflare.com:3478");
+
+    preset.value = "mozilla";
+    preset.dispatchEvent(new Event("change"));
+    expect(stunUrl.value).toBe("stun:stun.services.mozilla.com:3478");
+
+    preset.value = "google";
+    preset.dispatchEvent(new Event("change"));
+    expect(stunUrl.value).toBe("stun:stun.l.google.com:19302");
+  });
+
+  it("selecting 'custom' does not overwrite whatever is currently in stun-url", () => {
+    initApp(document, { locale: "uk" });
+    const preset = document.getElementById("stun-preset");
+    const stunUrl = document.getElementById("stun-url");
+
+    stunUrl.value = "stun:my-own-stun.example:3478";
+    preset.value = "custom";
+    preset.dispatchEvent(new Event("change"));
+    expect(stunUrl.value).toBe("stun:my-own-stun.example:3478");
+  });
+
+  it("manually typing a non-preset URL into stun-url flips the dropdown to 'custom'", () => {
+    initApp(document, { locale: "uk" });
+    const preset = document.getElementById("stun-preset");
+    const stunUrl = document.getElementById("stun-url");
+
+    stunUrl.value = "stun:something-else.example:3478";
+    stunUrl.dispatchEvent(new Event("input"));
+    expect(preset.value).toBe("custom");
+  });
+
+  it("manually typing a URL that happens to match a known preset selects that preset, not 'custom'", () => {
+    initApp(document, { locale: "uk" });
+    const preset = document.getElementById("stun-preset");
+    const stunUrl = document.getElementById("stun-url");
+
+    stunUrl.value = "stun:stun.cloudflare.com:3478";
+    stunUrl.dispatchEvent(new Event("input"));
+    expect(preset.value).toBe("cloudflare");
   });
 });
 

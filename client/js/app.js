@@ -1867,6 +1867,30 @@ export function initApp(doc, options) {
     list.hidden = false;
   }
 
+  // Section C8 (specs/reviews/spirit-evaluation-triage.md): STUN preset
+  // dropdown -- #stun-url stays the single value currentRtcConfig() reads,
+  // this is purely a fill-in convenience. Selecting a known preset fills
+  // stun-url; selecting "custom" leaves it untouched. Typing directly into
+  // stun-url flips the dropdown to whichever preset matches (or "custom"
+  // if none does), so the two controls never visibly disagree.
+  const STUN_PRESETS = {
+    google: "stun:stun.l.google.com:19302",
+    cloudflare: "stun:stun.cloudflare.com:3478",
+    mozilla: "stun:stun.services.mozilla.com:3478"
+  };
+  el("stun-preset")?.addEventListener("change", () => {
+    const preset = el("stun-preset").value;
+    if (preset !== "custom" && STUN_PRESETS[preset]) {
+      el("stun-url").value = STUN_PRESETS[preset];
+    }
+  });
+  el("stun-url")?.addEventListener("input", () => {
+    const stunPresetEl = el("stun-preset");
+    if (!stunPresetEl) return;
+    const match = Object.entries(STUN_PRESETS).find(([, url]) => url === el("stun-url").value);
+    stunPresetEl.value = match ? match[0] : "custom";
+  });
+
   // Section: multi-node signaling/TURN UI (specs/phase4/multi-node-ui.md).
   // localStorage, not the "profile" IndexedDB store -- this is a
   // browser/device-level setting (which signaling node this machine talks

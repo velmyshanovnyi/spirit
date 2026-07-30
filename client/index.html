@@ -374,6 +374,17 @@
           <input id="server-url" type="text" value="spirit/public/index.php">
         </label>
         <label class="field"><span data-i18n="label.stun">STUN:</span>
+          <!-- Section C8 (specs/reviews/spirit-evaluation-triage.md): a
+               dropdown of known public STUN servers, or "custom" to type
+               your own below -- #stun-url (not this select) remains the
+               single value currentRtcConfig() actually reads; this is
+               purely a fill-in convenience wired in app.js. -->
+          <select id="stun-preset">
+            <option value="google" data-i18n="stun.presetGoogle" selected>Google</option>
+            <option value="cloudflare" data-i18n="stun.presetCloudflare">Cloudflare</option>
+            <option value="mozilla" data-i18n="stun.presetMozilla">Mozilla</option>
+            <option value="custom" data-i18n="stun.presetCustom">Власний</option>
+          </select>
           <input id="stun-url" type="text" value="stun:stun.l.google.com:19302">
         </label>
         <!-- Section B3 (specs/reviews/spirit-evaluation-triage.md): a
