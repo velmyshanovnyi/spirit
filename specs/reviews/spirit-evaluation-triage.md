@@ -1129,14 +1129,55 @@ B1-B4 завершено. Лишаються B5-B7, з яких B6 (автент
         групи без учасників оновлює список і статус коректно, нуль
         помилок консолі.
 
-  **Залишок роботи (не в цьому проході)**: device-linking-UI
-  (`btn-link-device`/`btn-join-as-device`-обробники) і file-transfer-UI
-  лишаються найризикованішими кандидатами -- обидва глибоко пов'язані з
-  активним WebRTC-каналом/сесійним ключем (`state.channel`/
-  `state.sessionKey`/`state.sessionEcdhWires`), не лише з `state.senderKey`,
-  як groups-UI. Кожен -- окремим кроком з такою самою регрес-перевіркою
-  через наявні чорноскринькові тести `app.test.js` І живою перевіркою у
-  справжній новій вкладці.
+  **Крок 4 завершено (найризикованіший на сьогодні)**: device-linking-UI
+  (`btn-link-device`/`btn-join-as-device`-обробники, увесь B6-флоу з SAS)
+  винесено в новий `client/js/deviceLinkingUI.js` як
+  `initDeviceLinkingUI({...})` -- `app.js`: 4759 -> 4645 рядків. На
+  відміну від кроків 1-3: цей модуль СПРАВДІ читає Й ПИШЕ до `state`
+  (`state.identityKeyPair`/`state.senderKey` присвоюються всередині
+  callback'а застосування grant на новому пристрої) -- `state`
+  передається ПО ПОСИЛАННЮ (не деструктуризовано), тож записи тут
+  одразу видимі в `app.js`, точно як до винесення.
+  `startInitiatorSession`/`startJoinerSession`/`currentRtcConfig`/
+  `randomSenderKey` і чотири render-/reset- хелпери лишились у `app.js`
+  (спільна WebRTC-машинерія сесії й рендер ІНШИХ карток, поза обсягом)
+  і передані як залежності; решта (примітиви з `deviceLinking.js`/
+  `identity.js`/`e2ee.js`/`db.js`) імпортується напряму, бо без стану.
+
+  Під час цього кроку знайдено й виправлено реальний баг ДО того, як
+  він дійшов до тестів: буквальний `*/` у тексті JSDoc-коментаря
+  ("render*/reset*") передчасно закрив блок-коментар -- Vite's
+  import-analysis коректно відхилив це як синтаксичну помилку;
+  виправлено переформулюванням.
+
+  - [x] **Tests**: жодних нових тестів не знадобилось -- наявні
+        `app.test.js`-тести на device-linking (B6, включно з SAS/PIN/
+        F2-регресією) пройшли без змін. Повний набір: 874/874.
+  - [x] **Impl**: `client/js/deviceLinkingUI.js` (новий), `client/js/app.js`
+        (заміна блоку + прибрано тепер-зайві імпорти
+        `generateDeviceKeyPair`/`createLinkRequest`/`createLinkGrant`/
+        `applyLinkGrant`/`appendDeviceToList`/`deriveLinkVerificationCode`
+        з `deviceLinking.js` і `listKeys` з `db.js`; `snapshotContacts`
+        перенесено цілком у новий модуль, бо мав лише один виклик).
+  - [x] **Exec review**: самоперевірка -- **найповніша жива перевірка
+        серед усіх чотирьох кроків**: повний end-to-end
+        device-linking-хендшейк у ДВОХ реальних вкладках на
+        `spirit.kibr.com.ua` (створення профілю -> `btn-link-device` ->
+        реальний `createInvite`/PoW -> друга вкладка `btn-join-as-device`
+        з тим самим room_id/invite_token -> SAS-код `860245` збігається
+        на ОБОХ екранах -> клік "Підтвердити" -> `pub-key-display` на
+        новому пристрої побайтово ЗБІГАЄТЬСЯ з ідентичністю primary) --
+        підтверджує, що весь SAS/PIN/grant/appendDeviceToList-ланцюжок
+        працює після рефакторингу без жодної регресії. Додатково
+        підтверджено `createInvite`/PoW-флоу окремо на
+        `spirit.kolo.media`. Нуль помилок консолі на обох.
+
+  **Залишок роботи (не в цьому проході)**: file-transfer-UI
+  (`fileInput`-обробник, `sendFileChunks`) лишається останнім
+  кандидатом декомпозиції -- пов'язаний з активним WebRTC-каналом
+  (`state.channel`/`state.sessionKey`/`state.outgoingFileTransfers`/
+  `state.pendingFileOffers`), той самий клас ризику, що й щойно
+  завершений device-linking-UI.
   - [ ] **Tests**: TBD для кожного наступного кроку.
   - [ ] **Impl**: TBD.
   - [ ] **Exec review**: TBD.
