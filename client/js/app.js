@@ -51,7 +51,15 @@ import { acceptNewerProofSet, addProofToSet, revokeProofFromSet } from "./proofS
 import { createProofBlock, parseProofBlock, verifyProofBlock } from "./proofs.js";
 import { fetchProofPageText } from "./fetchProof.js";
 import { generateAnonymousNickname } from "./anonymousNickname.js";
-import { splitFileIntoChunks, chunkToBase64, base64ToChunk, computeFileHash, createFileAssembler } from "./fileTransfer.js";
+import {
+  chunkToBase64,
+  base64ToChunk,
+  computeFileHash,
+  computeFileHashStreaming,
+  countFileChunks,
+  readFileChunk,
+  createFileAssembler
+} from "./fileTransfer.js";
 import { getGroup, listGroups, updateGroupMembers, ensureGroupBootstrap } from "./groups.js";
 import { initGroupsUI } from "./groupsUI.js";
 import {
@@ -2168,19 +2176,23 @@ export function initApp(doc, options) {
     const channel = state.channel;
     const bufferedAmountHighThreshold = getSetting("bufferedAmountHighThresholdBytes");
     channel.bufferedAmountLowThreshold = bufferedAmountHighThreshold;
-    for (let index = transfer.sentCount; index < transfer.chunks.length; index++) {
+    for (let index = transfer.sentCount; index < transfer.totalChunks; index++) {
       // The transfer can vanish mid-flight (peer session reset) -- stop
       // rather than keep pushing chunks nobody will ever assemble.
       if (!state.outgoingFileTransfers[fileId] || state.channel !== channel) return;
       if (channel.bufferedAmount > bufferedAmountHighThreshold) {
         await waitForBufferedAmountLow(channel);
       }
-      const data = chunkToBase64(transfer.chunks[index]);
+      // Section D0: read this ONE chunk directly off disk via the File
+      // object rather than indexing into a whole-file array held in
+      // memory since selection time.
+      const chunkBytes = await readFileChunk(transfer.file, index, transfer.chunkSize);
+      const data = chunkToBase64(chunkBytes);
       channel.send(await encryptMessage(state.sessionKey, JSON.stringify({ type: "file-chunk", fileId, index, data })));
       transfer.sentCount = index + 1;
       renderFileTransferStatus(
         fileId,
-        t("fileTransfer.progressSending", { name: transfer.name, sent: transfer.sentCount, total: transfer.chunks.length })
+        t("fileTransfer.progressSending", { name: transfer.name, sent: transfer.sentCount, total: transfer.totalChunks })
       );
     }
     delete state.outgoingFileTransfers[fileId];
@@ -4578,12 +4590,20 @@ export function initApp(doc, options) {
       const file = fileInput.files && fileInput.files[0];
       fileInput.value = "";
       if (!file || !state.channel || !state.sessionKey || !state.peerFingerprint) return;
-      const buffer = await file.arrayBuffer();
-      const sha256 = await computeFileHash(buffer);
-      const chunks = splitFileIntoChunks(buffer, getSetting("fileChunkSize"));
+      // Section D0 (specs/reviews/spirit-evaluation-triage.md): the whole
+      // file used to be read into memory here (file.arrayBuffer()) before
+      // hashing or chunking could even start -- constant-memory streaming
+      // hash instead; chunks themselves are read on demand in
+      // sendFileChunks() below via readFileChunk(), never pre-split into a
+      // held-in-memory array.
+      const sha256 = await computeFileHashStreaming(file);
+      const chunkSize = getSetting("fileChunkSize");
+      const totalChunks = countFileChunks(file.size, chunkSize);
       const fileId = randomFileId();
       state.outgoingFileTransfers[fileId] = {
-        chunks,
+        file,
+        chunkSize,
+        totalChunks,
         name: file.name,
         mimeType: file.type,
         size: file.size,
@@ -4599,14 +4619,14 @@ export function initApp(doc, options) {
             size: file.size,
             mimeType: file.type,
             sha256,
-            totalChunks: chunks.length
+            totalChunks
           })
         )
       );
       const statusText =
         file.size > getSetting("fileSizeWarningBytes")
           ? t("fileTransfer.sizeWarning", { name: file.name })
-          : t("fileTransfer.progressSending", { name: file.name, sent: 0, total: chunks.length });
+          : t("fileTransfer.progressSending", { name: file.name, sent: 0, total: totalChunks });
       renderFileTransferStatus(fileId, statusText);
     });
   }

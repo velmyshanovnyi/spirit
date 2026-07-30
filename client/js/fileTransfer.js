@@ -3,6 +3,8 @@
 // No DOM dependency, no app.js/state dependency -- integration into the
 // live chat flow (control messages, backpressure, UI) is Section FT2.
 
+import { createSHA256 } from "./vendor/hash-wasm.esm.js";
+
 /**
  * Splits an ArrayBuffer into an array of Uint8Array chunks of exactly
  * `chunkSize` bytes each, except possibly the last one which may be
@@ -50,6 +52,67 @@ export function base64ToChunk(base64String) {
 export async function computeFileHash(arrayBuffer) {
   const digest = await crypto.subtle.digest("SHA-256", arrayBuffer);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Internal read-window size for computeFileHashStreaming -- independent of
+// the app's own configurable fileChunkSize (Section D0 deliberately keeps
+// these separate: the DataChannel chunk size is a user-tunable transport
+// concern, this is purely an internal memory-bound knob for hashing).
+const HASH_STREAM_WINDOW_BYTES = 1024 * 1024;
+
+/**
+ * Section D0 (specs/reviews/spirit-evaluation-triage.md): streaming
+ * SHA-256 over a File/Blob -- constant memory regardless of file size,
+ * unlike computeFileHash(arrayBuffer) above which requires the whole file
+ * already resident in memory. Reads via Blob.slice()/.arrayBuffer() in
+ * fixed-size windows rather than Blob.stream() -- deliberately, since
+ * jsdom's File polyfill (used by this project's own test suite) doesn't
+ * implement .stream(), while .slice()/.arrayBuffer() work identically in
+ * every real browser and in jsdom, so the exact same code path is
+ * exercised by tests and production. Used on the SENDING side (app.js's
+ * file-input handler); computeFileHash(buffer) is still used on the
+ * RECEIVING side to verify a fully-reassembled buffer, where the whole
+ * buffer is already necessarily in memory by the time verification
+ * happens (createFileAssembler.assemble() below). Web Crypto's
+ * SubtleCrypto.digest() has no incremental/streaming API in browsers,
+ * hence the separate vendored WASM implementation
+ * (vendor/hash-wasm.esm.js, already used elsewhere for Argon2id) -- both
+ * produce byte-identical SHA-256 output for the same input, verified in
+ * fileTransfer.test.js against Web Crypto's own known test vectors.
+ */
+export async function computeFileHashStreaming(blob) {
+  const hasher = await createSHA256();
+  hasher.init();
+  for (let offset = 0; offset < blob.size; offset += HASH_STREAM_WINDOW_BYTES) {
+    const window = blob.slice(offset, offset + HASH_STREAM_WINDOW_BYTES);
+    hasher.update(new Uint8Array(await window.arrayBuffer()));
+  }
+  return hasher.digest("hex");
+}
+
+/**
+ * How many chunks splitFileIntoChunks(arrayBuffer, chunkSize) WOULD have
+ * produced for a buffer of `size` bytes, without needing the buffer itself
+ * -- same empty-file-yields-zero-chunks and short-last-chunk semantics.
+ */
+export function countFileChunks(size, chunkSize) {
+  if (!Number.isInteger(chunkSize) || chunkSize <= 0) {
+    throw new Error("chunkSize must be a positive integer");
+  }
+  return Math.ceil(size / chunkSize);
+}
+
+/**
+ * Reads chunk `index` (0-based) of a File/Blob directly via Blob.slice(),
+ * without ever reading the rest of the file into memory -- the on-demand
+ * counterpart to splitFileIntoChunks, which requires the whole file
+ * pre-loaded into an ArrayBuffer. Same chunk boundaries countFileChunks
+ * above describes.
+ */
+export async function readFileChunk(blob, index, chunkSize) {
+  const start = index * chunkSize;
+  const slice = blob.slice(start, start + chunkSize);
+  return new Uint8Array(await slice.arrayBuffer());
 }
 
 /**

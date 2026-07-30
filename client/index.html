@@ -6,11 +6,24 @@
   <!-- Section G3 (specs/reviews/spirit-evaluation-triage.md): no
        'unsafe-inline' in script-src -- the former inline theme-prepaint
        script was moved to js/themePrepaint.js for exactly this reason.
-       connect-src is intentionally '*': the signaling/STUN/TURN server URLs
-       are user-configured (docs/decisions.md D1/D2), not fixed origins this
-       policy could name in advance. style-src keeps 'unsafe-inline' for the
-       same reason design-settings overrides apply as inline styles. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src *; frame-src https://accounts.google.com; object-src 'none'; base-uri 'self'; form-action 'self'">
+       'wasm-unsafe-eval' (Section D0 follow-up, found while adding
+       streaming file hashing): client/js/vendor/hash-wasm.esm.js compiles
+       a WebAssembly module for Argon2id (deterministic accounts) and
+       SHA-256 (file hashing) -- WITHOUT this, WebAssembly.compile() itself
+       is blocked as a script-src violation, which silently broke
+       Argon2id-based portable login in production from the moment the
+       CSP without it was deployed until this fix (caught by live-testing
+       the file-hash streaming change, not by re-testing portable login
+       itself -- see the triage entry for the lesson on testing EVERY
+       script-src-adjacent feature after a CSP change, not just the one
+       being actively worked on). 'wasm-unsafe-eval' only permits
+       WebAssembly compilation, NOT arbitrary eval()/Function() -- much
+       narrower than 'unsafe-eval'. connect-src is intentionally '*': the
+       signaling/STUN/TURN server URLs are user-configured
+       (docs/decisions.md D1/D2), not fixed origins this policy could name
+       in advance. style-src keeps 'unsafe-inline' for the same reason
+       design-settings overrides apply as inline styles. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src *; frame-src https://accounts.google.com; object-src 'none'; base-uri 'self'; form-action 'self'">
   <title>Spirit</title>
   <link rel="stylesheet" href="css/style.css">
   <script src="js/themePrepaint.js"></script>

@@ -7,6 +7,9 @@ import {
   chunkToBase64,
   base64ToChunk,
   computeFileHash,
+  computeFileHashStreaming,
+  countFileChunks,
+  readFileChunk,
   createFileAssembler,
 } from "../js/fileTransfer.js";
 
@@ -119,6 +122,72 @@ describe("computeFileHash", () => {
     const bytes = new TextEncoder().encode("abc");
     const hash = await computeFileHash(bytes.buffer);
     expect(hash).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+  });
+});
+
+// Section D0 (specs/reviews/spirit-evaluation-triage.md): the SENDING side
+// used to call file.arrayBuffer() -- the whole file in memory at once --
+// before hashing or chunking could even start. computeFileHashStreaming +
+// readFileChunk/countFileChunks let the sender hash and chunk a File
+// without ever holding more than one chunk (or one streaming-hash internal
+// buffer) in memory at a time, regardless of file size.
+describe("computeFileHashStreaming", () => {
+  it("matches computeFileHash's result for the same content (cross-validates the two hashing paths the sender vs. receiver now use)", async () => {
+    const bytes = new Uint8Array(5000).map((_, i) => i % 256);
+    const viaBuffer = await computeFileHash(bytes.buffer);
+    const viaStream = await computeFileHashStreaming(new Blob([bytes]));
+    expect(viaStream).toBe(viaBuffer);
+  });
+
+  it("matches a known SHA-256 test vector for the empty string", async () => {
+    const hash = await computeFileHashStreaming(new Blob([]));
+    expect(hash).toBe("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+  });
+
+  it("matches a known SHA-256 test vector for the ASCII string 'abc'", async () => {
+    const hash = await computeFileHashStreaming(new Blob(["abc"]));
+    expect(hash).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+  });
+
+  it("streams a file larger than any single internal chunk correctly (multi-read-loop path)", async () => {
+    // Blob.stream()'s default internal read size varies by engine but is
+    // typically far under a megabyte -- this forces at least a few loop
+    // iterations in computeFileHashStreaming's reader.read() loop.
+    const bytes = new Uint8Array(2_000_000).map((_, i) => i % 256);
+    const viaBuffer = await computeFileHash(bytes.buffer);
+    const viaStream = await computeFileHashStreaming(new Blob([bytes]));
+    expect(viaStream).toBe(viaBuffer);
+  });
+});
+
+describe("countFileChunks", () => {
+  it("matches splitFileIntoChunks's chunk count for an exact multiple", () => {
+    expect(countFileChunks(32, 16)).toBe(2);
+  });
+
+  it("matches splitFileIntoChunks's chunk count when the last chunk is short", () => {
+    expect(countFileChunks(35, 16)).toBe(3);
+  });
+
+  it("a zero-byte file has zero chunks", () => {
+    expect(countFileChunks(0, 16)).toBe(0);
+  });
+
+  it("a file smaller than one chunkSize has exactly one chunk", () => {
+    expect(countFileChunks(5, 16)).toBe(1);
+  });
+});
+
+describe("readFileChunk", () => {
+  it("reads the same bytes at each index as splitFileIntoChunks would have produced", async () => {
+    const bytes = new Uint8Array(35).map((_, i) => i);
+    const blob = new Blob([bytes]);
+    const chunk0 = await readFileChunk(blob, 0, 16);
+    const chunk1 = await readFileChunk(blob, 1, 16);
+    const chunk2 = await readFileChunk(blob, 2, 16);
+    expect(Array.from(chunk0)).toEqual(Array.from({ length: 16 }, (_, i) => i));
+    expect(Array.from(chunk1)).toEqual(Array.from({ length: 16 }, (_, i) => 16 + i));
+    expect(Array.from(chunk2)).toEqual([32, 33, 34]);
   });
 });
 
