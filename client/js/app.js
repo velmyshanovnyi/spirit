@@ -43,18 +43,11 @@ import { acceptNewerProofSet, addProofToSet, revokeProofFromSet } from "./proofS
 import { createProofBlock, parseProofBlock, verifyProofBlock } from "./proofs.js";
 import { fetchProofPageText } from "./fetchProof.js";
 import { generateAnonymousNickname } from "./anonymousNickname.js";
-import {
-  chunkToBase64,
-  base64ToChunk,
-  computeFileHash,
-  computeFileHashStreaming,
-  countFileChunks,
-  readFileChunk,
-  createFileAssembler
-} from "./fileTransfer.js";
+import { chunkToBase64, base64ToChunk, computeFileHash, readFileChunk } from "./fileTransfer.js";
 import { getGroup, listGroups, updateGroupMembers, ensureGroupBootstrap } from "./groups.js";
 import { initGroupsUI } from "./groupsUI.js";
 import { initDeviceLinkingUI } from "./deviceLinkingUI.js";
+import { initFileTransferUI } from "./fileTransferUI.js";
 import {
   saveImportedContact,
   listImportedContacts,
@@ -2115,10 +2108,6 @@ export function initApp(doc, options) {
   // 2, client/js/settingsRegistry.js: fileChunkSize,
   // bufferedAmountHighThresholdBytes, fileSizeWarningBytes), defaults
   // unchanged from the original hardcoded 16KB/1MB/100MB.
-  function randomFileId() {
-    return [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
-  }
-
   function formatFileSize(bytes) {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -4445,94 +4434,11 @@ export function initApp(doc, options) {
     }
   });
 
-  // Section FT2 (specs/phase4/file-transfer.md): selecting a file only ever
-  // computes its hash/chunks and sends a file-offer -- chunks are NEVER
-  // sent here. Actual chunk streaming happens exclusively in
-  // sendFileChunks(), which is only reachable from the "file-accept" branch
-  // of handleChatMessage above, once the peer has explicitly accepted.
-  const fileInput = el("file-input");
-  if (fileInput) {
-    fileInput.addEventListener("change", async () => {
-      const file = fileInput.files && fileInput.files[0];
-      fileInput.value = "";
-      if (!file || !state.channel || !state.sessionKey || !state.peerFingerprint) return;
-      // Section D0 (specs/reviews/spirit-evaluation-triage.md): the whole
-      // file used to be read into memory here (file.arrayBuffer()) before
-      // hashing or chunking could even start -- constant-memory streaming
-      // hash instead; chunks themselves are read on demand in
-      // sendFileChunks() below via readFileChunk(), never pre-split into a
-      // held-in-memory array.
-      const sha256 = await computeFileHashStreaming(file);
-      const chunkSize = getSetting("fileChunkSize");
-      const totalChunks = countFileChunks(file.size, chunkSize);
-      const fileId = randomFileId();
-      state.outgoingFileTransfers[fileId] = {
-        file,
-        chunkSize,
-        totalChunks,
-        name: file.name,
-        mimeType: file.type,
-        size: file.size,
-        sentCount: 0
-      };
-      state.channel.send(
-        await encryptMessage(
-          state.sessionKey,
-          JSON.stringify({
-            type: "file-offer",
-            fileId,
-            name: file.name,
-            size: file.size,
-            mimeType: file.type,
-            sha256,
-            totalChunks
-          })
-        )
-      );
-      const statusText =
-        file.size > getSetting("fileSizeWarningBytes")
-          ? t("fileTransfer.sizeWarning", { name: file.name })
-          : t("fileTransfer.progressSending", { name: file.name, sent: 0, total: totalChunks });
-      renderFileTransferStatus(fileId, statusText);
-    });
-  }
-
-  const btnFileAccept = el("btn-file-accept");
-  if (btnFileAccept) {
-    btnFileAccept.addEventListener("click", async () => {
-      const banner = el("file-offer-banner");
-      const fileId = banner && banner.dataset.fileId;
-      const offer = fileId && state.pendingFileOffers[fileId];
-      if (!offer || !state.channel || !state.sessionKey) return;
-      delete state.pendingFileOffers[fileId];
-      banner.hidden = true;
-      state.incomingFileTransfers[fileId] = {
-        assembler: createFileAssembler(offer.totalChunks),
-        name: offer.name,
-        mimeType: offer.mimeType,
-        sha256: offer.sha256,
-        totalChunks: offer.totalChunks
-      };
-      renderFileTransferStatus(
-        fileId,
-        t("fileTransfer.progressReceiving", { name: offer.name, received: 0, total: offer.totalChunks })
-      );
-      state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify({ type: "file-accept", fileId })));
-    });
-  }
-
-  const btnFileReject = el("btn-file-reject");
-  if (btnFileReject) {
-    btnFileReject.addEventListener("click", async () => {
-      const banner = el("file-offer-banner");
-      const fileId = banner && banner.dataset.fileId;
-      const offer = fileId && state.pendingFileOffers[fileId];
-      if (!offer || !state.channel || !state.sessionKey) return;
-      delete state.pendingFileOffers[fileId];
-      banner.hidden = true;
-      state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify({ type: "file-reject", fileId })));
-    });
-  }
+  // Section G1 (specs/reviews/spirit-evaluation-triage.md): fifth and last
+  // module extracted out of this closure -- see fileTransferUI.js.
+  // renderFileTransferStatus/sendFileChunks stay in app.js (shared with
+  // handleChatMessage's receiving-side branches).
+  initFileTransferUI({ doc, el, t, state, renderFileTransferStatus });
   // Bug report 2026-07-17: Enter alone must send, same as clicking "Надіслати"
   // -- Shift+Enter is left alone in case a future multi-line input wants it
   // for a newline (the input is a single-line <input> today, so it's a no-op,
