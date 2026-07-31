@@ -616,6 +616,19 @@
        CSS `resize` on the panel itself, both persisted to localStorage
        (app.js's floating-video drag/resize wiring) the same way
        spirit.folders/spirit.theme persist other device-level UI state. -->
+  <!-- Section footer-1 (2026-07-31, user request): the app previously had
+       no footer at all -- LICENSE/GitHub/docs links plus a build marker so
+       users/volunteers can tell which deploy they're looking at. Fixed to
+       the bottom of the viewport (same pattern as #conversation-toolbar),
+       body gets matching bottom padding in style.css so it never covers
+       the last row of page content. -->
+  <footer id="app-footer" class="app-footer">
+    <a id="footer-license-link" class="footer-link" href="https://github.com/velmyshanovnyi/spirit/blob/main/LICENSE" target="_blank" rel="noopener" data-i18n="footer.license">Ліцензія (AGPL-3.0)</a>
+    <a id="footer-github-link" class="footer-link" href="https://github.com/velmyshanovnyi/spirit" target="_blank" rel="noopener" data-i18n="footer.github">GitHub</a>
+    <a id="footer-docs-link" class="footer-link" href="https://github.com/velmyshanovnyi/spirit/blob/main/docs/e2ee.md" target="_blank" rel="noopener" data-i18n="footer.docs">Документація</a>
+    <span class="footer-version"><span data-i18n="footer.version">Білд:</span> <span id="app-version"></span></span>
+  </footer>
+
   <div id="floating-video" class="floating-video" hidden>
     <div id="floating-video-handle" class="floating-video-handle" aria-hidden="true"></div>
     <video id="video-remote" class="video-tile video-tile-remote" autoplay playsinline hidden></video>

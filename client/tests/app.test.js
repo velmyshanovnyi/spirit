@@ -171,6 +171,7 @@ import {
 import { createPermanentProfile, exportRawIdentity, listProfiles, loadPermanentProfile, setNickname, getNickname, adoptScalarIdentity } from "../js/profile.js";
 import { deriveAccountMaterial, generateAccountName } from "../js/deterministicIdentity.js";
 import { generateStrongPassword } from "../js/passwordGenerator.js";
+import { APP_VERSION } from "../js/version.js";
 import {
   generateDeviceKeyPair,
   createLinkRequest,
@@ -466,6 +467,13 @@ const HTML = `
     <div id="history-list"></div>
     <p id="history-empty"></p>
   </section>
+
+  <footer id="app-footer">
+    <a id="footer-license-link" href="https://github.com/velmyshanovnyi/spirit/blob/main/LICENSE" target="_blank" rel="noopener"></a>
+    <a id="footer-github-link" href="https://github.com/velmyshanovnyi/spirit" target="_blank" rel="noopener"></a>
+    <a id="footer-docs-link" href="https://github.com/velmyshanovnyi/spirit/blob/main/docs/e2ee.md" target="_blank" rel="noopener"></a>
+    <span id="app-version"></span>
+  </footer>
 `;
 
 function fakePublicKey(tag) {
@@ -1448,6 +1456,14 @@ describe("theme and language switchers (Section U2)", () => {
     langSelect.value = "de";
     langSelect.dispatchEvent(new Event("change"));
     expect(document.getElementById("account-heading").textContent).toBe("Konto");
+  });
+
+  // Section footer-1 (2026-07-31, user request): a footer with LICENSE/
+  // GitHub/docs links and a build marker -- previously the app had no
+  // footer at all anywhere in the DOM.
+  it("stamps the footer's version span with APP_VERSION on init", async () => {
+    initApp(document, { locale: "uk" });
+    expect(document.getElementById("app-version").textContent).toBe(APP_VERSION);
   });
 
   // Section C6 (specs/reviews/spirit-evaluation-triage.md): settingsRegistry.js/

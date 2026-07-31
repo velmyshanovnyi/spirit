@@ -14,6 +14,7 @@ import { generateStrongPassword } from "./passwordGenerator.js";
 import { bytesToMnemonic } from "./mnemonic.js";
 import { createKeyfile } from "./keyfile.js";
 import { buildIdenticonSvg } from "./identicon.js";
+import { APP_VERSION } from "./version.js";
 import { acceptNewerDeviceList } from "./deviceLinking.js";
 import { get, put } from "./db.js";
 import { createIdentityAnnounce, verifyIdentityAnnounce } from "./identityAnnounce.js";
@@ -147,6 +148,13 @@ export function initApp(doc, options) {
   // which screen the user starts on, same as theme itself.
   applyDesignSettings(doc);
   applyTranslations(doc);
+
+  // Section footer-1 (2026-07-31, user request): static build marker, no
+  // reactivity needed -- set once at boot, same as the rest of this block.
+  const appVersionEl = el("app-version");
+  if (appVersionEl) {
+    appVersionEl.textContent = APP_VERSION;
+  }
 
   const themeToggle = doc.getElementById("theme-toggle");
   if (themeToggle) {
