@@ -173,6 +173,17 @@ import { deriveAccountMaterial, generateAccountName } from "../js/deterministicI
 import { generateStrongPassword } from "../js/passwordGenerator.js";
 import { APP_VERSION } from "../js/version.js";
 import {
+  FOOTER_ITEMS,
+  setFooterItemVisible,
+  isFooterItemVisible,
+  addCustomBlock,
+  setCustomBlockHtml,
+  removeCustomBlock,
+  setFooterOrder,
+  getFooterOrder,
+  applyFooterSettings
+} from "../js/footerRegistry.js";
+import {
   generateDeviceKeyPair,
   createLinkRequest,
   createLinkGrant,
@@ -380,6 +391,11 @@ const HTML = `
     <button id="btn-reset-all-settings" type="button"></button>
     <div id="design-settings-list"></div>
     <button id="btn-reset-all-design-settings" type="button"></button>
+    <h2 data-i18n="footerSettings.heading"></h2>
+    <div id="footer-settings-list"></div>
+    <div id="footer-settings-status"></div>
+    <button id="btn-add-footer-custom-block" type="button"></button>
+    <button id="btn-reset-footer-settings" type="button"></button>
   </section>
 
   <section data-screen="room">
@@ -472,7 +488,7 @@ const HTML = `
     <a id="footer-license-link" href="https://github.com/velmyshanovnyi/spirit/blob/main/LICENSE" target="_blank" rel="noopener"></a>
     <a id="footer-github-link" href="https://github.com/velmyshanovnyi/spirit" target="_blank" rel="noopener"></a>
     <a id="footer-docs-link" href="https://github.com/velmyshanovnyi/spirit/blob/main/docs/e2ee.md" target="_blank" rel="noopener"></a>
-    <span id="app-version"></span>
+    <span class="footer-version"><span id="app-version"></span></span>
     <button id="footer-advanced-toggle" type="button" data-i18n="footer.advancedModeUnlock"></button>
   </footer>
   <div id="advanced-mode-modal" hidden>
@@ -1692,6 +1708,294 @@ describe("advanced mode (Section SM2+SM3)", () => {
 
     await vi.waitFor(() => expect(document.querySelector('[data-screen="conversation"]').hidden).toBe(false));
     expect(document.getElementById("app-sidebar").hidden).toBe(true); // still locked otherwise
+  });
+});
+
+// Section FC2 (specs/ui/footer-customization.md): footer rendering driven
+// by footerRegistry.js's visibility/order data -- fixed items get CSS
+// `order` + `hidden` per the registry, custom blocks get their own
+// dynamically-created DOM nodes with raw innerHTML.
+describe("footer settings render (Section FC2)", () => {
+  it("hides a fixed item when its visibility is turned off", () => {
+    setFooterItemVisible("github", false);
+    initApp(document, { locale: "uk" });
+    expect(document.getElementById("footer-github-link").hidden).toBe(true);
+    expect(document.getElementById("footer-license-link").hidden).toBe(false);
+  });
+
+  // Exec review finding 1 (specs/reviews/footer-customization-FC2-iter1.md):
+  // hiding footer-advanced-toggle used to actually work like any other
+  // item -- but it's the ONLY way to reach the rest of the app once
+  // locked (index.html's own comment on this element: "always visible in
+  // the footer regardless of mode"). Hide it, then lock -- zero UI path
+  // back in.
+  it("never hides the advanced-mode toggle, even if its visibility is explicitly turned off (self-lockout guard)", () => {
+    setFooterItemVisible("advancedToggle", false);
+    initApp(document, { locale: "uk" });
+    expect(document.getElementById("footer-advanced-toggle").hidden).toBe(false);
+  });
+
+  it("applies the saved combined order as CSS order on every fixed item, at their REAL (non-trivial) position", () => {
+    const reversed = [...FOOTER_ITEMS.map((i) => i.key)].reverse();
+    setFooterOrder(reversed);
+    initApp(document, { locale: "uk" });
+    reversed.forEach((key, index) => {
+      const item = FOOTER_ITEMS.find((i) => i.key === key);
+      const node = document.querySelector(item.selector);
+      expect(node.style.order).toBe(String(index));
+    });
+    // Guards against a hardcoded "0" implementation: at least one item
+    // here MUST be at a non-zero position for the test above to mean
+    // anything.
+    expect(reversed.length).toBeGreaterThan(1);
+  });
+
+  it("renders a custom block's raw HTML into its own node inside the footer", () => {
+    const id = addCustomBlock();
+    setCustomBlockHtml(id, '<a href="https://example.com">custom link</a>');
+    initApp(document, { locale: "uk" });
+
+    const node = document.querySelector(`#app-footer [data-footer-block-id="${id}"]`);
+    expect(node).not.toBeNull();
+    expect(node.innerHTML).toBe('<a href="https://example.com">custom link</a>');
+    expect(node.parentElement.id).toBe("app-footer");
+  });
+
+  it("positions a custom block's CSS order according to its REAL (non-zero-if-not-first) combined position", () => {
+    const id = addCustomBlock();
+    const order = getFooterOrder().filter((e) => e !== `custom:${id}`);
+    // Put it third, not first -- a hardcoded order="0" implementation
+    // would still pass a "put it first" test.
+    const withCustomThird = [...order.slice(0, 2), `custom:${id}`, ...order.slice(2)];
+    setFooterOrder(withCustomThird);
+    initApp(document, { locale: "uk" });
+
+    const node = document.querySelector(`#app-footer [data-footer-block-id="${id}"]`);
+    expect(node.style.order).toBe("2");
+  });
+
+  // Exec review finding 2: comparing against node.innerHTML (browser-
+  // normalized re-serialization) instead of the ORIGINAL source string
+  // means a block whose HTML content hasn't semantically changed can
+  // still get its subtree destroyed and rebuilt on every re-render
+  // (browsers normalize e.g. single quotes to double, attribute spacing,
+  // etc.), losing any live state inside it -- concretely, an <input>'s
+  // in-progress typed value and focus.
+  it("does not lose focus/typed state inside a custom block when re-rendering with unchanged source HTML", () => {
+    const id = addCustomBlock();
+    // Single-quoted attribute -- browsers/jsdom re-serialize innerHTML
+    // with double quotes, so a naive `.innerHTML !== source` compare is
+    // ALWAYS true for this input, on every single render.
+    setCustomBlockHtml(id, "<input type='text' id='probe-input'>");
+    initApp(document, { locale: "uk" });
+
+    const input = document.getElementById("probe-input");
+    input.focus();
+    input.value = "half-typed";
+
+    // Re-render with the SAME stored source (e.g. triggered by an
+    // unrelated settings change elsewhere) must not touch this block.
+    applyFooterSettings(document);
+
+    expect(document.getElementById("probe-input").value).toBe("half-typed");
+    expect(document.activeElement.id).toBe("probe-input");
+  });
+
+  it("removes a custom block's DOM node once the block itself is deleted, WITHOUT a page reload", () => {
+    // Exec review finding 3: the original test reset document.body.innerHTML
+    // before re-init, so the footer started with zero custom-block nodes --
+    // the sweep-removal loop itself was never actually exercised. This is
+    // the real FC3 delete-button path: call applyFooterSettings again on
+    // the SAME live DOM after removeCustomBlock().
+    const id = addCustomBlock();
+    setCustomBlockHtml(id, "<p>bye</p>");
+    initApp(document, { locale: "uk" });
+    expect(document.querySelector(`#app-footer [data-footer-block-id="${id}"]`)).not.toBeNull();
+
+    removeCustomBlock(id);
+    applyFooterSettings(document);
+    expect(document.querySelector(`#app-footer [data-footer-block-id="${id}"]`)).toBeNull();
+  });
+});
+
+// Section FC3 (specs/ui/footer-customization.md): the Settings panel card
+// that lets the user actually drive footerRegistry.js -- visibility
+// checkboxes + up/down reordering for fixed items, add/edit/remove for
+// custom HTML blocks, all sharing ONE combined order.
+describe("footer settings UI panel (Section FC3)", () => {
+  function footerSettingsList() {
+    return document.getElementById("footer-settings-list");
+  }
+
+  it("renders one row per fixed item plus one per custom block, EACH AT ITS REAL COMBINED-ORDER POSITION", () => {
+    // Exec review finding 2 (specs/reviews/footer-customization-FC3-iter1.md):
+    // the original version of this test only checked row COUNT and that
+    // ONE row somewhere had a textarea -- it never verified the actual
+    // relative ORDER of rows against the stored order, so a panel that
+    // silently rendered fixed items in registry order (ignoring the real
+    // saved order) while placing custom blocks at their stored index
+    // still passed.
+    const id = addCustomBlock();
+    const savedOrder = ["github", `custom:${id}`, "license", "docs", "version", "advancedToggle"];
+    setFooterOrder(savedOrder);
+    initApp(document, { locale: "uk" });
+
+    const rows = [...footerSettingsList().children];
+    expect(rows).toHaveLength(6);
+    expect(rows.map((row) => row.dataset.footerOrderEntry)).toEqual(savedOrder);
+    expect(rows[1].querySelector("textarea")).not.toBeNull(); // the custom block, at its real index (1)
+  });
+
+  it("the advancedToggle row has no visibility checkbox (cannot be hidden, order-only)", () => {
+    initApp(document, { locale: "uk" });
+    const row = footerSettingsList().querySelector('[data-footer-order-entry="advancedToggle"]');
+    expect(row.querySelector('input[type="checkbox"]')).toBeNull();
+  });
+
+  it("toggling a fixed item's checkbox hides/shows it in the live footer immediately", () => {
+    initApp(document, { locale: "uk" });
+    const checkbox = footerSettingsList().querySelector('input[data-footer-item-key="github"]');
+    checkbox.checked = false;
+    checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+
+    expect(document.getElementById("footer-github-link").hidden).toBe(true);
+    expect(isFooterItemVisible("github")).toBe(false);
+  });
+
+  it("moving a fixed item down changes the combined order AND immediately updates the live footer's CSS order (no reload)", () => {
+    // Exec review finding 1: the original test only asserted against
+    // getFooterOrder() (the stored data), never against the LIVE footer
+    // DOM -- mutation-verified that deleting the applyFooterSettings(doc)
+    // call inside this click handler still left the whole suite green.
+    initApp(document, { locale: "uk" });
+    const firstKey = getFooterOrder()[0];
+    const secondKey = getFooterOrder()[1];
+    const secondItem = FOOTER_ITEMS.find((i) => i.key === secondKey);
+    const downBtn = footerSettingsList().querySelector(`[data-footer-order-entry="${firstKey}"] [data-footer-order-move="down"]`);
+    downBtn.click();
+
+    expect(getFooterOrder()[0]).toBe(secondKey);
+    expect(getFooterOrder()[1]).toBe(firstKey);
+    if (secondItem) {
+      expect(document.querySelector(secondItem.selector).style.order).toBe("0");
+    }
+  });
+
+  it("moving a fixed item up (not just down) changes the combined order and the live footer", () => {
+    initApp(document, { locale: "uk" });
+    const firstKey = getFooterOrder()[0];
+    const secondKey = getFooterOrder()[1];
+    const firstItem = FOOTER_ITEMS.find((i) => i.key === firstKey);
+    const upBtn = footerSettingsList().querySelector(`[data-footer-order-entry="${secondKey}"] [data-footer-order-move="up"]`);
+    upBtn.click();
+
+    expect(getFooterOrder()[0]).toBe(secondKey);
+    expect(getFooterOrder()[1]).toBe(firstKey);
+    if (firstItem) {
+      expect(document.querySelector(firstItem.selector).style.order).toBe("1");
+    }
+  });
+
+  it('"Додати HTML-блок" adds a new empty, visible block row and an (empty) block in the live footer', () => {
+    initApp(document, { locale: "uk" });
+    const before = footerSettingsList().children.length;
+
+    document.getElementById("btn-add-footer-custom-block").click();
+
+    expect(footerSettingsList().children.length).toBe(before + 1);
+    const newTextarea = [...footerSettingsList().querySelectorAll("textarea")].at(-1);
+    expect(newTextarea.value).toBe("");
+    const blockId = newTextarea.dataset.footerBlockId;
+    expect(document.querySelector(`#app-footer [data-footer-block-id="${blockId}"]`)).not.toBeNull();
+  });
+
+  // Exec review finding 3 (specs/reviews/footer-customization-FC3-iter1.md):
+  // addCustomBlock() returning null (FC1 -- persistence failed, e.g.
+  // storage quota) used to be silently discarded -- the button did
+  // nothing with zero feedback, a permanently dead button on failure.
+  it('shows an error and adds nothing when "Додати HTML-блок" fails to persist (storage quota)', () => {
+    initApp(document, { locale: "uk" });
+    const before = footerSettingsList().children.length;
+    const setItemSpy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota", "QuotaExceededError");
+    });
+
+    document.getElementById("btn-add-footer-custom-block").click();
+    setItemSpy.mockRestore();
+
+    expect(footerSettingsList().children.length).toBe(before);
+    expect(document.getElementById("footer-settings-status").textContent.length).toBeGreaterThan(0);
+  });
+
+  // Exec review finding 4: a bare <span>+<input>/<textarea> pair has no
+  // accessible name -- every other settings row in this file wraps its
+  // control in a real <label>, so clicking the visible text toggles the
+  // control too (and screen readers announce a name, not "checkbox").
+  it("wraps the visibility checkbox and the custom-block textarea in a real <label> (accessible name + click-to-toggle)", () => {
+    const id = addCustomBlock();
+    initApp(document, { locale: "uk" });
+
+    const checkboxLabel = footerSettingsList().querySelector('input[data-footer-item-key="license"]').closest("label");
+    expect(checkboxLabel).not.toBeNull();
+    expect(checkboxLabel.tagName).toBe("LABEL");
+
+    const textareaLabel = footerSettingsList().querySelector(`textarea[data-footer-block-id="${id}"]`).closest("label");
+    expect(textareaLabel).not.toBeNull();
+    expect(textareaLabel.tagName).toBe("LABEL");
+  });
+
+  it("editing a custom block's textarea and firing change updates the live footer's innerHTML", () => {
+    const id = addCustomBlock();
+    initApp(document, { locale: "uk" });
+    const textarea = footerSettingsList().querySelector(`textarea[data-footer-block-id="${id}"]`);
+    textarea.value = "<b>hello</b>";
+    textarea.dispatchEvent(new Event("change", { bubbles: true }));
+
+    expect(document.querySelector(`#app-footer [data-footer-block-id="${id}"]`).innerHTML).toBe("<b>hello</b>");
+  });
+
+  it('"Видалити" asks for confirmation and only removes the block if confirmed', () => {
+    const id = addCustomBlock();
+    initApp(document, { locale: "uk" });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    document.querySelector(`[data-remove-footer-block-id="${id}"]`).click();
+    expect(document.querySelector(`#app-footer [data-footer-block-id="${id}"]`)).not.toBeNull(); // cancelled -- still there
+
+    confirmSpy.mockReturnValue(true);
+    document.querySelector(`[data-remove-footer-block-id="${id}"]`).click();
+    expect(document.querySelector(`#app-footer [data-footer-block-id="${id}"]`)).toBeNull();
+    expect(footerSettingsList().querySelector(`textarea[data-footer-block-id="${id}"]`)).toBeNull();
+
+    confirmSpy.mockRestore();
+  });
+
+  it('"Скинути" restores default visibility/order but keeps custom block content', () => {
+    const id = addCustomBlock();
+    setCustomBlockHtml(id, "<p>keep me</p>");
+    setFooterItemVisible("github", false);
+    setFooterOrder(["license", `custom:${id}`, "github", "docs", "version", "advancedToggle"]);
+    initApp(document, { locale: "uk" });
+
+    document.getElementById("btn-reset-footer-settings").click();
+
+    expect(isFooterItemVisible("github")).toBe(true);
+    expect(document.getElementById("footer-github-link").hidden).toBe(false);
+    expect(document.querySelector(`#app-footer [data-footer-block-id="${id}"]`).innerHTML).toBe("<p>keep me</p>");
+  });
+
+  it("a language switch re-renders the panel's static labels", () => {
+    initApp(document, { locale: "uk" });
+    expect(document.querySelector("h2[data-i18n='footerSettings.heading']").textContent).toBe("Підвал сайту");
+
+    document.getElementById("lang-select").value = "en";
+    document.getElementById("lang-select").dispatchEvent(new Event("change"));
+    // The panel is rendered imperatively (no data-i18n on the generated
+    // rows), same as settingsRegistry/designSettings -- re-render must be
+    // wired into the SAME language-switch handler, not just the static
+    // heading via applyTranslations().
+    const label = footerSettingsList().querySelector('[data-footer-order-entry="license"] span');
+    expect(label.textContent).toBe("License link");
   });
 });
 

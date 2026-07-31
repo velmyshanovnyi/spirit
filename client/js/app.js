@@ -35,6 +35,7 @@ import { buildRecoveryShareAnnounce, parseRecoveryShareAnnounce, encodeShareAsTe
 import { computeSharedSafetyNumber, hexToEmoji } from "./safetyNumber.js";
 import { getSetting } from "./settingsRegistry.js";
 import { applyDesignSettings } from "./designSettingsRegistry.js";
+import { applyFooterSettings } from "./footerRegistry.js";
 import { initSettingsPanelUI } from "./settingsPanelUI.js";
 import { initSidebarFoldersUI } from "./sidebarFoldersUI.js";
 import { saveTrustedShare, listTrustedShares, getTrustedShare } from "./trustedShares.js";
@@ -154,6 +155,11 @@ export function initApp(doc, options) {
   // inline :root custom properties -- must run on every load regardless of
   // which screen the user starts on, same as theme itself.
   applyDesignSettings(doc);
+  // Section FC2 (specs/ui/footer-customization.md): footer visibility/
+  // order + custom HTML blocks -- must run on every load same as design
+  // settings, before the footer's own static content would otherwise be
+  // visible in its unconfigured order.
+  applyFooterSettings(doc);
   applyTranslations(doc);
 
   // Section footer-1 (2026-07-31, user request): static build marker, no
@@ -223,6 +229,10 @@ export function initApp(doc, options) {
       // happened to edit or reset a field.
       renderSettingsRegistry();
       renderDesignSettings();
+      // Section FC3 (specs/ui/footer-customization.md): same imperative-
+      // render class of bug as the two calls just above -- footer item
+      // labels are read through t() at render time too.
+      renderFooterSettings();
       // Exec review finding 5 (specs/reviews/simplified-ephemeral-mode-SM2-SM3-iter1.md):
       // same class of bug as the C6 fix just above -- the footer toggle's
       // label is set imperatively (footer.advancedModeUnlock/Lock, chosen
@@ -2067,7 +2077,7 @@ export function initApp(doc, options) {
   // extracted out of this closure -- see settingsPanelUI.js. renderSettingsRegistry/
   // renderDesignSettings are re-called from the lang-select handler above
   // (Section C6) after a locale switch, via these returned bindings.
-  const { renderSettingsRegistry, renderDesignSettings } = initSettingsPanelUI({ doc, el, t });
+  const { renderSettingsRegistry, renderDesignSettings, renderFooterSettings } = initSettingsPanelUI({ doc, el, t });
 
   withBusyButton(el("btn-admin-login"), async () => {
     const password = el("admin-password").value;

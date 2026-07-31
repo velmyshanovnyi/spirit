@@ -1468,6 +1468,24 @@ button:disabled {
   cursor: pointer;
 }
 
+/* Section FC3 (specs/ui/footer-customization.md): a user-authored custom
+   HTML block rendered inline in the footer -- deliberately minimal, no
+   assumed layout (the user's own markup decides what it looks like). */
+.footer-custom-block {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* The footer-settings panel's own textarea (Settings screen), distinct
+   from the rendered .footer-custom-block above. */
+#footer-settings-list textarea {
+  width: 100%;
+  min-height: 4em;
+  font-family: monospace;
+  font-size: 12px;
+  resize: vertical;
+}
+
 /* Section SM3 (specs/ui/simplified-ephemeral-mode.md): a brief, dismissible
    notice when a restricted route redirects away -- same fixed-position
    fade-timeout pattern as .copied-tooltip, but a stable slot near the

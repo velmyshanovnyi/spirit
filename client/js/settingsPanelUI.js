@@ -7,6 +7,19 @@ import {
   resetAllDesignSettings,
   applyDesignSettings
 } from "./designSettingsRegistry.js";
+import {
+  FOOTER_ITEMS,
+  isFooterItemVisible,
+  setFooterItemVisible,
+  listCustomBlocks,
+  addCustomBlock,
+  setCustomBlockHtml,
+  removeCustomBlock,
+  getFooterOrder,
+  moveFooterEntry,
+  resetFooterSettings,
+  applyFooterSettings
+} from "./footerRegistry.js";
 
 /**
  * Section G1 (specs/reviews/spirit-evaluation-triage.md): first extraction
@@ -303,5 +316,147 @@ export function initSettingsPanelUI({ doc, el, t }) {
     renderDesignSettings();
   });
 
-  return { renderSettingsRegistry, renderDesignSettings };
+  // Section FC3 (specs/ui/footer-customization.md): a hand-written render,
+  // NOT the generic DESIGN_SETTINGS-driven shape above -- custom HTML
+  // blocks are a dynamic, user-managed list (add/remove at runtime, own
+  // textarea+delete UI), which doesn't fit that registry's fixed-item
+  // shape. Fixed items and custom blocks share ONE combined order
+  // (footerRegistry.js's getFooterOrder()), rendered as one row list here,
+  // reordered by the same ▲/▼ buttons regardless of which kind a row is.
+  function renderFooterSettings() {
+    const list = el("footer-settings-list");
+    if (!list) return;
+    list.innerHTML = "";
+    const order = getFooterOrder();
+    const blocksById = new Map(listCustomBlocks().map((b) => [b.id, b]));
+
+    order.forEach((entryId, index) => {
+      const row = doc.createElement("div");
+      row.className = "settings-row order-list-item";
+      row.dataset.footerOrderEntry = entryId;
+
+      if (entryId.startsWith("custom:")) {
+        const id = entryId.slice("custom:".length);
+        const block = blocksById.get(id);
+        if (!block) return;
+        // Exec review finding 4 (specs/reviews/footer-customization-FC3-iter1.md):
+        // a bare <span>+<textarea> pair has no accessible name -- wrap in
+        // a <label>, matching every other row in this file (e.g. the
+        // "field" label pattern used by renderSettingsRegistry above).
+        const label = doc.createElement("label");
+        label.className = "field";
+        const labelText = doc.createElement("span");
+        labelText.textContent = t("footerSettings.customBlockLabel");
+        label.appendChild(labelText);
+        const textarea = doc.createElement("textarea");
+        textarea.value = block.html;
+        textarea.placeholder = t("footerSettings.htmlPlaceholder");
+        textarea.dataset.footerBlockId = id;
+        label.appendChild(textarea);
+        row.appendChild(label);
+        const removeBtn = doc.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "btn-link";
+        removeBtn.textContent = t("footerSettings.removeBlock");
+        removeBtn.dataset.removeFooterBlockId = id;
+        row.appendChild(removeBtn);
+      } else {
+        const item = FOOTER_ITEMS.find((i) => i.key === entryId);
+        if (!item) return;
+        // Section FC2 exec review finding 1: advancedToggle can never be
+        // hidden (it's the only way back once locked) -- no checkbox for
+        // it at all, order-only, so the UI doesn't even imply a control
+        // that wouldn't work.
+        if (item.key !== "advancedToggle") {
+          const label = doc.createElement("label");
+          label.className = "field";
+          const checkbox = doc.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.checked = isFooterItemVisible(item.key);
+          checkbox.dataset.footerItemKey = item.key;
+          label.appendChild(checkbox);
+          const labelText = doc.createElement("span");
+          labelText.textContent = t(item.labelKey);
+          label.appendChild(labelText);
+          row.appendChild(label);
+        } else {
+          const label = doc.createElement("span");
+          label.textContent = t(item.labelKey);
+          row.appendChild(label);
+        }
+      }
+
+      const upBtn = doc.createElement("button");
+      upBtn.type = "button";
+      upBtn.className = "btn-link";
+      upBtn.textContent = "▲";
+      upBtn.disabled = index === 0;
+      upBtn.dataset.footerOrderEntry = entryId;
+      upBtn.dataset.footerOrderMove = "up";
+      row.appendChild(upBtn);
+      const downBtn = doc.createElement("button");
+      downBtn.type = "button";
+      downBtn.className = "btn-link";
+      downBtn.textContent = "▼";
+      downBtn.disabled = index === order.length - 1;
+      downBtn.dataset.footerOrderEntry = entryId;
+      downBtn.dataset.footerOrderMove = "down";
+      row.appendChild(downBtn);
+
+      list.appendChild(row);
+    });
+  }
+  renderFooterSettings();
+
+  el("footer-settings-list")?.addEventListener("change", (event) => {
+    const checkbox = event.target.closest("[data-footer-item-key]");
+    if (checkbox) {
+      setFooterItemVisible(checkbox.dataset.footerItemKey, checkbox.checked);
+      applyFooterSettings(doc);
+      return;
+    }
+    const textarea = event.target.closest("[data-footer-block-id]");
+    if (textarea) {
+      setCustomBlockHtml(textarea.dataset.footerBlockId, textarea.value);
+      applyFooterSettings(doc);
+    }
+  });
+  el("footer-settings-list")?.addEventListener("click", (event) => {
+    const moveBtn = event.target.closest("[data-footer-order-move]");
+    if (moveBtn) {
+      moveFooterEntry(moveBtn.dataset.footerOrderEntry, moveBtn.dataset.footerOrderMove);
+      applyFooterSettings(doc);
+      renderFooterSettings();
+      return;
+    }
+    const removeBtn = event.target.closest("[data-remove-footer-block-id]");
+    if (removeBtn) {
+      if (!doc.defaultView.confirm(t("footerSettings.confirmRemoveBlock"))) return;
+      removeCustomBlock(removeBtn.dataset.removeFooterBlockId);
+      applyFooterSettings(doc);
+      renderFooterSettings();
+    }
+  });
+  el("btn-add-footer-custom-block")?.addEventListener("click", () => {
+    // Exec review finding 3 (specs/reviews/footer-customization-FC3-iter1.md):
+    // addCustomBlock() returns null when persistence failed (FC1 -- e.g.
+    // storage quota exceeded, reachable since custom HTML has no size
+    // limit by design). Previously the return value was discarded, so the
+    // button silently did nothing with zero feedback on failure.
+    const status = el("footer-settings-status");
+    if (addCustomBlock() === null) {
+      if (status) status.textContent = t("footerSettings.addBlockFailed");
+      return;
+    }
+    if (status) status.textContent = "";
+    applyFooterSettings(doc);
+    renderFooterSettings();
+  });
+  el("btn-reset-footer-settings")?.addEventListener("click", () => {
+    resetFooterSettings();
+    applyFooterSettings(doc);
+    renderFooterSettings();
+  });
+
+  return { renderSettingsRegistry, renderDesignSettings, renderFooterSettings };
 }

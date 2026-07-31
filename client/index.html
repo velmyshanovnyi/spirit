@@ -472,6 +472,26 @@
           <button id="btn-reset-all-design-settings" type="button" data-i18n="design.resetAll">Скинути весь дизайн до типового</button>
         </div>
       </section>
+
+      <!-- Section FC3 (specs/ui/footer-customization.md): visibility/order
+           of fixed footer items + user-added custom HTML blocks, rendered
+           structurally from client/js/footerRegistry.js. A dedicated,
+           hand-written render (not the generic DESIGN_SETTINGS renderer
+           above) -- custom blocks are a dynamic, user-managed list with
+           their own add/remove/textarea UI, which doesn't fit that
+           registry's fixed-item-list shape. -->
+      <section class="card">
+        <h2 data-i18n="footerSettings.heading">Підвал сайту</h2>
+        <p class="hint" data-i18n="footerSettings.hint">
+          Вмикайте/вимикайте пункти підвалу й міняйте їх порядок. Можна додати власні HTML-блоки (посилання, картинки, будь-який код) -- вони переставляються в тій самій послідовності.
+        </p>
+        <div id="footer-settings-list" class="list-area"></div>
+        <div id="footer-settings-status" class="hint-text"></div>
+        <div class="btn-row">
+          <button id="btn-add-footer-custom-block" type="button" data-i18n="footerSettings.addBlock">Додати HTML-блок</button>
+          <button id="btn-reset-footer-settings" type="button" data-i18n="footerSettings.resetAll">Скинути</button>
+        </div>
+      </section>
     </section>
 
     <!-- ================= Ініціація / приєднання до кімнати ================= -->
