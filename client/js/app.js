@@ -49,6 +49,8 @@ import { getGroup, listGroups, updateGroupMembers, ensureGroupBootstrap } from "
 import { initGroupsUI } from "./groupsUI.js";
 import { initDeviceLinkingUI } from "./deviceLinkingUI.js";
 import { initFileTransferUI } from "./fileTransferUI.js";
+import { isAdvancedModeUnlocked } from "./advancedMode.js";
+import { initAdvancedModeUI } from "./advancedModeUI.js";
 import {
   saveImportedContact,
   listImportedContacts,
@@ -97,6 +99,11 @@ const ADMIN_CONFIG_FIELDS = [
 
 const ROUTES = ["account", "profile", "server", "room", "conversation", "manage", "history"];
 const GATED_ROUTES = ["profile", "conversation", "manage", "history"];
+// Section SM3 (specs/ui/simplified-ephemeral-mode.md): everything except the
+// ephemeral conversation itself, hidden by default until Advanced Mode is
+// unlocked. "account" is deliberately excluded -- see the spec for why
+// (it would cascade-loop against "conversation"'s own identity gate).
+const ADVANCED_ROUTES = ["profile", "server", "room", "manage", "history"];
 
 // Per-profile own device list record key in the "profile" store (Section 15:
 // multiple accounts each maintain their own list).
@@ -156,6 +163,40 @@ export function initApp(doc, options) {
     appVersionEl.textContent = APP_VERSION;
   }
 
+  // Section SM3 (specs/ui/simplified-ephemeral-mode.md): brief, dismissible
+  // notice for a redirected-away restricted route -- same fade timeout
+  // pattern as showCopiedTooltip below, but a fixed DOM slot (index.html)
+  // rather than a dynamically anchored one, since it isn't tied to a click.
+  function showAdvancedModeNotice() {
+    const notice = el("advanced-mode-notice");
+    if (!notice) return;
+    notice.textContent = t("footer.advancedModeRestricted");
+    notice.hidden = false;
+    clearTimeout(notice.dataset.hideTimeoutId);
+    notice.dataset.hideTimeoutId = doc.defaultView.setTimeout(() => {
+      notice.hidden = true;
+    }, 4000);
+  }
+
+  // renderGuestQuickActions is defined later in this closure (hoisted
+  // function declaration) but only CALLED here on a later click, never at
+  // this wiring line -- same hoisting-safety pattern as the *UI.js
+  // extractions (Section G1). onVisibilityChange also re-dispatches
+  // hashchange so the router (created further down, also hoisting-safe
+  // since this only runs on a later click) re-evaluates the CURRENT route
+  // against the now-changed lock state -- exec review finding 1: without
+  // this, locking while on an advanced screen (e.g. #/server) left that
+  // whole screen visible, only the sidebar/gear actually hid.
+  const advancedModeUIHandle = initAdvancedModeUI({
+    doc,
+    el,
+    t,
+    onVisibilityChange: () => {
+      renderGuestQuickActions();
+      doc.defaultView.dispatchEvent(new Event("hashchange"));
+    }
+  });
+
   const themeToggle = doc.getElementById("theme-toggle");
   if (themeToggle) {
     themeToggle.addEventListener("click", () => toggleTheme(doc));
@@ -182,6 +223,12 @@ export function initApp(doc, options) {
       // happened to edit or reset a field.
       renderSettingsRegistry();
       renderDesignSettings();
+      // Exec review finding 5 (specs/reviews/simplified-ephemeral-mode-SM2-SM3-iter1.md):
+      // same class of bug as the C6 fix just above -- the footer toggle's
+      // label is set imperatively (footer.advancedModeUnlock/Lock, chosen
+      // by current lock state, not a fixed data-i18n key), so it needs its
+      // own explicit re-render on language switch too.
+      advancedModeUIHandle?.refreshToggleLabel();
     });
   }
 
@@ -788,7 +835,13 @@ export function initApp(doc, options) {
   function renderGuestQuickActions() {
     const bar = el("guest-quick-actions");
     if (!bar) return;
-    bar.hidden = !!state.senderKey;
+    // Section SM3 (specs/ui/simplified-ephemeral-mode.md): the only
+    // clickable path to the account/login screen is these two buttons --
+    // stay hidden while advanced mode is locked regardless of identity
+    // state, checked here (not just once in applyAdvancedModeVisibility)
+    // because this function re-runs at every identity-establishing/
+    // clearing point, which would otherwise re-show it.
+    bar.hidden = !!state.senderKey || !isAdvancedModeUnlocked();
   }
   renderGuestQuickActions(); // set the correct initial visibility on load
 
@@ -1549,7 +1602,11 @@ export function initApp(doc, options) {
     routes: ROUTES,
     defaultRoute: "account",
     gatedRoutes: GATED_ROUTES,
-    hasIdentity: () => !!state.senderKey
+    hasIdentity: () => !!state.senderKey,
+    restrictedRoutes: ADVANCED_ROUTES,
+    isRestricted: () => !isAdvancedModeUnlocked(),
+    restrictedRedirectRoute: "conversation",
+    onRestricted: () => showAdvancedModeNotice()
   });
 
   // Section SD1 (specs/ui/persistent-sidebar.md): populate the persistent

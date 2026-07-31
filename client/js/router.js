@@ -9,14 +9,55 @@ function parseRoute(hash) {
   return hash.replace(/^#\/?/, "");
 }
 
-export function initRouter(doc, { routes, defaultRoute, gatedRoutes = [], hasIdentity }) {
+export function initRouter(
+  doc,
+  {
+    routes,
+    defaultRoute,
+    gatedRoutes = [],
+    hasIdentity,
+    // Section SM3 (specs/ui/simplified-ephemeral-mode.md): a second,
+    // independent gate -- same shape as gatedRoutes/hasIdentity, different
+    // predicate (advanced-mode-unlocked vs. has-identity), own callback so
+    // a caller can surface a "this section is hidden" notice. Deliberately
+    // NOT merged into gatedRoutes: the two gates redirect for unrelated
+    // reasons and a future caller may want only one of them.
+    restrictedRoutes = [],
+    isRestricted = () => false,
+    // Deliberately independent from defaultRoute: the caller may want the
+    // identity gate and the restricted-mode gate to bounce to different
+    // screens (Section SM3 sends restricted routes to "conversation", not
+    // to the identity gate's "account" fallback -- "conversation" is
+    // itself identity-gated, so a route that's simultaneously fresh
+    // (no identity yet) AND restricted correctly cascades through both
+    // gates in one settle rather than looping between them).
+    restrictedRedirectRoute = defaultRoute,
+    onRestricted
+  }
+) {
   const screens = new Map();
   for (const el of doc.querySelectorAll("[data-screen]")) {
     screens.set(el.dataset.screen, el);
   }
   const navItems = [...doc.querySelectorAll(".nav-item[data-route]")];
 
-  function render() {
+  // Section SM3 exec review (specs/reviews/simplified-ephemeral-mode-SM2-SM3-iter1.md,
+  // finding 3): each gate's own misconfiguration guard only checks ITS OWN
+  // route list, so a redirect target that's gated by the OTHER gate (not
+  // restricted by its own) slips past both guards -- e.g.
+  // restrictedRedirectRoute identity-gated, and the identity gate's
+  // defaultRoute itself restricted, cycles server -> conversation ->
+  // account -> server forever without either guard ever tripping. A hop
+  // counter is the only check that's correct regardless of how many gates
+  // exist or how they're configured relative to each other.
+  const MAX_REDIRECT_HOPS = 10;
+
+  function render(hopCount = 0) {
+    if (hopCount > MAX_REDIRECT_HOPS) {
+      throw new Error(
+        `initRouter: too many redirect hops (>${MAX_REDIRECT_HOPS}) -- likely a cycle between gatedRoutes/restrictedRoutes redirect targets`
+      );
+    }
     let route = parseRoute(doc.defaultView.location.hash);
     if (!routes.includes(route)) {
       route = defaultRoute;
@@ -31,7 +72,20 @@ export function initRouter(doc, { routes, defaultRoute, gatedRoutes = [], hasIde
       // screen synchronously, not only after the browser's own (possibly
       // async, e.g. in jsdom) hashchange for this new hash fires.
       doc.defaultView.location.hash = `#/${defaultRoute}`;
-      render();
+      render(hopCount + 1);
+      return;
+    }
+    if (restrictedRoutes.includes(route) && isRestricted()) {
+      if (restrictedRoutes.includes(restrictedRedirectRoute)) {
+        // Misconfiguration guard: a restricted redirect target would
+        // recurse forever against ITS OWN gate. (It may legitimately be
+        // gated by the identity check above -- that's a different gate,
+        // handled by cascading through this function again, not a loop.)
+        throw new Error(`initRouter: restrictedRedirectRoute "${restrictedRedirectRoute}" must not itself be a restricted route`);
+      }
+      onRestricted?.(route);
+      doc.defaultView.location.hash = `#/${restrictedRedirectRoute}`;
+      render(hopCount + 1);
       return;
     }
 
@@ -44,9 +98,12 @@ export function initRouter(doc, { routes, defaultRoute, gatedRoutes = [], hasIde
       } else {
         item.removeAttribute("aria-current");
       }
-      // A gated item is dead weight without an identity -- clicking it would
-      // just redirect right back (see the gate above), so hide it instead.
-      item.hidden = gatedRoutes.includes(item.dataset.route) && !hasIdentity();
+      // A gated/restricted item is dead weight without the right
+      // identity/unlock state -- clicking it would just redirect right
+      // back (see the gates above), so hide it instead.
+      item.hidden =
+        (gatedRoutes.includes(item.dataset.route) && !hasIdentity()) ||
+        (restrictedRoutes.includes(item.dataset.route) && isRestricted());
     }
   }
 
@@ -69,8 +126,19 @@ export function initRouter(doc, { routes, defaultRoute, gatedRoutes = [], hasIde
   if (win.__spiritRouterHashListener) {
     win.removeEventListener("hashchange", win.__spiritRouterHashListener);
   }
-  win.__spiritRouterHashListener = render;
-  win.addEventListener("hashchange", render);
+  // Exec review iter2 (specs/reviews/simplified-ephemeral-mode-SM2-SM3-iter1.md,
+  // finding 3 follow-up): render was registered DIRECTLY as the listener,
+  // so the browser's Event object landed in render's hopCount parameter on
+  // every hashchange-driven call -- Event > MAX_REDIRECT_HOPS is always
+  // false and hopCount + 1 string-concatenates onto the Event's string
+  // form, so the hop-counter guard silently never tripped on the one path
+  // (real navigation) it most needed to cover; only the init-time and
+  // navigate()-time calls (both call render() with no args) were ever
+  // actually protected. Wrapping ensures hopCount always starts at its
+  // real default (0) regardless of caller.
+  const hashChangeListener = () => render();
+  win.__spiritRouterHashListener = hashChangeListener;
+  win.addEventListener("hashchange", hashChangeListener);
 
   render();
 

@@ -627,7 +627,29 @@
     <a id="footer-github-link" class="footer-link" href="https://github.com/velmyshanovnyi/spirit" target="_blank" rel="noopener" data-i18n="footer.github">GitHub</a>
     <a id="footer-docs-link" class="footer-link" href="https://github.com/velmyshanovnyi/spirit/blob/main/docs/e2ee.md" target="_blank" rel="noopener" data-i18n="footer.docs">Документація</a>
     <span class="footer-version"><span data-i18n="footer.version">Білд:</span> <span id="app-version"></span></span>
+    <!-- Section SM2 (specs/ui/simplified-ephemeral-mode.md): the ONLY way to
+         reach the rest of the app when Advanced Mode is locked -- always
+         visible in the footer regardless of mode, unlike everything else
+         this section gates. Label text is set from app.js (toggles between
+         footer.advancedModeUnlock/Lock depending on state). -->
+    <button id="footer-advanced-toggle" type="button" class="footer-link footer-advanced-toggle" data-i18n="footer.advancedModeUnlock">Розширений режим</button>
   </footer>
+
+  <div id="advanced-mode-modal" class="modal-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="advanced-mode-modal-title">
+    <div class="modal-card">
+      <h2 id="advanced-mode-modal-title" data-i18n="footer.advancedModeUnlock">Розширений режим</h2>
+      <label>
+        <span data-i18n="admin.passwordLabel">Пароль адміністратора:</span>
+        <input id="advanced-mode-password" type="password">
+      </label>
+      <div id="advanced-mode-error" class="hint-text"></div>
+      <div class="btn-row">
+        <button id="btn-advanced-mode-unlock" type="button" class="btn-primary" data-i18n="btn.unlock">Розблокувати</button>
+        <button id="btn-advanced-mode-cancel" type="button" data-i18n="btn.cancel">Скасувати</button>
+      </div>
+    </div>
+  </div>
+  <div id="advanced-mode-notice" class="advanced-mode-notice" hidden></div>
 
   <div id="floating-video" class="floating-video" hidden>
     <div id="floating-video-handle" class="floating-video-handle" aria-hidden="true"></div>

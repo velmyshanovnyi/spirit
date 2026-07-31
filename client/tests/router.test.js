@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { initRouter } from "../js/router.js";
 
 const ROUTES = ["account", "profile", "server", "room", "conversation", "contacts", "history"];
@@ -156,5 +156,144 @@ describe("initRouter", () => {
     navigate("history");
     expect(location.hash).toBe("#/history");
     expect(visibleScreens()).toEqual(["history"]);
+  });
+
+  // Section SM3 (specs/ui/simplified-ephemeral-mode.md): a second,
+  // independent gate from gatedRoutes/hasIdentity -- same mechanism shape,
+  // different predicate, own callback for a UI notice. Defaults ([], () =>
+  // false) keep every existing test above byte-for-byte unaffected.
+  it("redirects a restricted route to the default route and calls onRestricted, independent of the identity gate", () => {
+    const onRestricted = vi.fn();
+    initRouter(document, {
+      routes: ROUTES,
+      defaultRoute: "conversation",
+      hasIdentity: () => true,
+      restrictedRoutes: ["profile", "server", "room", "history"],
+      isRestricted: () => true,
+      onRestricted
+    });
+
+    location.hash = "#/server";
+    window.dispatchEvent(new Event("hashchange"));
+
+    expect(visibleScreens()).toEqual(["conversation"]);
+    expect(location.hash).toBe("#/conversation");
+    expect(onRestricted).toHaveBeenCalledWith("server");
+  });
+
+  it("allows a restricted route once isRestricted() returns false, without touching onRestricted", () => {
+    let restricted = true;
+    const onRestricted = vi.fn();
+    initRouter(document, {
+      routes: ROUTES,
+      defaultRoute: "conversation",
+      hasIdentity: () => true,
+      restrictedRoutes: ["server"],
+      isRestricted: () => restricted,
+      onRestricted
+    });
+
+    restricted = false;
+    location.hash = "#/server";
+    window.dispatchEvent(new Event("hashchange"));
+
+    expect(visibleScreens()).toEqual(["server"]);
+    expect(onRestricted).not.toHaveBeenCalled();
+  });
+
+  it("cascades correctly (no infinite loop) when the restricted redirect target is itself identity-gated", () => {
+    // Mirrors app.js's real shape: restricted routes redirect to
+    // "conversation", but "conversation" is ALSO identity-gated and no
+    // identity exists yet -- must settle on the identity gate's own
+    // defaultRoute ("account"), not loop between the two gates.
+    const onRestricted = vi.fn();
+    initRouter(document, {
+      routes: ROUTES,
+      defaultRoute: "account",
+      gatedRoutes: ["conversation"],
+      hasIdentity: () => false,
+      restrictedRoutes: ["server", "profile", "room", "history"],
+      isRestricted: () => true,
+      restrictedRedirectRoute: "conversation",
+      onRestricted
+    });
+
+    location.hash = "#/server";
+    window.dispatchEvent(new Event("hashchange"));
+
+    expect(visibleScreens()).toEqual(["account"]);
+    expect(location.hash).toBe("#/account");
+    expect(onRestricted).toHaveBeenCalledWith("server");
+    expect(onRestricted).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws instead of hanging on a redirect cycle between the two gates (defense-in-depth, exec review finding 3)", () => {
+    // Contrived but reachable-by-misconfiguration: restrictedRedirectRoute
+    // is itself identity-gated, and the identity gate's OWN defaultRoute is
+    // itself restricted -- neither per-gate misconfiguration guard trips
+    // (each only checks its own list), so without a hop limit render()
+    // would cycle server -> conversation -> account -> server forever.
+    // This exercises the INIT-time render() call (initRouter's own final
+    // render() at setup) -- see the next test for the hashchange-driven
+    // entry point, which had its own separate bug.
+    expect(() => {
+      initRouter(document, {
+        routes: ROUTES,
+        defaultRoute: "account",
+        gatedRoutes: ["conversation"],
+        hasIdentity: () => false,
+        restrictedRoutes: ["server", "account"],
+        isRestricted: () => true,
+        restrictedRedirectRoute: "conversation"
+      });
+    }).toThrow(/redirect/i);
+  });
+
+  it("registers a hashchange listener that starts hopCount at 0, not at the Event object itself (exec review iter2 finding)", () => {
+    // Iter2 exec review: render was previously registered DIRECTLY as the
+    // hashchange listener (`win.addEventListener("hashchange", render)`),
+    // so the browser passes an Event object as render's FIRST argument on
+    // every event-driven call -- which IS render's hopCount parameter.
+    // `Event > MAX_REDIRECT_HOPS` is always false and `hopCount + 1`
+    // string-concatenates onto the Event's string form, so the hop-counter
+    // guard silently never tripped on the one path (real navigation) it
+    // most needed to cover -- only the init-time and navigate()-time calls
+    // (both call render() with zero arguments) were ever actually
+    // protected. This calls the ACTUAL registered listener directly with a
+    // real Event (exactly what the browser does), bypassing dispatchEvent's
+    // (correct, but test-inconvenient) swallowing of synchronous throws
+    // from listeners.
+    const addEventListenerSpy = vi.spyOn(window, "addEventListener");
+    let cyclic = false;
+    initRouter(document, {
+      routes: ROUTES,
+      defaultRoute: "account",
+      gatedRoutes: ["conversation"],
+      hasIdentity: () => !cyclic,
+      restrictedRoutes: ["server", "account"],
+      isRestricted: () => cyclic,
+      restrictedRedirectRoute: "conversation"
+    });
+    const hashchangeCall = addEventListenerSpy.mock.calls.find((call) => call[0] === "hashchange");
+    const registeredListener = hashchangeCall[1];
+    addEventListenerSpy.mockRestore();
+
+    cyclic = true;
+    location.hash = "#/server";
+    expect(() => registeredListener(new Event("hashchange"))).toThrow(/redirect/i);
+  });
+
+  it("hides restricted nav items while isRestricted() is true", () => {
+    initRouter(document, {
+      routes: ROUTES,
+      defaultRoute: "conversation",
+      hasIdentity: () => true,
+      restrictedRoutes: ["profile", "server"],
+      isRestricted: () => true
+    });
+
+    expect(document.querySelector('.nav-item[data-route="profile"]').hidden).toBe(true);
+    expect(document.querySelector('.nav-item[data-route="server"]').hidden).toBe(true);
+    expect(document.querySelector('.nav-item[data-route="room"]').hidden).toBe(false);
   });
 });

@@ -205,7 +205,7 @@ import { appendMessage, listMessages, listConversations } from "../js/historySto
 import { createGroup, getGroup, listGroups, updateGroupMembers, ensureGroupBootstrap } from "../js/groups.js";
 import { saveImportedContact, listImportedContacts, getImportedContact, setMatchedFingerprint, deleteImportedContact, clearPendingMessages } from "../js/importedContacts.js";
 import { parseContactList, parseChatExport } from "../js/importParsers.js";
-import { adminLogin, getAdminConfig } from "../js/adminAuth.js";
+import { adminLogin, getAdminConfig, AdminAuthError } from "../js/adminAuth.js";
 import { bytesToMnemonic } from "../js/mnemonic.js";
 import { createKeyfile } from "../js/keyfile.js";
 import {
@@ -473,7 +473,15 @@ const HTML = `
     <a id="footer-github-link" href="https://github.com/velmyshanovnyi/spirit" target="_blank" rel="noopener"></a>
     <a id="footer-docs-link" href="https://github.com/velmyshanovnyi/spirit/blob/main/docs/e2ee.md" target="_blank" rel="noopener"></a>
     <span id="app-version"></span>
+    <button id="footer-advanced-toggle" type="button" data-i18n="footer.advancedModeUnlock"></button>
   </footer>
+  <div id="advanced-mode-modal" hidden>
+    <input id="advanced-mode-password" type="password">
+    <div id="advanced-mode-error"></div>
+    <button id="btn-advanced-mode-unlock" type="button"></button>
+    <button id="btn-advanced-mode-cancel" type="button"></button>
+  </div>
+  <div id="advanced-mode-notice" hidden></div>
 `;
 
 function fakePublicKey(tag) {
@@ -488,6 +496,13 @@ beforeEach(() => {
   location.hash = "";
   document.body.innerHTML = HTML;
   localStorage.clear();
+  // Section SM3 (specs/ui/simplified-ephemeral-mode.md): production defaults
+  // to LOCKED (simplified ephemeral-only UI) when this key is absent, but
+  // the other several hundred tests in this file were all written assuming
+  // full access to every screen/nav-item -- unlocking here by default keeps
+  // them behaviorally unchanged. The "advanced mode" describe block below
+  // explicitly clears this key to exercise the real locked-by-default state.
+  localStorage.setItem("spirit.advancedModeUnlocked", "1");
   vi.clearAllMocks();
   listProfiles.mockResolvedValue([]);
   listMessages.mockResolvedValue([]);
@@ -1505,6 +1520,178 @@ describe("theme and language switchers (Section U2)", () => {
     // Static text re-translated, runtime values untouched.
     expect(document.getElementById("account-heading").textContent).toBe("Account");
     expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001live-fingerprint");
+  });
+});
+
+// Section SM2+SM3 (specs/ui/simplified-ephemeral-mode.md): by default (no
+// localStorage flag -- the real production state on a fresh visit) only the
+// ephemeral conversation is visible; a footer link unlocks the rest of the
+// app for THIS browser via the existing admin password, reusing adminLogin
+// purely for validation.
+describe("advanced mode (Section SM2+SM3)", () => {
+  beforeEach(() => {
+    // The shared beforeEach above unlocks by default for the rest of the
+    // suite's sake (see its comment) -- this block explicitly exercises the
+    // real locked-by-default state, so undo that here.
+    localStorage.removeItem("spirit.advancedModeUnlocked");
+  });
+
+  it("hides guest quick actions, the settings gear/menu, and the sidebar when locked", () => {
+    initApp(document, { locale: "uk" });
+
+    expect(document.getElementById("guest-quick-actions").hidden).toBe(true);
+    expect(document.getElementById("app-sidebar").hidden).toBe(true);
+    expect(document.querySelector(".settings-wrap").hidden).toBe(true);
+  });
+
+  it("redirects an advanced route to conversation and shows a notice when locked", () => {
+    initApp(document, { locale: "uk" });
+
+    location.hash = "#/server";
+    location.dispatchEvent ? null : null; // hashchange fires via jsdom's own mechanism below
+    window.dispatchEvent(new Event("hashchange"));
+
+    // Cascades through TWO independent gates in one settle (documented in
+    // the spec): restricted "server" -> redirect target "conversation" ->
+    // "conversation" is ALSO identity-gated and no identity exists yet in
+    // this test -> settles on the identity gate's own "account" fallback.
+    // The notice still fires for the originally attempted "server" route.
+    expect(location.hash).toBe("#/account");
+    expect(document.getElementById("advanced-mode-notice").hidden).toBe(false);
+    expect(document.getElementById("advanced-mode-notice").textContent.length).toBeGreaterThan(0);
+  });
+
+  it("does not restrict routes once unlocked", () => {
+    localStorage.setItem("spirit.advancedModeUnlocked", "1");
+    initApp(document, { locale: "uk" });
+
+    location.hash = "#/server";
+    window.dispatchEvent(new Event("hashchange"));
+
+    expect(location.hash).toBe("#/server");
+    expect(document.getElementById("advanced-mode-notice").hidden).toBe(true);
+  });
+
+  it("clicking the footer toggle opens a password modal", () => {
+    initApp(document, { locale: "uk" });
+
+    document.getElementById("footer-advanced-toggle").click();
+
+    expect(document.getElementById("advanced-mode-modal").hidden).toBe(false);
+  });
+
+  it("a wrong password shows an error and leaves everything hidden", async () => {
+    adminLogin.mockRejectedValue(new AdminAuthError("Invalid or expired admin credentials"));
+    initApp(document, { locale: "uk" });
+
+    document.getElementById("footer-advanced-toggle").click();
+    document.getElementById("advanced-mode-password").value = "wrong";
+    document.getElementById("btn-advanced-mode-unlock").click();
+
+    await vi.waitFor(() => expect(document.getElementById("advanced-mode-error").textContent.length).toBeGreaterThan(0));
+    expect(document.getElementById("app-sidebar").hidden).toBe(true);
+    expect(document.getElementById("advanced-mode-modal").hidden).toBe(false);
+  });
+
+  it("a correct password unlocks immediately, no reload needed, and persists across a fresh init", async () => {
+    adminLogin.mockResolvedValue({ token: "signed.token", expiresAt: 12345 });
+    initApp(document, { locale: "uk" });
+
+    document.getElementById("footer-advanced-toggle").click();
+    document.getElementById("advanced-mode-password").value = "correct horse";
+    document.getElementById("btn-advanced-mode-unlock").click();
+
+    await vi.waitFor(() => expect(document.getElementById("advanced-mode-modal").hidden).toBe(true));
+    expect(document.getElementById("app-sidebar").hidden).toBe(false);
+    expect(document.getElementById("guest-quick-actions").hidden).toBe(false);
+    expect(adminLogin).toHaveBeenCalledWith("http://node.example/index.php", "correct horse");
+    expect(localStorage.getItem("spirit.advancedModeUnlocked")).toBe("1");
+    // Exec review finding 4 (simplified-ephemeral-mode-SM2-SM3-iter1.md):
+    // the password must not linger in the DOM after a successful unlock,
+    // matching the existing "The password must not linger" invariant this
+    // project already enforces for the admin-login form.
+    expect(document.getElementById("advanced-mode-password").value).toBe("");
+
+    // Re-running initApp (simulates a page reload) must stay unlocked.
+    document.body.innerHTML = HTML;
+    initApp(document, { locale: "uk" });
+    expect(document.getElementById("app-sidebar").hidden).toBe(false);
+  });
+
+  it("cancelling the unlock modal clears the typed password", () => {
+    initApp(document, { locale: "uk" });
+
+    document.getElementById("footer-advanced-toggle").click();
+    document.getElementById("advanced-mode-password").value = "correct horse";
+    document.getElementById("btn-advanced-mode-cancel").click();
+
+    expect(document.getElementById("advanced-mode-modal").hidden).toBe(true);
+    expect(document.getElementById("advanced-mode-password").value).toBe("");
+  });
+
+  it("clicking the toggle while unlocked locks immediately without confirmation and re-hides everything, including the currently-visible advanced screen", () => {
+    // Exec review finding 1 (simplified-ephemeral-mode-SM2-SM3-iter1.md):
+    // locking used to leave whatever advanced screen was currently open
+    // (e.g. #/server) fully visible -- only the sidebar/gear hid.
+    localStorage.setItem("spirit.advancedModeUnlocked", "1");
+    initApp(document, { locale: "uk" });
+
+    location.hash = "#/server";
+    window.dispatchEvent(new Event("hashchange"));
+    expect(document.querySelector('[data-screen="server"]').hidden).toBe(false);
+
+    document.getElementById("footer-advanced-toggle").click();
+
+    expect(document.getElementById("app-sidebar").hidden).toBe(true);
+    expect(localStorage.getItem("spirit.advancedModeUnlocked")).toBeNull();
+    expect(document.querySelector('[data-screen="server"]').hidden).toBe(true);
+    // No identity in this test -- "conversation" is itself identity-gated,
+    // so it cascades one step further to "account" (see the router cascade
+    // tests). The important assertion is simply that "server" no longer
+    // sits there fully visible.
+    expect(document.querySelector('[data-screen="account"]').hidden).toBe(false);
+  });
+
+  it("the footer toggle label re-translates on a language switch, in both lock states", () => {
+    // Exec review finding 5: refreshToggleLabel() wasn't re-run when
+    // applyTranslations() re-stamped every data-i18n element on a language
+    // switch, so the footer button silently reverted to English/whatever
+    // the initial locale was.
+    initApp(document, { locale: "uk" });
+    const toggle = document.getElementById("footer-advanced-toggle");
+    expect(toggle.textContent).toBe("Розширений режим");
+
+    document.getElementById("lang-select").value = "en";
+    document.getElementById("lang-select").dispatchEvent(new Event("change"));
+    expect(toggle.textContent).toBe("Advanced mode");
+
+    localStorage.setItem("spirit.advancedModeUnlocked", "1");
+    document.getElementById("lang-select").value = "uk";
+    document.getElementById("lang-select").dispatchEvent(new Event("change"));
+    expect(toggle.textContent).toBe("Заблокувати розширений режим");
+  });
+
+  // Section SM3 exec review (specs/reviews/simplified-ephemeral-mode-SM2-SM3-iter1.md):
+  // reviewer found the locked default landed on "account", not
+  // "conversation" -- but that repro didn't exercise autoStartChat (H5's
+  // real zero-click production path, {autoStartChat: true} matching
+  // index.html's bare initApp(document) call). This confirms the real
+  // path: enterConversationLobby() calls router.navigate("conversation")
+  // directly, by which point state.senderKey already exists, so BOTH the
+  // identity gate and the restricted-route gate pass it cleanly even while
+  // locked -- "account" is only ever a brief pre-identity flash, matching
+  // pre-existing (not new) behavior for any fresh visitor.
+  it("autoStartChat's zero-click ephemeral flow reaches conversation even while locked", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    generateAnonymousNickname.mockReturnValue("Тихий Привид");
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+
+    initApp(document, { locale: "uk", autoStartChat: true });
+
+    await vi.waitFor(() => expect(document.querySelector('[data-screen="conversation"]').hidden).toBe(false));
+    expect(document.getElementById("app-sidebar").hidden).toBe(true); // still locked otherwise
   });
 });
 
