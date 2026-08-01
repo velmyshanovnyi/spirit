@@ -5507,6 +5507,30 @@ describe("zero-click invite-link auto-join (Section F4)", () => {
     resolveGetOffer({ offer: JSON.stringify({ type: "offer", sdp: "OFFER_SDP" }), ecdhPubkey: "peer-ecdh-b64" });
     await vi.waitFor(() => expect(document.getElementById("btn-quick-chat").disabled).toBe(false));
   });
+
+  // User report (screenshot, 2026-07-31) -- see the matching H5 test for
+  // full context. cameFromInviteLink is synchronous (URL search params),
+  // independent of the autoStartChat option, so this path suppresses too.
+  it("suppresses the account modal's visual flash while auto-joining an invite link", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    let resolveGetOffer;
+    getOffer.mockReturnValue(
+      new Promise((resolve) => {
+        resolveGetOffer = resolve;
+      })
+    );
+    startAsJoiner.mockImplementation(() => ({ __fakePc: true }));
+
+    initApp(document, { locale: "uk", locationSearch: "?room=room-from-link&token=token-from-link" });
+
+    expect(document.body.classList.contains("account-modal-suppressed")).toBe(true);
+
+    resolveGetOffer({ offer: JSON.stringify({ type: "offer", sdp: "OFFER_SDP" }), ecdhPubkey: "peer-ecdh-b64" });
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
+    expect(document.body.classList.contains("account-modal-suppressed")).toBe(false);
+  });
 });
 
 describe("zero-click default landing on chat, no registration (Section H5)", () => {
@@ -5580,6 +5604,60 @@ describe("zero-click default landing on chat, no registration (Section H5)", () 
 
     resolveCreateInvite({ roomId: "room1", inviteToken: "tok1" });
     await vi.waitFor(() => expect(document.getElementById("btn-quick-chat").disabled).toBe(false));
+  });
+
+  // User report (screenshot, 2026-07-31): the "Акаунт" create/login modal
+  // visibly flashes on load before the auto-start flows above navigate
+  // away from it -- router.js's own gate resolution is SYNCHRONOUS
+  // (route settles to "account" before any of this file even runs, since
+  // "conversation" is itself identity-gated and no identity exists yet),
+  // but the actual navigate-away only happens once the async identity
+  // generation + createInvite/PoW/join-handshake work resolves -- up to a
+  // second or more, not just one microtask. Fix: suppress the modal's
+  // VISUAL display (a body class, CSS-only, not the router's own
+  // `.hidden` bookkeeping) the moment we can synchronously tell we're
+  // about to auto-leave it anyway, removed once the async attempt
+  // settles either way (success: already navigated, no-op; failure: user
+  // sees the normal, usable account screen instead of being stuck on
+  // nothing).
+  it("suppresses the account modal's visual flash when an ephemeral auto-start is about to leave it", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    generateAnonymousNickname.mockReturnValue("Тихий Привид");
+    let resolveCreateInvite;
+    createInvite.mockReturnValue(
+      new Promise((resolve) => {
+        resolveCreateInvite = resolve;
+      })
+    );
+
+    initApp(document, { locale: "uk", autoStartChat: true });
+
+    // Synchronous, right after initApp() returns -- before ANY await in
+    // the auto-start IIFE has had a chance to resolve.
+    expect(document.body.classList.contains("account-modal-suppressed")).toBe(true);
+
+    resolveCreateInvite({ roomId: "room1", inviteToken: "tok1" });
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
+    expect(document.body.classList.contains("account-modal-suppressed")).toBe(false);
+  });
+
+  it("un-suppresses the account modal if the auto-start attempt fails, instead of leaving the user looking at nothing", async () => {
+    generateIdentityKeyPair.mockRejectedValue(new Error("boom"));
+
+    initApp(document, { locale: "uk", autoStartChat: true });
+    expect(document.body.classList.contains("account-modal-suppressed")).toBe(true);
+
+    await vi.waitFor(() => expect(document.body.classList.contains("account-modal-suppressed")).toBe(false));
+  });
+
+  it("does not suppress the account modal for a returning user with a remembered session (nothing to flash-fix -- it's the correct, persistent state)", () => {
+    localStorage.setItem("spirit.session", JSON.stringify({ profileId: "some-profile-id", expiresAt: Date.now() + 3600_000 }));
+
+    initApp(document, { locale: "uk", autoStartChat: true });
+
+    expect(document.body.classList.contains("account-modal-suppressed")).toBe(false);
   });
 });
 

@@ -849,6 +849,19 @@ button:disabled {
   padding: 16px;
 }
 
+/* User report (screenshot, 2026-07-31): suppresses the account modal's
+   brief visual flash on a fresh auto-start visit (F4 invite-join, H5
+   ephemeral quick-start) -- app.js toggles this class synchronously,
+   well before the async work that actually navigates away resolves. Not
+   `display:none` (would drop layout/measurement work some browsers still
+   do for fixed-position elements) -- opacity+pointer-events keeps it
+   inert and invisible without that cost, and transitions cleanly back if
+   the auto-start attempt fails and the class is removed. */
+body.account-modal-suppressed [data-screen="account"].modal-screen {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .modal-screen > .card {
   position: relative;
   /* !important: the pre-existing `.screen > .card:only-of-type:not(.card-wide)`

@@ -263,6 +263,28 @@ export function initApp(doc, options) {
     el("invite-token").value = invitedToken;
   }
 
+  // User report (screenshot, 2026-07-31): the "Акаунт" create/login modal
+  // visibly flashed on load before the F4/H5 zero-click auto-start flows
+  // below navigate away from it. router.js's own gate resolution is
+  // SYNCHRONOUS (settles to "account" before this function has even
+  // finished running, since "conversation" is itself identity-gated and
+  // no identity exists yet) -- but the actual navigate-away only happens
+  // once the async identity-generation + createInvite/PoW/join-handshake
+  // work resolves, which can take up to a second or more, not just one
+  // microtask. Both auto-leave conditions are knowable SYNCHRONOUSLY,
+  // right here, well before router init -- so suppress the modal's
+  // VISUAL display via a body class (CSS-only, does not touch router.js's
+  // own `.hidden` bookkeeping, which must keep resolving to "account" as
+  // its gated fallback) whenever we're about to leave it anyway. Removed
+  // in the F4/H5 branches' own `finally` blocks below, regardless of
+  // success or failure -- on success the screen is already hidden by then
+  // (no-op), on failure the user sees the normal, usable account screen
+  // instead of being stuck looking at nothing.
+  const willAutoLeaveAccountScreen = cameFromInviteLink || (autoStartChat && !getRememberedProfileId());
+  if (willAutoLeaveAccountScreen) {
+    doc.body.classList.add("account-modal-suppressed");
+  }
+
   // Section H1 (specs/ui/chat-first-redesign.md): a first-time visitor sees
   // a brief welcome + quick-start modal exactly once (localStorage flag),
   // never again on subsequent visits. Bug report 2026-07-17: an invite-link
@@ -4586,6 +4608,7 @@ export function initApp(doc, options) {
         enterConversationLobby({ ownsInvite: false });
       } finally {
         quickChatButton.disabled = false;
+        doc.body.classList.remove("account-modal-suppressed");
       }
     })().catch((err) => setStatus(t("status.error", { msg: err.message })));
   } else if (autoStartChat && !getRememberedProfileId()) {
@@ -4613,6 +4636,7 @@ export function initApp(doc, options) {
         await initiateChatSession();
       } finally {
         quickChatButton.disabled = false;
+        doc.body.classList.remove("account-modal-suppressed");
       }
     })().catch((err) => setStatus(t("status.error", { msg: err.message })));
   }
