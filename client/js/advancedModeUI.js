@@ -14,18 +14,25 @@ import { AdminAuthError } from "./adminAuth.js";
  * every identity-establishing/clearing point throughout the app's
  * lifetime and would clobber a one-time hide set here. It checks
  * isAdvancedModeUnlocked() itself instead.
+ *
+ * .settings-wrap (the gear + its dropdown) is ALSO deliberately not in
+ * this list (user decision 2026-07-31, follow-up): the gear icon itself
+ * stays visible/reachable even while locked, same treatment as call/
+ * camera/mic above. This does not defeat the lock -- clicking a nav item
+ * inside the dropdown that leads to a restricted route (profile/server/
+ * manage/history) still bounces back to "conversation" with SM3's own
+ * "розділ вимкнено" notice (router.js's restrictedRoutes gate, untouched
+ * by this change); this only avoids hiding the gear's mere presence.
  */
 const ADVANCED_ELEMENT_IDS = ["app-sidebar", "btn-sidebar-back"];
 
-export function applyAdvancedModeVisibility(doc, el) {
+export function applyAdvancedModeVisibility(el) {
   const unlocked = isAdvancedModeUnlocked();
   const hide = !unlocked;
   for (const id of ADVANCED_ELEMENT_IDS) {
     const node = el(id);
     if (node) node.hidden = hide;
   }
-  const settingsWrap = doc.querySelector(".settings-wrap");
-  if (settingsWrap) settingsWrap.hidden = hide;
   return unlocked;
 }
 
@@ -42,7 +49,7 @@ export function initAdvancedModeUI({ doc, el, t, onVisibilityChange }) {
     toggleBtn.textContent = isAdvancedModeUnlocked() ? t("footer.advancedModeLock") : t("footer.advancedModeUnlock");
   }
 
-  applyAdvancedModeVisibility(doc, el);
+  applyAdvancedModeVisibility(el);
   refreshToggleLabel();
 
   if (toggleBtn) {
@@ -52,7 +59,7 @@ export function initAdvancedModeUI({ doc, el, t, onVisibilityChange }) {
         // spec) -- no confirmation needed, matches the "замкнути -- не
         // потребує підтвердження" decision.
         lockAdvancedMode();
-        applyAdvancedModeVisibility(doc, el);
+        applyAdvancedModeVisibility(el);
         refreshToggleLabel();
         onVisibilityChange?.();
         return;
@@ -83,7 +90,7 @@ export function initAdvancedModeUI({ doc, el, t, onVisibilityChange }) {
       // project already enforces for the admin-login form's own password
       // field (app.test.js's admin-panel tests) -- applies here too.
       if (passwordInput) passwordInput.value = "";
-      applyAdvancedModeVisibility(doc, el);
+      applyAdvancedModeVisibility(el);
       refreshToggleLabel();
       onVisibilityChange?.();
     } catch (error) {

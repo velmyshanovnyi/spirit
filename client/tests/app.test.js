@@ -1555,12 +1555,18 @@ describe("advanced mode (Section SM2+SM3)", () => {
     localStorage.removeItem("spirit.advancedModeUnlocked");
   });
 
-  it("hides guest quick actions, the settings gear/menu, and the sidebar when locked", () => {
+  it("hides guest quick actions and the sidebar when locked, but keeps the settings gear/menu visible (user decision 2026-07-31)", () => {
+    // User decision 2026-07-31: the settings gear stays visible/reachable
+    // even while locked, same treatment as call/camera/mic -- clicking a
+    // nav item inside it that leads to a restricted route (profile/server/
+    // manage/history) still bounces back to conversation with the
+    // "розділ вимкнено" notice (SM3's own router gate), so this doesn't
+    // defeat the lock, it just avoids hiding the gear itself entirely.
     initApp(document, { locale: "uk" });
 
     expect(document.getElementById("guest-quick-actions").hidden).toBe(true);
     expect(document.getElementById("app-sidebar").hidden).toBe(true);
-    expect(document.querySelector(".settings-wrap").hidden).toBe(true);
+    expect(document.querySelector(".settings-wrap").hidden).toBe(false);
   });
 
   it("redirects an advanced route to conversation and shows a notice when locked", () => {
