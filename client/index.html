@@ -119,11 +119,15 @@
     </div>
   </div>
 
-  <!-- User follow-up (2026-07-31): replaces the blank gap that remained
-       after suppressing the account modal (see .account-modal-suppressed
-       in style.css) -- shown/hidden by app.js via the SAME synchronous
-       auto-start predicate, no new async logic. -->
-  <div id="auto-start-loading" class="auto-start-loading" hidden>
+  <!-- User follow-up (2026-07-31, updated 2026-08-03): replaces the blank
+       gap that remained after suppressing the account modal (see
+       .account-modal-suppressed in style.css). VISIBLE BY DEFAULT (no
+       `hidden` here) -- same "hidden/shown state lives in the honest
+       default, not assumed" principle as #app-header/#app-body below --
+       covers the gap before app.js has even finished loading/parsing,
+       not just the predicted-auto-start window. app.js's revealAppChrome()
+       is the only thing that ever hides it. -->
+  <div id="auto-start-loading" class="auto-start-loading">
     <span class="spinner" aria-hidden="true"></span>
     <span data-i18n="status.loading">Завантаження…</span>
   </div>

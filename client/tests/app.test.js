@@ -258,7 +258,7 @@ const HTML = `
     <p id="welcome-body" data-i18n="welcome.body"></p>
     <button id="btn-welcome-confirm" type="button"></button>
   </div>
-  <div id="auto-start-loading" hidden><span data-i18n="status.loading"></span></div>
+  <div id="auto-start-loading"><span data-i18n="status.loading"></span></div>
   <header id="app-header" hidden></header>
   <div id="app-body" hidden></div>
 
@@ -5664,6 +5664,14 @@ describe("zero-click default landing on chat, no registration (Section H5)", () 
   // dedicated loading indicator, toggled by the SAME synchronous
   // predicate as the suppression class (no new async logic), replaces
   // the blank gap with visible "something is happening" feedback.
+  // 2026-08-03 follow-up: the loading indicator must be visible BY
+  // DEFAULT, before initApp() (or even this module) has run at all --
+  // covers a slow-connection/device gap before app.js itself finishes
+  // loading, not just the predicted-auto-start window that follows.
+  it("is visible by default, before initApp() runs at all", () => {
+    expect(document.getElementById("auto-start-loading").hidden).toBe(false);
+  });
+
   it("shows a loading indicator while the account modal is suppressed, hides it once settled", async () => {
     generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
     fingerprint.mockResolvedValue("sender-fp");

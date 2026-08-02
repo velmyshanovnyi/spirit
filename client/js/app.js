@@ -293,10 +293,14 @@ export function initApp(doc, options) {
   // reachable -- invisible for exactly this window. A dedicated
   // indicator, driven by the SAME synchronous predicate (no new async
   // logic), replaces the blank gap with visible feedback.
-  const autoStartLoading = el("auto-start-loading");
-  if (autoStartLoading) {
-    autoStartLoading.hidden = !willAutoLeaveAccountScreen;
-  }
+  //
+  // 2026-08-03 follow-up: #auto-start-loading is now VISIBLE by default
+  // in index.html's raw markup (no `hidden` attribute), same principle
+  // as #app-header/#app-body being hidden by default below -- covers not
+  // just the predicted-auto-start window but also the (rarer, but real
+  // on a slow connection/device) gap before this very module has even
+  // finished loading/parsing. revealAppChrome() below is the ONLY thing
+  // that ever hides it now; nothing here needs to explicitly show it.
   // User request (2026-07-31, DOM-structure follow-up): patching each
   // individual flash symptom (account modal, then the loading gap, then
   // the enterConversationLobby gap) one at a time left new ones
