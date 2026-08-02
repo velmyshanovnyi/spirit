@@ -110,6 +110,15 @@
     </div>
   </div>
 
+  <!-- User follow-up (2026-07-31): replaces the blank gap that remained
+       after suppressing the account modal (see .account-modal-suppressed
+       in style.css) -- shown/hidden by app.js via the SAME synchronous
+       auto-start predicate, no new async logic. -->
+  <div id="auto-start-loading" class="auto-start-loading" hidden>
+    <span class="spinner" aria-hidden="true"></span>
+    <span data-i18n="status.loading">Завантаження…</span>
+  </div>
+
   <div class="app-body">
 
   <!-- ================= Постійний сайдбар (SD1, specs/ui/persistent-sidebar.md) =================

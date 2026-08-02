@@ -284,6 +284,19 @@ export function initApp(doc, options) {
   if (willAutoLeaveAccountScreen) {
     doc.body.classList.add("account-modal-suppressed");
   }
+  // User follow-up (2026-07-31): suppressing the account modal alone
+  // replaced the WRONG-content flash with a BLANK gap -- live measurement
+  // showed up to ~2.6s can elapse before the first network request even
+  // fires (createInvite's client-side PoW solve, SR2). The existing
+  // "Вирішення PoW..." status message lives in #conversation-toolbar,
+  // itself hidden until the identity-gated "conversation" route is
+  // reachable -- invisible for exactly this window. A dedicated
+  // indicator, driven by the SAME synchronous predicate (no new async
+  // logic), replaces the blank gap with visible feedback.
+  const autoStartLoading = el("auto-start-loading");
+  if (autoStartLoading) {
+    autoStartLoading.hidden = !willAutoLeaveAccountScreen;
+  }
 
   // Section H1 (specs/ui/chat-first-redesign.md): a first-time visitor sees
   // a brief welcome + quick-start modal exactly once (localStorage flag),
@@ -4609,6 +4622,7 @@ export function initApp(doc, options) {
       } finally {
         quickChatButton.disabled = false;
         doc.body.classList.remove("account-modal-suppressed");
+        if (el("auto-start-loading")) el("auto-start-loading").hidden = true;
       }
     })().catch((err) => setStatus(t("status.error", { msg: err.message })));
   } else if (autoStartChat && !getRememberedProfileId()) {
@@ -4637,6 +4651,7 @@ export function initApp(doc, options) {
       } finally {
         quickChatButton.disabled = false;
         doc.body.classList.remove("account-modal-suppressed");
+        if (el("auto-start-loading")) el("auto-start-loading").hidden = true;
       }
     })().catch((err) => setStatus(t("status.error", { msg: err.message })));
   }

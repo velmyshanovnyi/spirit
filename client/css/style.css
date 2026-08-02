@@ -865,6 +865,39 @@ body.account-modal-suppressed [data-screen="account"].modal-screen {
   display: none;
 }
 
+/* User follow-up (2026-07-31): fills the gap left by suppressing the
+   account modal above -- a plain spinner + status text, toggled by
+   app.js's own `.hidden` (not CSS-scoped to the body class, so its
+   visibility is independently testable/inspectable, same convention as
+   every other element in this codebase). */
+.auto-start-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.auto-start-loading .spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: auto-start-spin 0.8s linear infinite;
+}
+
+@keyframes auto-start-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .modal-screen > .card {
   position: relative;
   /* !important: the pre-existing `.screen > .card:only-of-type:not(.card-wide)`

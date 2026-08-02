@@ -258,6 +258,7 @@ const HTML = `
     <p id="welcome-body" data-i18n="welcome.body"></p>
     <button id="btn-welcome-confirm" type="button"></button>
   </div>
+  <div id="auto-start-loading" hidden><span data-i18n="status.loading"></span></div>
 
   <!-- Section SD1 (specs/ui/persistent-sidebar.md): persistent sidebar shell,
        a SIBLING to the [data-screen] sections below -- outside router.js's
@@ -5643,13 +5644,53 @@ describe("zero-click default landing on chat, no registration (Section H5)", () 
     expect(document.body.classList.contains("account-modal-suppressed")).toBe(false);
   });
 
+  // User follow-up (2026-07-31): suppressing the account modal fixed the
+  // WRONG-content flash, but replaced it with a BLANK one -- live
+  // measurement on spirit.kibr.com.ua showed ~2.6s can elapse before the
+  // first network request even fires (createInvite's PoW solve, per the
+  // existing SR2 comment on this same code path, runs client-side BEFORE
+  // the request). The app already has a status message for exactly this
+  // ("Вирішення PoW..."), but it lives in #conversation-toolbar, which
+  // stays hidden until the "conversation" ROUTE is reachable -- itself
+  // gated on the identity that doesn't exist yet during this window. A
+  // dedicated loading indicator, toggled by the SAME synchronous
+  // predicate as the suppression class (no new async logic), replaces
+  // the blank gap with visible "something is happening" feedback.
+  it("shows a loading indicator while the account modal is suppressed, hides it once settled", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    generateAnonymousNickname.mockReturnValue("Тихий Привид");
+    let resolveCreateInvite;
+    createInvite.mockReturnValue(
+      new Promise((resolve) => {
+        resolveCreateInvite = resolve;
+      })
+    );
+
+    initApp(document, { locale: "uk", autoStartChat: true });
+    expect(document.getElementById("auto-start-loading").hidden).toBe(false);
+
+    resolveCreateInvite({ roomId: "room1", inviteToken: "tok1" });
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
+    expect(document.getElementById("auto-start-loading").hidden).toBe(true);
+  });
+
+  it("does not show the loading indicator for a normal load (not an auto-start visit)", () => {
+    localStorage.setItem("spirit.session", JSON.stringify({ profileId: "some-profile-id", expiresAt: Date.now() + 3600_000 }));
+    initApp(document, { locale: "uk", autoStartChat: true });
+    expect(document.getElementById("auto-start-loading").hidden).toBe(true);
+  });
+
   it("un-suppresses the account modal if the auto-start attempt fails, instead of leaving the user looking at nothing", async () => {
     generateIdentityKeyPair.mockRejectedValue(new Error("boom"));
 
     initApp(document, { locale: "uk", autoStartChat: true });
     expect(document.body.classList.contains("account-modal-suppressed")).toBe(true);
+    expect(document.getElementById("auto-start-loading").hidden).toBe(false);
 
     await vi.waitFor(() => expect(document.body.classList.contains("account-modal-suppressed")).toBe(false));
+    expect(document.getElementById("auto-start-loading").hidden).toBe(true);
   });
 
   it("does not suppress the account modal for a returning user with a remembered session (nothing to flash-fix -- it's the correct, persistent state)", () => {
