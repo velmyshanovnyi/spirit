@@ -163,7 +163,7 @@
     <!-- Section H4: rendered as a modal over the chat (not a full page nav)
          -- "screen" for the router's existing hidden-toggling mechanics,
          "modal-screen" for the H1-shared overlay/backdrop presentation. -->
-    <section data-screen="account" class="screen modal-screen">
+    <section data-screen="account" class="screen modal-screen" hidden>
       <section class="card">
         <button id="btn-account-close" type="button" class="btn-icon modal-close" data-i18n-title="btn.close" aria-label="Close">×</button>
         <h2 data-i18n="section.account">Акаунт</h2>
@@ -253,7 +253,7 @@
     </section>
 
     <!-- ================= Адміністрування акаунта (профіль) ================= -->
-    <section data-screen="profile" class="screen">
+    <section data-screen="profile" class="screen" hidden>
       <section class="card">
         <h2 data-i18n="section.profileAdmin">Профіль</h2>
         <div class="identity"><span data-i18n="label.yourId">Ваш ID:</span> <code id="pub-key-display" data-i18n="id.none">не згенеровано</code></div>
@@ -365,7 +365,7 @@
     </section>
 
     <!-- ================= Адміністрування сервера ================= -->
-    <section data-screen="server" class="screen">
+    <section data-screen="server" class="screen" hidden>
       <section class="card">
         <h2 data-i18n="infra.heading">Інфраструктура</h2>
         <label class="field"><span data-i18n="label.signalingNode">Сигнальний вузол:</span>
@@ -495,7 +495,7 @@
     </section>
 
     <!-- ================= Ініціація / приєднання до кімнати ================= -->
-    <section data-screen="room" class="screen">
+    <section data-screen="room" class="screen" hidden>
       <section class="card">
         <h2 data-i18n="infra.roomHeading">Кімната</h2>
         <label class="field"><span data-i18n="label.roomId">Room ID:</span>
@@ -523,7 +523,7 @@
     </section>
 
     <!-- ================= Розмова (чат + відеодзвінок) ================= -->
-    <section data-screen="conversation" class="screen">
+    <section data-screen="conversation" class="screen" hidden>
       <section class="card card-wide">
         <!-- Section RF10: two ways to present this verification value --
              each side's own view of the peer's fingerprint (default), or one
@@ -569,7 +569,7 @@
     </section>
 
     <!-- ================= Керування (групи + імпорт) ================= -->
-    <section data-screen="manage" class="screen">
+    <section data-screen="manage" class="screen" hidden>
       <!-- Section GC2 (specs/phase4/group-chats.md): star/tree invite
            topology -- selecting contacts here mints one 1:1 invite per
            selected member, tagged with a shared groupId. Mirrors
@@ -618,7 +618,7 @@
     </section>
 
     <!-- ================= Історія ================= -->
-    <section data-screen="history" class="screen">
+    <section data-screen="history" class="screen" hidden>
       <section class="card card-wide">
         <h2 data-i18n="history.heading">Історія</h2>
         <div id="history-list" class="list-area"></div>

@@ -852,14 +852,17 @@ button:disabled {
 /* User report (screenshot, 2026-07-31): suppresses the account modal's
    brief visual flash on a fresh auto-start visit (F4 invite-join, H5
    ephemeral quick-start) -- app.js toggles this class synchronously,
-   well before the async work that actually navigates away resolves. Not
-   `display:none` (would drop layout/measurement work some browsers still
-   do for fixed-position elements) -- opacity+pointer-events keeps it
-   inert and invisible without that cost, and transitions cleanly back if
-   the auto-start attempt fails and the class is removed. */
+   well before the async work that actually navigates away resolves.
+   display:none per user request (2026-07-31 follow-up) -- opacity alone
+   left the element painted/hit-testable for a frame on some runs; this
+   is a harder, unambiguous cut. Paired with `hidden` now being the
+   DEFAULT on every [data-screen] section in index.html (closes the
+   larger flash this was only a partial fix for -- see that markup
+   change's own note) -- router.js unconditionally sets `.hidden` for
+   every screen on its first render anyway, so neither default changes
+   any JS-observable behavior, only paint timing before JS runs. */
 body.account-modal-suppressed [data-screen="account"].modal-screen {
-  opacity: 0;
-  pointer-events: none;
+  display: none;
 }
 
 .modal-screen > .card {
