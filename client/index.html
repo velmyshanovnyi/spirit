@@ -29,7 +29,16 @@
   <script src="js/themePrepaint.js"></script>
 </head>
 <body>
-  <header class="app-header">
+  <!-- User request (2026-07-31, DOM-structure follow-up): header and
+       .app-body (sidebar + main content, everything [hidden]-by-default
+       screens live inside) both hidden by default -- app.js reveals both
+       in ONE synchronous statement, either immediately (no auto-start
+       predicted -- the common case, zero delay) or at the exact moment
+       real content is ready (enterConversationLobby). Closes the
+       structural root of the flash rather than patching each individual
+       symptom (account modal, then the loading gap, then the
+       enterConversationLobby gap) one at a time. -->
+  <header id="app-header" class="app-header" hidden>
     <div class="brand"><span class="logo">S</span> Spirit</div>
     <div id="guest-quick-actions" class="header-controls">
       <button id="btn-quick-create" type="button" class="btn-link" data-i18n="quick.create">Створити</button>
@@ -119,7 +128,7 @@
     <span data-i18n="status.loading">Завантаження…</span>
   </div>
 
-  <div class="app-body">
+  <div id="app-body" class="app-body" hidden>
 
   <!-- ================= Постійний сайдбар (SD1, specs/ui/persistent-sidebar.md) =================
        Deliberately outside any [data-screen] element -- router.js only

@@ -297,6 +297,27 @@ export function initApp(doc, options) {
   if (autoStartLoading) {
     autoStartLoading.hidden = !willAutoLeaveAccountScreen;
   }
+  // User request (2026-07-31, DOM-structure follow-up): patching each
+  // individual flash symptom (account modal, then the loading gap, then
+  // the enterConversationLobby gap) one at a time left new ones
+  // discoverable every time. Structural fix instead: #app-header and
+  // #app-body (everything real -- sidebar, cards, all [data-screen]
+  // content) are `hidden` by DEFAULT in index.html now, same as the
+  // screens inside them. revealAppChrome() (defined below, hoisted --
+  // called here immediately for the common case, and again later at the
+  // exact synchronous point real content is ready) reveals both in one
+  // statement, and also cleans up the loading indicator/suppression
+  // class, so every "we're done, show the real UI" call site only needs
+  // this one function instead of three separate lines repeated at each.
+  function revealAppChrome() {
+    if (el("app-header")) el("app-header").hidden = false;
+    if (el("app-body")) el("app-body").hidden = false;
+    doc.body.classList.remove("account-modal-suppressed");
+    if (el("auto-start-loading")) el("auto-start-loading").hidden = true;
+  }
+  if (!willAutoLeaveAccountScreen) {
+    revealAppChrome();
+  }
 
   // Section H1 (specs/ui/chat-first-redesign.md): a first-time visitor sees
   // a brief welcome + quick-start modal exactly once (localStorage flag),
@@ -4079,9 +4100,8 @@ export function initApp(doc, options) {
     // preview setup), closes a second, smaller blank gap the user could
     // still catch between "conversation is technically visible" and "the
     // loading overlay is actually gone". A no-op for the manual "Ініціювати
-    // чат" call site, which never sets either in the first place.
-    doc.body.classList.remove("account-modal-suppressed");
-    if (el("auto-start-loading")) el("auto-start-loading").hidden = true;
+    // чат" call site, which never suppressed anything in the first place.
+    revealAppChrome();
     state.isInviteOwner = ownsInvite;
     // Section GC3: entering an ordinary 1:1 session always routes the
     // shared conversation screen back to 1:1 mode, even if a group
@@ -4632,8 +4652,7 @@ export function initApp(doc, options) {
         enterConversationLobby({ ownsInvite: false });
       } finally {
         quickChatButton.disabled = false;
-        doc.body.classList.remove("account-modal-suppressed");
-        if (el("auto-start-loading")) el("auto-start-loading").hidden = true;
+        revealAppChrome();
       }
     })().catch((err) => setStatus(t("status.error", { msg: err.message })));
   } else if (autoStartChat && !getRememberedProfileId()) {
@@ -4661,8 +4680,7 @@ export function initApp(doc, options) {
         await initiateChatSession();
       } finally {
         quickChatButton.disabled = false;
-        doc.body.classList.remove("account-modal-suppressed");
-        if (el("auto-start-loading")) el("auto-start-loading").hidden = true;
+        revealAppChrome();
       }
     })().catch((err) => setStatus(t("status.error", { msg: err.message })));
   }
