@@ -283,7 +283,16 @@ describe("initRouter", () => {
     expect(() => registeredListener(new Event("hashchange"))).toThrow(/redirect/i);
   });
 
-  it("hides restricted nav items while isRestricted() is true", () => {
+  // User decision 2026-07-31 (follow-up to keeping the settings gear
+  // itself always visible): the menu's nav items stay visible too, even
+  // for a restricted route -- clicking one still redirects back with the
+  // "розділ вимкнено" notice (the render()-level restrictedRoutes gate
+  // above, untouched by this), so hiding the item itself only hid the
+  // affordance without changing what clicking it does. Restricted-ness
+  // no longer affects nav-item visibility at all; only the identity gate
+  // (gatedRoutes/hasIdentity) still does, a genuinely different concern
+  // (no identity yet vs. advanced mode locked).
+  it("does NOT hide restricted nav items -- only the identity gate affects nav-item visibility", () => {
     initRouter(document, {
       routes: ROUTES,
       defaultRoute: "conversation",
@@ -292,8 +301,23 @@ describe("initRouter", () => {
       isRestricted: () => true
     });
 
-    expect(document.querySelector('.nav-item[data-route="profile"]').hidden).toBe(true);
-    expect(document.querySelector('.nav-item[data-route="server"]').hidden).toBe(true);
+    expect(document.querySelector('.nav-item[data-route="profile"]').hidden).toBe(false);
+    expect(document.querySelector('.nav-item[data-route="server"]').hidden).toBe(false);
     expect(document.querySelector('.nav-item[data-route="room"]').hidden).toBe(false);
+  });
+
+  it("still hides identity-gated nav items when there is no identity, independent of restrictedRoutes", () => {
+    initRouter(document, {
+      routes: ROUTES,
+      defaultRoute: "account",
+      gatedRoutes: ["profile"],
+      hasIdentity: () => false,
+      restrictedRoutes: ["server"],
+      isRestricted: () => true
+    });
+
+    expect(document.querySelector('.nav-item[data-route="profile"]').hidden).toBe(true);
+    // restricted but NOT identity-gated -- visible despite isRestricted() being true.
+    expect(document.querySelector('.nav-item[data-route="server"]').hidden).toBe(false);
   });
 });

@@ -98,12 +98,16 @@ export function initRouter(
       } else {
         item.removeAttribute("aria-current");
       }
-      // A gated/restricted item is dead weight without the right
-      // identity/unlock state -- clicking it would just redirect right
-      // back (see the gates above), so hide it instead.
-      item.hidden =
-        (gatedRoutes.includes(item.dataset.route) && !hasIdentity()) ||
-        (restrictedRoutes.includes(item.dataset.route) && isRestricted());
+      // A gated item (no identity yet) is dead weight -- clicking it would
+      // just redirect right back to the identity gate's own fallback, so
+      // hide it instead. A RESTRICTED item (Section SM3, advanced mode
+      // locked) is deliberately NOT hidden the same way (user decision
+      // 2026-07-31): the render()-level restrictedRoutes gate above still
+      // redirects back with a "розділ вимкнено" notice on click, so hiding
+      // the nav item itself only hid the affordance without changing that
+      // behavior -- the user wants the full menu visible, with clicking a
+      // locked item being the feedback mechanism, not its disappearance.
+      item.hidden = gatedRoutes.includes(item.dataset.route) && !hasIdentity();
     }
   }
 
