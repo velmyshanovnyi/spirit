@@ -4071,6 +4071,17 @@ export function initApp(doc, options) {
    * initiator (owns the invite) and the joiner (doesn't).
    */
   function enterConversationLobby({ ownsInvite }) {
+    // User follow-up (2026-07-31): this is the exact synchronous moment
+    // real conversation content becomes visible (router.navigate below) --
+    // hiding the auto-start suppression/loading here, rather than only in
+    // the F4/H5 IIFEs' own `finally` blocks (which run after whatever
+    // ELSE those async functions still do post-navigate, e.g. local media
+    // preview setup), closes a second, smaller blank gap the user could
+    // still catch between "conversation is technically visible" and "the
+    // loading overlay is actually gone". A no-op for the manual "Ініціювати
+    // чат" call site, which never sets either in the first place.
+    doc.body.classList.remove("account-modal-suppressed");
+    if (el("auto-start-loading")) el("auto-start-loading").hidden = true;
     state.isInviteOwner = ownsInvite;
     // Section GC3: entering an ordinary 1:1 session always routes the
     // shared conversation screen back to 1:1 mode, even if a group
