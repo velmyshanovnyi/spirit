@@ -20,6 +20,7 @@ import {
   resetFooterSettings,
   applyFooterSettings
 } from "./footerRegistry.js";
+import { TOGGLEABLE_FEATURE_KEYS, ADVANCED_FEATURES, isFeatureEnabled, setFeatureEnabled, resetFeatureFlags } from "./advancedMode.js";
 
 /**
  * Section G1 (specs/reviews/spirit-evaluation-triage.md): first extraction
@@ -458,5 +459,48 @@ export function initSettingsPanelUI({ doc, el, t }) {
     renderFooterSettings();
   });
 
-  return { renderSettingsRegistry, renderDesignSettings, renderFooterSettings };
+  // Section GE3 (specs/ui/granular-feature-flags.md): per-route toggles on
+  // top of the master unlock -- structurally like renderSettingsRegistry
+  // above (one row per registry entry), but no order/per-item-reset: this
+  // isn't a visible list to sequence, it's an access-control list, and one
+  // shared "Скинути" button (below) is enough, same as design settings'
+  // resetAllDesignSettings. No re-render/router notification needed on
+  // toggle -- this panel only lives on the "server" screen, which can never
+  // be the SAME screen a just-toggled route refers to.
+  function renderFeatureFlagsSettings() {
+    const list = el("feature-flags-list");
+    if (!list) return;
+    list.innerHTML = "";
+    for (const key of TOGGLEABLE_FEATURE_KEYS) {
+      const entry = ADVANCED_FEATURES.find((f) => f.key === key);
+      const row = doc.createElement("div");
+      row.className = "settings-row";
+      row.dataset.featureKey = key;
+      const label = doc.createElement("label");
+      label.className = "field";
+      const checkbox = doc.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = isFeatureEnabled(key);
+      checkbox.dataset.featureToggleKey = key;
+      label.appendChild(checkbox);
+      const labelText = doc.createElement("span");
+      labelText.textContent = entry?.labelKey ? t(entry.labelKey) : key;
+      label.appendChild(labelText);
+      row.appendChild(label);
+      list.appendChild(row);
+    }
+  }
+  renderFeatureFlagsSettings();
+
+  el("feature-flags-list")?.addEventListener("change", (event) => {
+    const checkbox = event.target.closest("[data-feature-toggle-key]");
+    if (!checkbox) return;
+    setFeatureEnabled(checkbox.dataset.featureToggleKey, checkbox.checked);
+  });
+  el("btn-reset-feature-flags")?.addEventListener("click", () => {
+    resetFeatureFlags();
+    renderFeatureFlagsSettings();
+  });
+
+  return { renderSettingsRegistry, renderDesignSettings, renderFooterSettings, renderFeatureFlagsSettings };
 }

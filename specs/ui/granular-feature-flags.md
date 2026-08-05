@@ -93,7 +93,7 @@ UI.
 це не видимий список, а перемикачі доступу), без reset-кнопки для кожного
 окремо (одна спільна "Скинути" достатньо, як і в інших картках налаштувань).
 
-- [ ] **Tests**: рендер картки для кожного ключа з `TOGGLEABLE_FEATURE_KEYS`
+- [x] **Tests**: рендер картки для кожного ключа з `TOGGLEABLE_FEATURE_KEYS`
       (не показує `server`); чекбокс відображає поточний стан
       (`isFeatureEnabled`); зміна чекбокса викликає `setFeatureEnabled` і
       негайно (без перезавантаження) вимикає доступ до відповідного
@@ -102,7 +102,7 @@ UI.
       change) перерендерює цю панель так само, як `renderFooterSettings`
       (Секція C6-клас бага -- лейбли читаються через `t()` при рендері,
       `applyTranslations()` їх не торкається).
-- [ ] **Impl**: `renderFeatureFlagsSettings()` у `settingsPanelUI.js`
+- [x] **Impl**: `renderFeatureFlagsSettings()` у `settingsPanelUI.js`
       (структурно як `renderSettingsRegistry`, без order/reset-per-item);
       `#feature-flags-list`, `#btn-reset-feature-flags` в `index.html`
       (нова картка на екрані `server`); `initSettingsPanelUI` повертає
@@ -111,7 +111,11 @@ UI.
       `i18n.js`: `featureFlags.heading`, `.hint`, `.resetAll`,
       `.feature.profile`, `.feature.room`, `.feature.manage`,
       `.feature.history` для всіх 11 локалей.
-- [ ] **Exec review**: заплановано.
+- [x] **Exec review**: 1 ітерація, зійшлося, 0 блокуючих знахідок
+      (2 косметичні виправлено: неоднаковий inline uk-текст підказки,
+      перейменування `data-feature-key` на `data-feature-toggle-key` для
+      чекбокса, щоб не збігатися з ключем рядка). Див.
+      `specs/reviews/granular-feature-flags-GE3-iter1.md`.
 
 ## Що НЕ входить у цей MVP
 

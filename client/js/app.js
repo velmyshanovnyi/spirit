@@ -233,6 +233,10 @@ export function initApp(doc, options) {
       // render class of bug as the two calls just above -- footer item
       // labels are read through t() at render time too.
       renderFooterSettings();
+      // Section GE3 (specs/ui/granular-feature-flags.md): same imperative-
+      // render class of bug as the two calls just above -- feature-flag row
+      // labels are read through t() at render time too.
+      renderFeatureFlagsSettings();
       // Exec review finding 5 (specs/reviews/simplified-ephemeral-mode-SM2-SM3-iter1.md):
       // same class of bug as the C6 fix just above -- the footer toggle's
       // label is set imperatively (footer.advancedModeUnlock/Lock, chosen
@@ -2144,7 +2148,7 @@ export function initApp(doc, options) {
   // extracted out of this closure -- see settingsPanelUI.js. renderSettingsRegistry/
   // renderDesignSettings are re-called from the lang-select handler above
   // (Section C6) after a locale switch, via these returned bindings.
-  const { renderSettingsRegistry, renderDesignSettings, renderFooterSettings } = initSettingsPanelUI({ doc, el, t });
+  const { renderSettingsRegistry, renderDesignSettings, renderFooterSettings, renderFeatureFlagsSettings } = initSettingsPanelUI({ doc, el, t });
 
   withBusyButton(el("btn-admin-login"), async () => {
     const password = el("admin-password").value;

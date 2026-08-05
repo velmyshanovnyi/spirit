@@ -514,6 +514,23 @@
           <button id="btn-reset-footer-settings" type="button" data-i18n="footerSettings.resetAll">Скинути</button>
         </div>
       </section>
+
+      <!-- Section GE3 (specs/ui/granular-feature-flags.md): per-route
+           toggles on top of the master password unlock -- lives on THIS
+           screen deliberately (the screen itself is already a restricted
+           route, reachable only once unlocked), and "server" (this very
+           screen) is never listed here (client/js/advancedMode.js's
+           TOGGLEABLE_FEATURE_KEYS excludes it) to avoid a self-lockout. -->
+      <section class="card">
+        <h2 data-i18n="featureFlags.heading">Розширені розділи</h2>
+        <p class="hint" data-i18n="featureFlags.hint">
+          Вмикайте/вимикайте окремі розділи розширеного режиму, не замикаючи весь режим.
+        </p>
+        <div id="feature-flags-list" class="list-area"></div>
+        <div class="btn-row">
+          <button id="btn-reset-feature-flags" type="button" data-i18n="featureFlags.resetAll">Скинути</button>
+        </div>
+      </section>
     </section>
 
     <!-- ================= Ініціація / приєднання до кімнати ================= -->

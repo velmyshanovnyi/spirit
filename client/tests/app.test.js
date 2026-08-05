@@ -183,6 +183,7 @@ import {
   getFooterOrder,
   applyFooterSettings
 } from "../js/footerRegistry.js";
+import { isFeatureEnabled, setFeatureEnabled } from "../js/advancedMode.js";
 import {
   generateDeviceKeyPair,
   createLinkRequest,
@@ -399,6 +400,9 @@ const HTML = `
     <div id="footer-settings-status"></div>
     <button id="btn-add-footer-custom-block" type="button"></button>
     <button id="btn-reset-footer-settings" type="button"></button>
+    <h2 data-i18n="featureFlags.heading"></h2>
+    <div id="feature-flags-list"></div>
+    <button id="btn-reset-feature-flags" type="button"></button>
   </section>
 
   <section data-screen="room">
@@ -2047,6 +2051,74 @@ describe("footer settings UI panel (Section FC3)", () => {
     // heading via applyTranslations().
     const label = footerSettingsList().querySelector('[data-footer-order-entry="license"] span');
     expect(label.textContent).toBe("License link");
+  });
+});
+
+// Section GE3 (specs/ui/granular-feature-flags.md): the settings panel card
+// that lets an unlocked user drive GE1's per-route feature flags. Lives on
+// the "server" screen, same as the footer-customization card above -- that
+// screen is itself a restricted route, so this panel is unreachable while
+// locked, same self-gating property as the footer's advancedToggle row.
+describe("feature flags settings UI panel (Section GE3)", () => {
+  function featureFlagsList() {
+    return document.getElementById("feature-flags-list");
+  }
+
+  beforeEach(() => {
+    localStorage.setItem("spirit.advancedModeUnlocked", "1");
+  });
+
+  it("renders one row per TOGGLEABLE_FEATURE_KEYS entry, and never a row for server", () => {
+    initApp(document, { locale: "uk" });
+
+    const rows = [...featureFlagsList().children];
+    expect(rows.map((row) => row.dataset.featureKey).sort()).toEqual(["history", "manage", "profile", "room"].sort());
+    expect(featureFlagsList().querySelector('[data-feature-key="server"]')).toBeNull();
+  });
+
+  it("a checkbox reflects the currently stored enabled state", () => {
+    setFeatureEnabled("room", false);
+    initApp(document, { locale: "uk" });
+
+    expect(featureFlagsList().querySelector('input[data-feature-toggle-key="room"]').checked).toBe(false);
+    expect(featureFlagsList().querySelector('input[data-feature-toggle-key="profile"]').checked).toBe(true);
+  });
+
+  it("unchecking a feature's checkbox disables it immediately -- navigating to that route redirects right away, no reload", () => {
+    initApp(document, { locale: "uk" });
+
+    const checkbox = featureFlagsList().querySelector('input[data-feature-toggle-key="room"]');
+    checkbox.checked = false;
+    checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+
+    expect(isFeatureEnabled("room")).toBe(false);
+    location.hash = "#/room";
+    window.dispatchEvent(new Event("hashchange"));
+    expect(location.hash).not.toBe("#/room");
+  });
+
+  it('"Скинути" restores every feature flag to enabled', () => {
+    setFeatureEnabled("room", false);
+    setFeatureEnabled("history", false);
+    initApp(document, { locale: "uk" });
+
+    document.getElementById("btn-reset-feature-flags").click();
+
+    expect(isFeatureEnabled("room")).toBe(true);
+    expect(isFeatureEnabled("history")).toBe(true);
+    expect(featureFlagsList().querySelector('input[data-feature-toggle-key="room"]').checked).toBe(true);
+  });
+
+  it("a language switch re-renders the panel's row labels", () => {
+    initApp(document, { locale: "uk" });
+    const label = () => featureFlagsList().querySelector('[data-feature-key="room"] span');
+    const ukLabel = label().textContent;
+
+    document.getElementById("lang-select").value = "en";
+    document.getElementById("lang-select").dispatchEvent(new Event("change"));
+
+    expect(label().textContent).not.toBe(ukLabel);
+    expect(label().textContent.length).toBeGreaterThan(0);
   });
 });
 
