@@ -139,6 +139,37 @@ describe("Section RF22: layout edit mode -- conversation width", () => {
   });
 });
 
+// Section RF23 (specs/ui/design-edit-mode.md, Stage 2): same "type: choice"
+// pattern as sidebarSide/toolbarSide/videoMode -- controls WHERE the SM3
+// "розділ вимкнено" toast (#advanced-mode-notice) appears on screen.
+describe("Section RF23: layout edit mode -- restricted-route notice position", () => {
+  it("getDesignSetting returns null (== default bottom-center) when nothing is stored", () => {
+    expect(getDesignSetting("noticePosition")).toBeNull();
+  });
+
+  it("setDesignSetting persists a valid position and rejects an invalid one", () => {
+    expect(setDesignSetting("noticePosition", "top-left")).toBe(true);
+    expect(getDesignSetting("noticePosition")).toBe("top-left");
+    expect(setDesignSetting("noticePosition", "middle")).toBe(false);
+  });
+
+  it("accepts all six documented positions", () => {
+    for (const position of ["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"]) {
+      expect(setDesignSetting("noticePosition", position)).toBe(true);
+    }
+  });
+
+  it("applyDesignSettings sets/removes a data attribute on :root for a choice setting", () => {
+    setDesignSetting("noticePosition", "top-right");
+    applyDesignSettings(document);
+    expect(document.documentElement.dataset.noticePosition).toBe("top-right");
+
+    resetDesignSetting("noticePosition");
+    applyDesignSettings(document);
+    expect(document.documentElement.dataset.noticePosition).toBeUndefined();
+  });
+});
+
 describe("Section RF16: element visibility settings", () => {
   it("getDesignSetting returns null (== visible) when nothing is stored", () => {
     expect(getDesignSetting("folderTree")).toBeNull();

@@ -414,34 +414,33 @@ CSS-перемикач, як усі попередні `choice`-записи Sta
 (`renderDesignSettings`) уже підтверджено тричі як такий, що не вимагає
 змін в `app.js` для нового `choice`-запису.
 
-- [ ] **Tests**: `client/tests/designSettingsRegistry.test.js` --
+- [x] **Tests**: `client/tests/designSettingsRegistry.test.js` --
       новий `describe("Section RF23: layout edit mode -- restricted-route notice position")`
-      (тим самим шаблоном: default `null`/`"bottom-center"`;
-      валідне/невалідне значення через `setDesignSetting` (6 опцій:
-      `top-left`/`top-center`/`top-right`/`bottom-left`/`bottom-center`/
-      `bottom-right`); `applyDesignSettings` виставляє/знімає
-      `data-notice-position` на `:root`). `client/tests/app.test.js` --
-      жодних нових тестів не мало б знадобитись (той самий доказ
-      generic-архітектури, що й RF18/RF22) -- підтвердити читанням, чи
-      "renders one input..." (RF14) лічильник і так рахує нову
-      choice-групу автоматично.
-- [ ] **Impl**: `client/js/designSettingsRegistry.js` -- новий запис
-      `noticePosition` (`type: "choice"`, `options: ["top-left","top-center","top-right","bottom-left","bottom-center","bottom-right"]`,
-      категорія `layout`, `rootAttribute: "noticePosition"`, дефолт
-      `"bottom-center"` -- збігається з наявним захардкодженим
-      положенням, щоб нічого не зрушилось для тих, хто не чіпав це
-      налаштування). `client/css/style.css` -- `.advanced-mode-notice`'s
-      наявні `left:50%; bottom:40px; transform:translateX(-50%)`
-      переносяться під `:root[data-notice-position="bottom-center"]`
-      (чи взагалі лишаються дефолтом БЕЗ атрибута, якщо `rootAttribute`
-      не виставляється для дефолтного значення -- узгодити з наявним
-      патерном `sidebarSide`, де відсутність запису = перша опція),
-      додаються 5 інших варіантів (`top-*`: `top: 40px` замість
-      `bottom`; `*-left`/`*-right`: `left: 24px`/`right: 24px` замість
-      `left:50%; transform`). `client/js/i18n.js` -- нові ключі
-      `design.noticePosition.*` (лейбл/опис) + `designSettings.position.*`
-      (6 підписів опцій) для всіх 11 локалей.
-- [ ] **Exec review**: заплановано.
+      (default `null`/`"bottom-center"`; валідне/невалідне значення через
+      `setDesignSetting`; усі 6 опцій приймаються; `applyDesignSettings`
+      виставляє/знімає `data-notice-position` на `:root`). `client/tests/app.test.js`
+      -- новий тест, доданий після exec review finding 1: підсвітка
+      активної кнопки для дефолтного (нічого не збережено) стану має бути
+      `bottom-center`, не перша опція масиву (клас багу, якого RF17/RF18
+      уникнули лише випадково, бо `left` там і перша опція, і CSS-дефолт
+      одночасно).
+- [x] **Impl**: `client/js/designSettingsRegistry.js` -- новий запис
+      `noticePosition` (`type: "choice"`, `options` з `"bottom-center"`
+      ПЕРШИМ у масиві -- обов'язково, бо `renderDesignSettings` підсвічує
+      `options[0]` як активний за замовчуванням, і це має збігатися зі
+      справжнім CSS-дефолтом). `client/css/style.css` -- базове правило
+      `.advanced-mode-notice` безумовно тримає bottom-center-позицію
+      (як і раніше), 5 override-правил `:root[data-notice-position="X"]`
+      для решти позицій, кожне явно скасовує всі властивості base-правила
+      (`transform`/`bottom`/`left`). `.choice-toggle` отримав
+      `flex-wrap: wrap` (6 чипів замість звичних 2). `client/js/i18n.js`
+      -- нові ключі `designSettings.noticePosition.*` + `designSettings.position.*`
+      для 11 локалей.
+- [x] **Exec review**: 1 ітерація, зійшлося, 2 реальні знахідки виправлені
+      (порядок `options` не збігався з CSS-дефолтом -- неправильна
+      підсвітка активної кнопки; латвійський типо
+      "Parinojuma"→"Pazinojuma"). Див.
+      `specs/reviews/design-edit-mode-RF23-iter1.md`.
 
 (Деталізація Tests/Impl по кожній стадії -- у момент старту роботи над
 нею, за тим самим патерном, що й RF14-16.)

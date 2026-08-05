@@ -147,6 +147,33 @@ export const DESIGN_SETTINGS = [
     max: 1600
   },
   {
+    // Section RF23 (specs/ui/design-edit-mode.md, Stage 2): where the SM3
+    // "розділ вимкнено" toast (#advanced-mode-notice) appears -- default
+    // "bottom-center" matches the pre-existing hardcoded position exactly
+    // (client/css/style.css), so leaving this unset changes nothing.
+    key: "noticePosition",
+    category: "layout",
+    labelKey: "designSettings.noticePosition.label",
+    descriptionKey: "designSettings.noticePosition.description",
+    type: "choice",
+    // Exec review finding 1 (specs/reviews/design-edit-mode-RF23-iter1.md):
+    // options[0] must be the actual stylesheet default (settingsPanelUI.js's
+    // renderDesignSettings relies on this exact invariant -- "stored ??
+    // entry.options[0]" -- to highlight the active chip when nothing is
+    // stored). CSS's unconditional base rule is bottom-center, so it MUST
+    // be first here, not just alphabetically/reading-order first.
+    options: ["bottom-center", "top-left", "top-center", "top-right", "bottom-left", "bottom-right"],
+    optionLabelKeys: {
+      "top-left": "designSettings.position.topLeft",
+      "top-center": "designSettings.position.topCenter",
+      "top-right": "designSettings.position.topRight",
+      "bottom-left": "designSettings.position.bottomLeft",
+      "bottom-center": "designSettings.position.bottomCenter",
+      "bottom-right": "designSettings.position.bottomRight"
+    },
+    rootAttribute: "noticePosition"
+  },
+  {
     key: "sidebarSide",
     category: "layout",
     labelKey: "designSettings.sidebarSide.label",

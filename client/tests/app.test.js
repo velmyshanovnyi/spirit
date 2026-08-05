@@ -1213,6 +1213,26 @@ describe("Section RF14: design settings panel", () => {
     expect(document.querySelector('[data-design-choice-key="toolbarSide"][data-design-choice-value="left"]').className).toContain("chip-active");
   });
 
+  // Exec review finding 1 (specs/reviews/design-edit-mode-RF23-iter1.md):
+  // renderDesignSettings() highlights `options[0]` as active when nothing
+  // is stored ("stored ?? entry.options[0]") -- that MUST be the actual
+  // CSS stylesheet default (bottom-center), not just whichever option
+  // happens to be listed first in the registry array. This pins that
+  // invariant for noticePosition specifically, since it's a 6-option
+  // choice (not left/right, where "first" and "default" trivially agree).
+  it("Section RF23: highlights bottom-center as the active notice-position chip by default (matches the unconditional CSS default, not just options[0])", () => {
+    initApp(document, { locale: "uk" });
+    expect(document.querySelector('[data-design-choice-key="noticePosition"][data-design-choice-value="bottom-center"]').className).toContain("chip-active");
+
+    document.querySelector('[data-design-choice-key="noticePosition"][data-design-choice-value="top-left"]').click();
+    expect(document.documentElement.dataset.noticePosition).toBe("top-left");
+    expect(document.querySelector('[data-design-choice-key="noticePosition"][data-design-choice-value="top-left"]').className).toContain("chip-active");
+
+    document.querySelector('[data-design-choice-key="noticePosition"][data-design-choice-value="bottom-center"]').click();
+    expect(document.documentElement.dataset.noticePosition).toBe("bottom-center");
+    expect(document.querySelector('[data-design-choice-key="noticePosition"][data-design-choice-value="bottom-center"]').className).toContain("chip-active");
+  });
+
   it("Section RF19: moving a header-controls order item up/down applies the new inline order to the real elements", () => {
     initApp(document, { locale: "uk" });
     // Default order: headerCallControls, langSelect, themeToggle, settingsGear.
