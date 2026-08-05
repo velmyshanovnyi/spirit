@@ -133,6 +133,20 @@ export const DESIGN_SETTINGS = [
     max: 500
   },
   {
+    // Section RF22 (specs/ui/design-edit-mode.md, Stage 2): the
+    // conversation card's width was previously a HARDCODED 1100px on
+    // .layout (client/css/style.css) -- default here matches that exact
+    // value, so leaving this unset changes nothing for existing users.
+    key: "conversationWidth",
+    category: "layout",
+    labelKey: "designSettings.conversationWidth.label",
+    descriptionKey: "designSettings.conversationWidth.description",
+    type: "length",
+    cssVar: "--conversation-width",
+    min: 600,
+    max: 1600
+  },
+  {
     key: "sidebarSide",
     category: "layout",
     labelKey: "designSettings.sidebarSide.label",

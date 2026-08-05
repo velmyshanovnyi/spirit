@@ -292,6 +292,33 @@ body.conversation-toolbar-visible .app-body {
   padding: 16px;
 }
 
+/* Section RF22 (specs/ui/design-edit-mode.md, Stage 2): scoped to the
+   conversation screen specifically -- .card-wide is reused by
+   manage/history too (client/index.html), which must keep filling the FULL
+   .layout width regardless of this setting. --conversation-width defaults
+   to 1100px, matching .layout's own hardcoded max-width above, so leaving
+   this design setting unset changes nothing visually.
+
+   Exec review finding 1 (specs/reviews/design-edit-mode-RF22-iter1.md):
+   the FIRST version of this rule only widened .card-wide itself, but
+   .layout's own max-width: 1100px (with 24px padding each side at
+   desktop) still capped the actual available box at ~1052px -- every
+   value above that in the registry's 600-1600 range was silently inert.
+   .layout's own cap now grows to match whenever this setting exceeds the
+   1100px default (max() never SHRINKS it below the original hardcode, so
+   every OTHER screen sharing .layout is unaffected when this setting is
+   at its default or below it). Still bounded by .app-body's own
+   --content-max-width (1400px default) further out -- the same kind of
+   nested-constraint interaction sidebarWidth/contentMaxWidth already have,
+   not a new class of bug. */
+[data-screen="conversation"] .layout {
+  max-width: max(1100px, var(--conversation-width, 1100px));
+}
+[data-screen="conversation"] .card-wide {
+  max-width: var(--conversation-width, 1100px);
+  margin-inline: auto;
+}
+
 @media (min-width: 768px) {
   .layout {
     grid-template-columns: 1fr 1fr;

@@ -379,26 +379,31 @@ CSS-перемикач, як усі попередні `choice`-записи Sta
 `cornerRadius` та інші RF14-16 записи), лише новий CSS var замість
 захардкодженого значення.
 
-- [ ] **Tests**: `client/tests/designSettingsRegistry.test.js` --
+- [x] **Tests**: `client/tests/designSettingsRegistry.test.js` --
       новий `describe("Section RF22: layout edit mode -- conversation width")`
-      (тим самим шаблоном, що й наявні `length`-тести: default
-      `null`/1100; валідне/невалідне (поза `min`/`max`) значення через
-      `setDesignSetting`; `applyDesignSettings` виставляє/знімає
-      `--conversation-width` на `:root`). `client/tests/app.test.js` --
-      новий тест: рядок налаштування рендериться в розділі "Дизайн"
-      (той самий генерик `length`-рендер, що й для інших записів --
-      ЖОДНИХ змін у `renderDesignSettings` не мало б знадобитись, той
-      самий доказ generic-архітектури, що й RF18).
-- [ ] **Impl**: `client/js/designSettingsRegistry.js` -- новий запис
+      (default `null`/1100; валідне/невалідне (поза `min`/`max`) значення
+      через `setDesignSetting`; `applyDesignSettings` виставляє/знімає
+      `--conversation-width` на `:root`). Жодних нових тестів у
+      `app.test.js` не знадобилось (той самий доказ generic-архітектури,
+      що й RF18) -- підтверджено запуском наявних design-тестів.
+- [x] **Impl**: `client/js/designSettingsRegistry.js` -- новий запис
       `conversationWidth` (`type: "length"`, `cssVar:
       "--conversation-width"`, категорія `layout`, `min: 600`,
-      `max: 1600`, дефолт-полога дорівнює наявному захардкодженому
-      `1100`). `client/css/style.css` -- `.card-wide` (чи вужчий
-      селектор, специфічний для конверсаційного екрана, якщо
-      `.card-wide` перевикористовується деінде для НЕ-чат карток --
-      перевірити читанням перед зміною) отримує
-      `max-width: var(--conversation-width, 1100px); margin-inline: auto;`.
-- [ ] **Exec review**: заплановано.
+      `max: 1600`). `client/css/style.css` -- `.card-wide`
+      перевикористовується екранами `manage`/`history` теж, тому селектор
+      скоуплений: `[data-screen="conversation"] .card-wide` (max-width +
+      `margin-inline: auto`) ТА `[data-screen="conversation"] .layout`
+      (`max-width: max(1100px, var(--conversation-width, 1100px))` --
+      виправлено після exec review, без цього `.layout`'s власний
+      захардкоджений `max-width:1100px` унеможливлював майже весь
+      діапазон вище ~1052px). Нові i18n-ключі
+      `designSettings.conversationWidth.label`/`.description` для 11
+      локалей.
+- [x] **Exec review**: 1 ітерація, зійшлося, 1 реальна знахідка
+      виправлена (налаштування могло лише звужувати картку, ніколи
+      розширювати -- `.layout`'s власний cap не давав діапазону вище
+      1100px жодного ефекту). Див.
+      `specs/reviews/design-edit-mode-RF22-iter1.md`.
 
 ### Секція RF23 (2026-08-05, за прямим запитом користувача) -- позиція тосту "розділ вимкнено"
 

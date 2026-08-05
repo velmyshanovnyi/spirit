@@ -111,6 +111,34 @@ describe("Section RF15: layout width settings", () => {
   });
 });
 
+// Section RF22 (specs/ui/design-edit-mode.md, Stage 2): same "type: length"
+// pattern as contentMaxWidth/sidebarWidth above -- new CSS var, applied on
+// the conversation screen's own .card-wide AND .layout (exec review
+// finding 1: .layout's hardcoded max-width:1100px would otherwise cap the
+// card at ~1052px regardless of this setting's value).
+describe("Section RF22: layout edit mode -- conversation width", () => {
+  it("getDesignSetting returns null (== default 1100px) when nothing is stored", () => {
+    expect(getDesignSetting("conversationWidth")).toBeNull();
+  });
+
+  it("setDesignSetting persists a valid width and rejects one outside the safe range", () => {
+    expect(setDesignSetting("conversationWidth", 1400)).toBe(true);
+    expect(getDesignSetting("conversationWidth")).toBe(1400);
+    expect(setDesignSetting("conversationWidth", 100)).toBe(false);
+    expect(setDesignSetting("conversationWidth", 5000)).toBe(false);
+  });
+
+  it("applyDesignSettings sets/removes --conversation-width in px on :root", () => {
+    setDesignSetting("conversationWidth", 900);
+    applyDesignSettings(document);
+    expect(document.documentElement.style.getPropertyValue("--conversation-width")).toBe("900px");
+
+    resetDesignSetting("conversationWidth");
+    applyDesignSettings(document);
+    expect(document.documentElement.style.getPropertyValue("--conversation-width")).toBe("");
+  });
+});
+
 describe("Section RF16: element visibility settings", () => {
   it("getDesignSetting returns null (== visible) when nothing is stored", () => {
     expect(getDesignSetting("folderTree")).toBeNull();
