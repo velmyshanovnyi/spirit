@@ -50,7 +50,7 @@ import { getGroup, listGroups, updateGroupMembers, ensureGroupBootstrap } from "
 import { initGroupsUI } from "./groupsUI.js";
 import { initDeviceLinkingUI } from "./deviceLinkingUI.js";
 import { initFileTransferUI } from "./fileTransferUI.js";
-import { isAdvancedModeUnlocked } from "./advancedMode.js";
+import { isAdvancedModeUnlocked, isFeatureEnabled } from "./advancedMode.js";
 import { initAdvancedModeUI } from "./advancedModeUI.js";
 import {
   saveImportedContact,
@@ -1674,7 +1674,14 @@ export function initApp(doc, options) {
     gatedRoutes: GATED_ROUTES,
     hasIdentity: () => !!state.senderKey,
     restrictedRoutes: ADVANCED_ROUTES,
-    isRestricted: () => !isAdvancedModeUnlocked(),
+    // Section GE2 (specs/ui/granular-feature-flags.md): the master
+    // password unlock is checked first (short-circuits -- locked means
+    // EVERY advanced route is restricted regardless of per-feature
+    // flags); isFeatureEnabled(route) then layers the per-route toggle on
+    // top once unlocked. isFeatureEnabled("server") is hard-coded true in
+    // advancedMode.js, so "server" can never be restricted by its own
+    // flag (self-lockout guard -- it's where the toggle panel itself lives).
+    isRestricted: (route) => !isAdvancedModeUnlocked() || !isFeatureEnabled(route),
     restrictedRedirectRoute: "conversation",
     onRestricted: () => showAdvancedModeNotice()
   });

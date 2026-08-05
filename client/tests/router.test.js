@@ -201,6 +201,33 @@ describe("initRouter", () => {
     expect(onRestricted).not.toHaveBeenCalled();
   });
 
+  // Section GE2 (specs/ui/granular-feature-flags.md): isRestricted is now
+  // called WITH the route being checked, so a caller can restrict routes
+  // individually rather than all-or-nothing. Every existing test above
+  // passes a callback that ignores its argument -- proves the new call
+  // shape doesn't break the old, coarser usage.
+  it("passes the route being checked to isRestricted, allowing per-route restriction", () => {
+    const onRestricted = vi.fn();
+    initRouter(document, {
+      routes: ROUTES,
+      defaultRoute: "conversation",
+      hasIdentity: () => true,
+      restrictedRoutes: ["profile", "server"],
+      isRestricted: (route) => route === "server",
+      onRestricted
+    });
+
+    location.hash = "#/profile";
+    window.dispatchEvent(new Event("hashchange"));
+    expect(visibleScreens()).toEqual(["profile"]);
+    expect(onRestricted).not.toHaveBeenCalled();
+
+    location.hash = "#/server";
+    window.dispatchEvent(new Event("hashchange"));
+    expect(visibleScreens()).toEqual(["conversation"]);
+    expect(onRestricted).toHaveBeenCalledWith("server");
+  });
+
   it("cascades correctly (no infinite loop) when the restricted redirect target is itself identity-gated", () => {
     // Mirrors app.js's real shape: restricted routes redirect to
     // "conversation", but "conversation" is ALSO identity-gated and no

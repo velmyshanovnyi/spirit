@@ -1597,6 +1597,48 @@ describe("advanced mode (Section SM2+SM3)", () => {
     expect(document.getElementById("advanced-mode-notice").hidden).toBe(true);
   });
 
+  // Section GE2 (specs/ui/granular-feature-flags.md): per-route feature
+  // flags apply ON TOP OF the master unlock -- these tests unlock first
+  // (real-shaped: the granular panel is itself only reachable once
+  // unlocked), then exercise a flag written directly to localStorage (the
+  // same external-write path GE1's own tests cover for isFeatureEnabled).
+  it("redirects an individually-disabled route to conversation even while unlocked, but leaves other advanced routes alone", () => {
+    // "room" and "server" are advanced routes that are NOT also
+    // identity-gated (unlike "profile"/"manage"/"history") -- picking one
+    // of those isolates the restricted-route gate's own behavior from the
+    // identity gate, which this test (no identity established) would
+    // otherwise trip first.
+    localStorage.setItem("spirit.advancedModeUnlocked", "1");
+    localStorage.setItem("spirit.advancedFeatureFlags", JSON.stringify({ room: false }));
+    initApp(document, { locale: "uk" });
+
+    location.hash = "#/server";
+    window.dispatchEvent(new Event("hashchange"));
+    expect(location.hash).toBe("#/server");
+
+    location.hash = "#/room";
+    window.dispatchEvent(new Event("hashchange"));
+    // Same two-gate cascade as the existing "redirects an advanced route to
+    // conversation..." test above: restricted "room" -> redirect target
+    // "conversation" -> itself identity-gated with no identity in this
+    // test -> settles on "account". The notice still fires for "room".
+    expect(location.hash).toBe("#/account");
+    expect(document.getElementById("advanced-mode-notice").hidden).toBe(false);
+    expect(document.getElementById("advanced-mode-notice").textContent.length).toBeGreaterThan(0);
+  });
+
+  it("keeps server reachable even if its own feature flag is hand-set to false (self-lockout guard)", () => {
+    localStorage.setItem("spirit.advancedModeUnlocked", "1");
+    localStorage.setItem("spirit.advancedFeatureFlags", JSON.stringify({ server: false }));
+    initApp(document, { locale: "uk" });
+
+    location.hash = "#/server";
+    window.dispatchEvent(new Event("hashchange"));
+
+    expect(location.hash).toBe("#/server");
+    expect(document.getElementById("advanced-mode-notice").hidden).toBe(true);
+  });
+
   it("clicking the footer toggle opens a password modal", () => {
     initApp(document, { locale: "uk" });
 

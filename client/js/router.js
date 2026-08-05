@@ -22,6 +22,13 @@ export function initRouter(
     // a caller can surface a "this section is hidden" notice. Deliberately
     // NOT merged into gatedRoutes: the two gates redirect for unrelated
     // reasons and a future caller may want only one of them.
+    //
+    // Section GE2 (specs/ui/granular-feature-flags.md): isRestricted is
+    // called AS isRestricted(route) -- the route currently being checked --
+    // so a caller can restrict routes individually (per-feature flags) on
+    // top of a coarser master gate, not just all-or-nothing. Existing
+    // callers that pass a zero-arg predicate are unaffected (the extra
+    // argument is simply ignored).
     restrictedRoutes = [],
     isRestricted = () => false,
     // Deliberately independent from defaultRoute: the caller may want the
@@ -75,7 +82,7 @@ export function initRouter(
       render(hopCount + 1);
       return;
     }
-    if (restrictedRoutes.includes(route) && isRestricted()) {
+    if (restrictedRoutes.includes(route) && isRestricted(route)) {
       if (restrictedRoutes.includes(restrictedRedirectRoute)) {
         // Misconfiguration guard: a restricted redirect target would
         // recurse forever against ITS OWN gate. (It may legitimately be

@@ -65,7 +65,7 @@ UI.
 для всіх `restrictedRoutes`. Гранулярні флаги вимагають знати, ЯКИЙ саме
 маршрут перевіряється -- сигнатура має стати `isRestricted(route)`.
 
-- [ ] **Tests**: `router.test.js` -- новий тест: з `isRestricted` що приймає
+- [x] **Tests**: `router.test.js` -- новий тест: з `isRestricted` що приймає
       `route` і повертає `true` лише для одного конкретного маршруту зі
       списку `restrictedRoutes`, навігація на ЦЕЙ маршрут редіректить, а на
       ІНШИЙ (теж у `restrictedRoutes`, але не обмежений цим разом) -- ні;
@@ -77,10 +77,11 @@ UI.
       `localStorage` (самозамкнення неможливе); окремий маршрут (напр.
       `profile`) з власним флагом `false` редіректить на `conversation` з
       тим самим "розділ вимкнено" повідомленням, що й повне замкнення.
-- [ ] **Impl**: `router.js`: `restrictedRoutes.includes(route) && isRestricted(route)`
+- [x] **Impl**: `router.js`: `restrictedRoutes.includes(route) && isRestricted(route)`
       (було `isRestricted()`), оновлений JSDoc-коментар над параметром.
       `app.js`: `isRestricted: (route) => !isAdvancedModeUnlocked() || !isFeatureEnabled(route)`.
-- [ ] **Exec review**: заплановано.
+- [x] **Exec review**: 1 ітерація, зійшлося (+ виправлення тексту тосту
+      `footer.advancedModeRestricted`, див. `specs/reviews/granular-feature-flags-GE2-iter1.md`).
 
 ## Секція GE3: UI-панель гранулярних перемикачів (`settingsPanelUI.js` + `index.html`)
 
