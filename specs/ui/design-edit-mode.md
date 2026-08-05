@@ -247,5 +247,196 @@ RF14-16) -- НЕ прив'язано до акаунта:
         `order` до `"0"` для всіх. Цим завершується весь Stage 1 фічі
         "режим редагування дизайну" (сайдбар/тулбар/шапка, RF17-19).
 
+## Stage 2 (2026-08-05, за прямим запитом користувача) -- плаваюче відео + структура чату
+
+Бектрог (`docs/roadmap.md`, "Бектрог UI") досі позначав "плаваюче відео і
+структуру самого чату" як "не почато" -- але Stage 1's власне архітектурне
+рішення (пункт 1 вище) вже сказало, що плаваюче відео НЕ входить у цю
+фічу (воно вже рухоме, RF4), а сам чат-контейнер "не блок, що має сенс
+переставляти". Перш ніж кодити, уточнено з користувачем (AskUserQuestion,
+2026-08-05), що саме малось на увазі під цими двома пунктами тепер, коли
+Stage 1 уже готовий:
+
+- **Плаваюче відео**: (а) кнопка "Скинути позицію" -- повертає
+  `spirit.floatingVideoRect` до дефолтної позиції/розміру, той самий
+  патерн, що й "Скинути весь дизайн"; (б) перемикач float/docked --
+  можливість закріпити відео як звичайний блок у розмітці чату замість
+  плаваючої overlay-панелі.
+- **Структура чату**: ширина/розташування самого чат-контейнера.
+
+### Дослідження поточного коду (перед дизайном секцій)
+
+- `spirit.floatingVideoRect` (`client/js/app.js:1765`) -- `{left, top,
+  width, height}` у пікселях, читається/пишеться через
+  `loadFloatingVideoRect()`/`saveFloatingVideoRect()`
+  (`app.js:1766-1781`). Дефолт обчислюється (не зберігається як окремий
+  запис) у `app.js:1807-1814` -- правий нижній кут вікна,
+  ширина/висота з `settingsRegistry.js`'s `floatingVideoDefaultWidth`/
+  `floatingVideoDefaultHeight`. Уся apply/drag/resize-логіка -- IIFE
+  всередині `initApp()` (`app.js:1782-1884`), НЕ окрема експортована
+  функція -- немає наявної точки входу "скинути" ззовні цього блоку.
+  `#floating-video` (`client/index.html:713-717`) -- `position: fixed`
+  (`client/css/style.css:1001-1049`), позиція/розмір виставляються
+  ЛИШЕ inline JS-стилями (CSS не тримає жодної координати).
+- `.layout` (`client/css/style.css:286-293`) -- CSS grid, **захардкожений**
+  `max-width: 1100px`, немає власного CSS var. `.card-wide`
+  (`style.css:302-304`, використовується конверсаційним екраном) --
+  `grid-column: 1 / -1`, займає всю ширину `.layout`. Наявні
+  design-setting-CSS-var (`--content-max-width`, `--sidebar-width`)
+  контролюють ЗАГАЛЬНУ ширину застосунку й сайдбар, а не саму
+  чат-колонку.
+- `designSettingsRegistry.js` не має жодного "action"-типу (кнопка без
+  збереженого значення) -- лише `color|length|text|choice|order|boolean`.
+  Найближчий наявний "reset"-прецедент -- `btn-reset-all-design-settings`
+  (звичайна кнопка ПОЗА реєстром, у `index.html`+`app.js` напряму), не
+  через сам реєстр.
+
+### Секція RF20 -- кнопка "Скинути позицію відео"
+
+Свідомо ПОЗА `designSettingsRegistry.js` (як і `btn-reset-all-design-settings`
+сам собою) -- `spirit.floatingVideoRect` НЕ є записом цього реєстру
+(немає "дефолтного" значення для порівняння, дефолт обчислюється
+динамічно від розміру вікна), тож не має сенсу вводити новий
+"action"-тип лише заради одного нетипового випадку.
+
+- [x] **Tests**: `client/tests/app.test.js` -- новий тест: після
+      drag/resize (симуляція pointerdown/move/up, за наявним патерном
+      RF4-тестів для floating video) `spirit.floatingVideoRect` містить
+      нестандартні координати; клік по `#btn-reset-floating-video`
+      видаляє запис і негайно перераховує/застосовує дефолтний rect (без
+      релоаду) -- порівняти координати ДО й ПІСЛЯ через inline style.
+      Другий тест: та сама перевірка, коли панель ПРИХОВАНА (реальний
+      сценарій -- кнопка на екрані "Сервер", панель видима лише на
+      "Розмова") -- виправлено після exec review, першопочатковий варіант
+      лише перевіряв "не кидає помилку", що проходив і з баґом.
+- [x] **Impl**: `client/index.html` -- нова кнопка
+      `#btn-reset-floating-video` в розділі "Дизайн". `client/js/app.js`
+      -- floating-video IIFE переприсвоює зовнішню `let resetFloatingVideoRect`
+      (видаляє `localStorage` запис, застосовує дефолтний rect
+      БЕЗУМОВНО -- не лише коли панель видима, бо в реальному UI вона
+      завжди прихована в момент кліку). Новий i18n-ключ
+      `design.resetFloatingVideo` для 11 локалей.
+- [x] **Exec review**: 1 ітерація, зійшлося, 1 реальна знахідка
+      виправлена (guard `!panel.hidden` робив скидання невидимим до
+      наступного релоаду -- прибрано). Див.
+      `specs/reviews/design-edit-mode-RF20-iter1.md`.
+
+### Секція RF21 -- перемикач float/docked
+
+**Найризикованіша секція**: "docked" означає видимий рендер
+`#floating-video` ВСЕРЕДИНІ конверсаційної картки (`.card-wide`), а не
+просто зміну `position` на місці -- сам елемент зараз змонтований поза
+`.layout` (перевірено читанням `index.html`), тож `position: static` без
+переміщення DOM-вузла показав би відео там, де воно фізично лежить у
+дереві (не в чаті). Тому "docked" вимагає УМОВНОГО реального
+DOM-переміщення (`appendChild`/`insertBefore`) відео-панелі всередину
+`.card-wide` (перед `#chat-log`) під час активного дзвінка, і назад до
+початкової точки монтування при поверненні в "float"-режим -- НЕ просто
+CSS-перемикач, як усі попередні `choice`-записи Stage 1.
+
+- [ ] **Tests**: `client/tests/designSettingsRegistry.test.js` --
+      новий `describe("Section RF21: layout edit mode -- video float/docked mode")`
+      (тим самим шаблоном, що й RF17/RF18: default `null`/`"float"`;
+      валідне/невалідне значення через `setDesignSetting`;
+      `applyDesignSettings` виставляє/знімає `data-video-mode`).
+      `client/tests/app.test.js` -- новий тест: під час активного
+      дзвінка (мокнутий `getUserMedia`/RTCPeerConnection, за наявним
+      патерном video-call тестів) перемикання на "docked" переміщує
+      `#floating-video` усередину `.card-wide` (перевірити
+      `parentElement`/`compareDocumentPosition`), вимикає
+      pointerdown/ResizeObserver-логіку (перевірити, що
+      `spirit.floatingVideoRect` НЕ змінюється при спробі "перетягнути"
+      докований елемент); перемикання назад на "float" повертає вузол
+      на початкову позицію (перед `#app-footer`, чи де він фактично
+      змонтований у `index.html`) і відновлює drag/resize.
+- [ ] **Impl**: `client/js/designSettingsRegistry.js` -- новий запис
+      `videoMode` (`type: "choice"`, `options: ["float","docked"]`,
+      категорія `layout`, `rootAttribute: "videoMode"`).
+      `client/js/app.js` -- floating-video IIFE зберігає посилання на
+      оригінальний батьківський вузол/наступного сиблінга при ініціалізації
+      (для точного повернення); новий обробник, підписаний і на
+      `designSettingsRegistry`'s зміну (той самий `onVisibilityChange`-
+      подібний коллбек, що й для advanced mode/footer), і на подію
+      "дзвінок почався/закінчився" -- застосовує реальне DOM-переміщення
+      ЛИШЕ коли обидві умови істинні (docked-режим AND активний дзвінок);
+      у docked-режимі pointerdown/ResizeObserver-слухачі на панелі
+      вимкнені (early-return, не видалені -- щоб не плодити повторну
+      підписку при поверненні в float). `client/css/style.css` --
+      `:root[data-video-mode="docked"] .floating-video` скасовує
+      `position:fixed`/`resize`, робить звичайним block-елементом
+      (`position: static; width: 100%; height: auto; margin-bottom: var(--gap)`
+      чи подібне, узгодити з наявною версткою `.card-wide` під час
+      імплементації).
+- [ ] **Exec review**: заплановано (ця секція торкається живого
+      відеодзвінка -- обов'язкова жива перевірка реального
+      pointerdown/pointerup drag-флоу на обох хостах, не лише unit-тести,
+      перш ніж вважати завершеною).
+
+### Секція RF22 -- ширина чат-контейнера
+
+Найпростіша й найменш ризикована секція -- той самий `type: "length"`
+патерн, що вже тричі підтверджений (`contentMaxWidth`/`sidebarWidth`/
+`cornerRadius` та інші RF14-16 записи), лише новий CSS var замість
+захардкодженого значення.
+
+- [ ] **Tests**: `client/tests/designSettingsRegistry.test.js` --
+      новий `describe("Section RF22: layout edit mode -- conversation width")`
+      (тим самим шаблоном, що й наявні `length`-тести: default
+      `null`/1100; валідне/невалідне (поза `min`/`max`) значення через
+      `setDesignSetting`; `applyDesignSettings` виставляє/знімає
+      `--conversation-width` на `:root`). `client/tests/app.test.js` --
+      новий тест: рядок налаштування рендериться в розділі "Дизайн"
+      (той самий генерик `length`-рендер, що й для інших записів --
+      ЖОДНИХ змін у `renderDesignSettings` не мало б знадобитись, той
+      самий доказ generic-архітектури, що й RF18).
+- [ ] **Impl**: `client/js/designSettingsRegistry.js` -- новий запис
+      `conversationWidth` (`type: "length"`, `cssVar:
+      "--conversation-width"`, категорія `layout`, `min: 600`,
+      `max: 1600`, дефолт-полога дорівнює наявному захардкодженому
+      `1100`). `client/css/style.css` -- `.card-wide` (чи вужчий
+      селектор, специфічний для конверсаційного екрана, якщо
+      `.card-wide` перевикористовується деінде для НЕ-чат карток --
+      перевірити читанням перед зміною) отримує
+      `max-width: var(--conversation-width, 1100px); margin-inline: auto;`.
+- [ ] **Exec review**: заплановано.
+
+### Секція RF23 (2026-08-05, за прямим запитом користувача) -- позиція тосту "розділ вимкнено"
+
+Користувач надіслав скріншот тосту `#advanced-mode-notice` (SM3,
+"Цей розділ вимкнено.") і попросив можливість налаштувати, ДЕ саме на
+екрані він з'являється. Той самий `type: "choice"` патерн, що й
+`sidebarSide`/`toolbarSide`/`videoMode` вище -- generic-рендер
+(`renderDesignSettings`) уже підтверджено тричі як такий, що не вимагає
+змін в `app.js` для нового `choice`-запису.
+
+- [ ] **Tests**: `client/tests/designSettingsRegistry.test.js` --
+      новий `describe("Section RF23: layout edit mode -- restricted-route notice position")`
+      (тим самим шаблоном: default `null`/`"bottom-center"`;
+      валідне/невалідне значення через `setDesignSetting` (6 опцій:
+      `top-left`/`top-center`/`top-right`/`bottom-left`/`bottom-center`/
+      `bottom-right`); `applyDesignSettings` виставляє/знімає
+      `data-notice-position` на `:root`). `client/tests/app.test.js` --
+      жодних нових тестів не мало б знадобитись (той самий доказ
+      generic-архітектури, що й RF18/RF22) -- підтвердити читанням, чи
+      "renders one input..." (RF14) лічильник і так рахує нову
+      choice-групу автоматично.
+- [ ] **Impl**: `client/js/designSettingsRegistry.js` -- новий запис
+      `noticePosition` (`type: "choice"`, `options: ["top-left","top-center","top-right","bottom-left","bottom-center","bottom-right"]`,
+      категорія `layout`, `rootAttribute: "noticePosition"`, дефолт
+      `"bottom-center"` -- збігається з наявним захардкодженим
+      положенням, щоб нічого не зрушилось для тих, хто не чіпав це
+      налаштування). `client/css/style.css` -- `.advanced-mode-notice`'s
+      наявні `left:50%; bottom:40px; transform:translateX(-50%)`
+      переносяться під `:root[data-notice-position="bottom-center"]`
+      (чи взагалі лишаються дефолтом БЕЗ атрибута, якщо `rootAttribute`
+      не виставляється для дефолтного значення -- узгодити з наявним
+      патерном `sidebarSide`, де відсутність запису = перша опція),
+      додаються 5 інших варіантів (`top-*`: `top: 40px` замість
+      `bottom`; `*-left`/`*-right`: `left: 24px`/`right: 24px` замість
+      `left:50%; transform`). `client/js/i18n.js` -- нові ключі
+      `design.noticePosition.*` (лейбл/опис) + `designSettings.position.*`
+      (6 підписів опцій) для всіх 11 локалей.
+- [ ] **Exec review**: заплановано.
+
 (Деталізація Tests/Impl по кожній стадії -- у момент старту роботи над
 нею, за тим самим патерном, що й RF14-16.)

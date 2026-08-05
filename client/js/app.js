@@ -1779,6 +1779,20 @@ export function initApp(doc, options) {
       // window resets to its default corner next load, not a functional break.
     }
   }
+  // Section RF20 (specs/ui/design-edit-mode.md, Stage 2): exposes a reset
+  // hook outside the block below, so the "Скинути позицію" button (wired
+  // further down, once el("btn-reset-floating-video") is guaranteed to
+  // exist) can trigger it. Declared here as a `let` and reassigned inside
+  // the block below once the real panel/rect-computation closures exist --
+  // this default only runs if el("floating-video") itself is missing (not
+  // reachable via index.html today, but kept as a safe fallback).
+  let resetFloatingVideoRect = () => {
+    try {
+      localStorage.removeItem(FLOATING_VIDEO_STORAGE_KEY);
+    } catch {
+      // Best-effort, same reasoning as saveFloatingVideoRect.
+    }
+  };
   {
     const panel = el("floating-video");
     const handle = el("floating-video-handle");
@@ -1804,18 +1818,40 @@ export function initApp(doc, options) {
           top: Math.min(Math.max(rect.top, 0), maxTop)
         };
       };
-      const rect = clampRect(
-        saved || {
+      const computeDefaultRect = () =>
+        clampRect({
           left: Math.max(16, win.innerWidth - defaultWidth - 16),
           top: Math.max(16, win.innerHeight - defaultHeight - 16),
           width: defaultWidth,
           height: defaultHeight
+        });
+      const applyRect = (rect) => {
+        panel.style.left = `${rect.left}px`;
+        panel.style.top = `${rect.top}px`;
+        panel.style.width = `${rect.width}px`;
+        panel.style.height = `${rect.height}px`;
+      };
+      applyRect(clampRect(saved || computeDefaultRect()));
+
+      resetFloatingVideoRect = () => {
+        try {
+          localStorage.removeItem(FLOATING_VIDEO_STORAGE_KEY);
+        } catch {
+          // Best-effort, same reasoning as saveFloatingVideoRect.
         }
-      );
-      panel.style.left = `${rect.left}px`;
-      panel.style.top = `${rect.top}px`;
-      panel.style.width = `${rect.width}px`;
-      panel.style.height = `${rect.height}px`;
+        // Exec review finding 1 (specs/reviews/design-edit-mode-RF20-iter1.md):
+        // the reset button lives on the "server" screen (index.html), and
+        // the panel is only ever un-hidden on the "conversation" route
+        // (setConversationChromeVisible) -- so `panel.hidden` is ALWAYS
+        // true at the moment this can be clicked in real usage. Gating the
+        // re-apply on `!panel.hidden` made the reset silently do nothing
+        // visible until the NEXT page reload (loadFloatingVideoRect() is
+        // only ever called once, at initApp() time -- nothing re-reads
+        // storage on a later route change). Applying unconditionally means
+        // the panel's inline styles are already correct by the time it's
+        // later revealed, with no reload needed.
+        applyRect(computeDefaultRect());
+      };
 
       const persistCurrentRect = () =>
         saveFloatingVideoRect({
@@ -1882,6 +1918,7 @@ export function initApp(doc, options) {
       });
     }
   }
+  el("btn-reset-floating-video")?.addEventListener("click", () => resetFloatingVideoRect());
 
   // Section H2 (specs/ui/chat-first-redesign.md): the old always-visible top
   // nav collapsed into a "⚙️ Налаштування" dropdown, in the same spirit as

@@ -395,6 +395,7 @@ const HTML = `
     <button id="btn-reset-all-settings" type="button"></button>
     <div id="design-settings-list"></div>
     <button id="btn-reset-all-design-settings" type="button"></button>
+    <button id="btn-reset-floating-video" type="button"></button>
     <h2 data-i18n="footerSettings.heading"></h2>
     <div id="footer-settings-list"></div>
     <div id="footer-settings-status"></div>
@@ -6554,6 +6555,60 @@ describe("Section RF4: fixed conversation toolbar + floating, draggable video wi
       Object.defineProperty(window, "innerWidth", { value: originalInnerWidth, configurable: true });
       Object.defineProperty(window, "innerHeight", { value: originalInnerHeight, configurable: true });
     }
+  });
+
+  // Section RF20 (specs/ui/design-edit-mode.md, Stage 2): a plain button
+  // outside designSettingsRegistry.js (spirit.floatingVideoRect has no
+  // "default" registry value to compare against -- the default is computed
+  // dynamically from the current window size, same reasoning as
+  // resetAllSettings vs. this one-off button).
+  it('"Скинути позицію" clears the stored rect and immediately re-applies the default when the panel is visible', () => {
+    initApp(document, { locale: "uk" });
+    const panel = document.getElementById("floating-video");
+    panel.hidden = false;
+    panel.getBoundingClientRect = () => ({ left: 100, top: 100, width: 320, height: 240 });
+    const handle = document.getElementById("floating-video-handle");
+    const down = new Event("pointerdown");
+    down.clientX = 110;
+    down.clientY = 105;
+    down.pointerId = 1;
+    handle.dispatchEvent(down);
+    const move = new Event("pointermove");
+    move.clientX = 210;
+    move.clientY = 205;
+    handle.dispatchEvent(move);
+    handle.dispatchEvent(new Event("pointerup"));
+    expect(panel.style.left).toBe("200px");
+    expect(localStorage.getItem("spirit.floatingVideoRect")).not.toBeNull();
+
+    document.getElementById("btn-reset-floating-video").click();
+
+    expect(localStorage.getItem("spirit.floatingVideoRect")).toBeNull();
+    expect(panel.style.left).not.toBe("200px");
+    expect(panel.style.width).toBe("320px");
+    expect(panel.style.height).toBe("240px");
+  });
+
+  it('"Скинути позицію" applies the default rect to the panel\'s inline styles even while it is currently hidden, so the reset takes effect without a reload once the panel is next revealed', () => {
+    // Exec review finding 1 (specs/reviews/design-edit-mode-RF20-iter1.md):
+    // this button lives on the "server" screen -- the panel is hidden at
+    // that exact moment in EVERY real usage (it only ever un-hides on
+    // #/conversation). A guard that skipped applying the rect while hidden
+    // made the reset silently do nothing until the next page reload; this
+    // test pins the fix by asserting the inline styles themselves, not
+    // just "didn't throw" (which passed even with the bug present).
+    localStorage.setItem("spirit.floatingVideoRect", JSON.stringify({ left: 42, top: 77, width: 400, height: 300 }));
+    initApp(document, { locale: "uk" });
+    const panel = document.getElementById("floating-video");
+    expect(panel.hidden).toBe(true);
+    expect(panel.style.left).toBe("42px");
+
+    document.getElementById("btn-reset-floating-video").click();
+
+    expect(localStorage.getItem("spirit.floatingVideoRect")).toBeNull();
+    expect(panel.style.left).not.toBe("42px");
+    expect(panel.style.width).toBe("320px");
+    expect(panel.style.height).toBe("240px");
   });
 });
 

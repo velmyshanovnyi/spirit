@@ -492,6 +492,12 @@
         <div id="design-settings-list" class="list-area"></div>
         <div class="btn-row">
           <button id="btn-reset-all-design-settings" type="button" data-i18n="design.resetAll">Скинути весь дизайн до типового</button>
+          <!-- Section RF20 (specs/ui/design-edit-mode.md, Stage 2): a plain
+               button OUTSIDE designSettingsRegistry.js -- spirit.floatingVideoRect
+               has no "default" registry value (the default is computed
+               dynamically from the current window size), so it doesn't fit
+               that reset-a-registry-key shape. -->
+          <button id="btn-reset-floating-video" type="button" data-i18n="design.resetFloatingVideo">Скинути позицію відео</button>
         </div>
       </section>
 
