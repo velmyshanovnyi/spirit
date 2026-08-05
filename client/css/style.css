@@ -310,8 +310,21 @@ body.conversation-toolbar-visible .app-body {
    at its default or below it). Still bounded by .app-body's own
    --content-max-width (1400px default) further out -- the same kind of
    nested-constraint interaction sidebarWidth/contentMaxWidth already have,
-   not a new class of bug. */
-[data-screen="conversation"] .layout {
+   not a new class of bug.
+
+   Live-verification finding (2026-08-05, caught in browser, NOT by
+   jsdom-based unit tests -- jsdom has no real CSS cascade engine, so a
+   selector that structurally can't match anything still passes every
+   getPropertyValue()-on-:root assertion): .layout is the PARENT of
+   [data-screen="conversation"] in the real DOM (client/index.html --
+   <main class="layout"> wraps ALL [data-screen] sections, including this
+   one), never its descendant. The original
+   `[data-screen="conversation"] .layout` selector therefore matched
+   NOTHING in a real browser -- .layout's cap silently never grew,
+   reproducing the exact bug the iter1 fix above believed it had already
+   fixed. :has() selects the ANCESTOR based on a live (non-[hidden])
+   descendant, which is exactly the relationship needed here. */
+.layout:has(> [data-screen="conversation"]:not([hidden])) {
   max-width: max(1100px, var(--conversation-width, 1100px));
 }
 [data-screen="conversation"] .card-wide {

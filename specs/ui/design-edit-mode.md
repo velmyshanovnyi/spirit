@@ -403,7 +403,15 @@ CSS-перемикач, як усі попередні `choice`-записи Sta
       виправлена (налаштування могло лише звужувати картку, ніколи
       розширювати -- `.layout`'s власний cap не давав діапазону вище
       1100px жодного ефекту). Див.
-      `specs/reviews/design-edit-mode-RF22-iter1.md`.
+      `specs/reviews/design-edit-mode-RF22-iter1.md`. **iter2 (жива
+      перевірка на spirit.kolo.media)**: селектор `[data-screen="conversation"] .layout`
+      з iter1 виявився структурно перевернутим -- `.layout` є БАТЬКОМ
+      `[data-screen="conversation"]`, а не нащадком, тож у реальному
+      браузері нічого не збігалось (jsdom-тести цього не ловлять, бо не
+      мають реального CSS-каскаду, лише перевіряють inline-стиль на
+      `:root`). Замінено на `:has()`:
+      `.layout:has(> [data-screen="conversation"]:not([hidden]))`. Див.
+      `specs/reviews/design-edit-mode-RF22-iter2.md`.
 
 ### Секція RF23 (2026-08-05, за прямим запитом користувача) -- позиція тосту "розділ вимкнено"
 
