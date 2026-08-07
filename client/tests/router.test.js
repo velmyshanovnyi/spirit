@@ -158,6 +158,71 @@ describe("initRouter", () => {
     expect(visibleScreens()).toEqual(["history"]);
   });
 
+  // Bug report (2026-08-08, user-observed): a real click on a nav item
+  // sometimes appeared to do nothing. Nav items are real `<a href="#/...">`
+  // elements (buildDom() above matches production index.html) that ALSO
+  // carry their own JS click listener calling navigate() -- without
+  // preventDefault(), a click on a RESTRICTED route (SM3's own gate)
+  // double-fires: navigate()'s synchronous render() redirects away and
+  // shows the "розділ вимкнено" notice once, THEN (once the click event
+  // finishes dispatching) the browser's native anchor default action ALSO
+  // navigates to the href -- now genuinely DIFFERENT from the just-redirected
+  // current hash -- triggering a SECOND async hashchange, a second notice,
+  // and a junk back-button history entry. Exec review (specs/reviews/
+  // simplified-ephemeral-mode-router-preventDefault-iter1.md): on the
+  // COMMON (non-restricted) path this was harmless (same-hash anchor
+  // click is a no-op) -- the double-fire only matters for restricted
+  // routes, which is exactly where it's most likely to have looked like
+  // "nothing happened" (a second notice most users wouldn't consciously
+  // register as different from the first).
+  it("does not double-fire onRestricted via the native anchor default action on a restricted route", () => {
+    const onRestricted = vi.fn();
+    initRouter(document, {
+      routes: ROUTES,
+      defaultRoute: "account",
+      hasIdentity: () => true,
+      restrictedRoutes: ["room"],
+      isRestricted: () => true,
+      restrictedRedirectRoute: "conversation",
+      onRestricted
+    });
+    const roomLink = document.querySelector('.nav-item[data-route="room"]');
+
+    const clickEvent = new MouseEvent("click", { bubbles: true, cancelable: true });
+    roomLink.dispatchEvent(clickEvent);
+
+    expect(onRestricted).toHaveBeenCalledTimes(1);
+    expect(clickEvent.defaultPrevented).toBe(true);
+  });
+
+  // Exec review finding 1: preventDefault() must not break the standard
+  // "open in a new tab/window" modifier-click affordance these real
+  // anchors exist to preserve (Ctrl/Cmd-click, Shift-click) -- only a
+  // plain left-click should be intercepted for in-page navigation.
+  it("does NOT intercept a modifier-clicked nav item -- Ctrl/Cmd/Shift-click still opens via the native anchor", () => {
+    initRouter(document, { routes: ROUTES, defaultRoute: "account", hasIdentity: () => true });
+    const roomLink = document.querySelector('.nav-item[data-route="room"]');
+
+    const ctrlClick = new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true });
+    roomLink.dispatchEvent(ctrlClick);
+    expect(ctrlClick.defaultPrevented).toBe(false);
+
+    const shiftClick = new MouseEvent("click", { bubbles: true, cancelable: true, shiftKey: true });
+    roomLink.dispatchEvent(shiftClick);
+    expect(shiftClick.defaultPrevented).toBe(false);
+  });
+
+  it("prevents the nav item's own native anchor navigation on a plain click -- the JS click handler is the ONLY thing that navigates", () => {
+    initRouter(document, { routes: ROUTES, defaultRoute: "account", hasIdentity: () => true });
+    const roomLink = document.querySelector('.nav-item[data-route="room"]');
+
+    const clickEvent = new MouseEvent("click", { bubbles: true, cancelable: true });
+    roomLink.dispatchEvent(clickEvent);
+
+    expect(clickEvent.defaultPrevented).toBe(true);
+    expect(visibleScreens()).toEqual(["room"]);
+  });
+
   // Section SM3 (specs/ui/simplified-ephemeral-mode.md): a second,
   // independent gate from gatedRoutes/hasIdentity -- same mechanism shape,
   // different predicate, own callback for a UI notice. Defaults ([], () =>

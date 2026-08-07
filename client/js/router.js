@@ -127,7 +127,26 @@ export function initRouter(
   }
 
   for (const item of navItems) {
-    item.addEventListener("click", () => navigate(item.dataset.route));
+    item.addEventListener("click", (event) => {
+      // Bug report (2026-08-08): nav items are real <a href="#/..."> (needed
+      // for deep-linking and Ctrl/Cmd/Shift-click "open in new tab/window",
+      // preserved by the modifier-key bail-out below), but ALSO carry this
+      // JS listener. On a RESTRICTED route (SM3's own gate), without
+      // preventDefault() a plain click double-fires: navigate()'s own
+      // synchronous render() redirects away and shows the "розділ вимкнено"
+      // notice once, then the browser's native anchor default action (once
+      // the click event finishes dispatching) navigates AGAIN -- now to a
+      // hash genuinely different from the just-redirected current one --
+      // triggering a second async hashchange, a second notice, and a junk
+      // back-button history entry. (On the common, non-restricted path this
+      // was harmless -- a same-hash anchor click is a no-op -- but the
+      // restricted-route double-fire is exactly the kind of "did that
+      // actually do anything?" confusion a real user would report as
+      // "clicking does nothing.")
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      navigate(item.dataset.route);
+    });
   }
 
   // Re-initializing (HMR, multiple app instances in one window/tests) must
