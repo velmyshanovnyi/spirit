@@ -34,7 +34,7 @@ import { splitSecret } from "./shamir.js";
 import { buildRecoveryShareAnnounce, parseRecoveryShareAnnounce, encodeShareAsText } from "./recoveryShare.js";
 import { computeSharedSafetyNumber, hexToEmoji } from "./safetyNumber.js";
 import { getSetting } from "./settingsRegistry.js";
-import { applyDesignSettings } from "./designSettingsRegistry.js";
+import { applyDesignSettings, getDesignSetting } from "./designSettingsRegistry.js";
 import { applyFooterSettings } from "./footerRegistry.js";
 import { initSettingsPanelUI } from "./settingsPanelUI.js";
 import { initSidebarFoldersUI } from "./sidebarFoldersUI.js";
@@ -1728,6 +1728,14 @@ export function initApp(doc, options) {
       doc.documentElement.style.setProperty("--conversation-toolbar-height", `${toolbar.offsetHeight}px`);
     }
   }
+  // Section RF21 (specs/ui/design-edit-mode.md, Stage 2): declared here (a
+  // `let`, reassigned once the floating-video block below has run) so
+  // setConversationChromeVisible can call it regardless of definition
+  // order -- same pattern as resetFloatingVideoRect (Section RF20). The
+  // floating-video block runs AFTER this function's own initial call
+  // further down, so that first call uses this no-op; the block re-invokes
+  // it once more after setup finishes, correcting the initial state.
+  let applyVideoDockMode = () => {};
   function setConversationChromeVisible(visible) {
     const toolbar = el("conversation-toolbar");
     if (toolbar) toolbar.hidden = !visible;
@@ -1741,6 +1749,7 @@ export function initApp(doc, options) {
     // Re-measure now that .hidden just changed -- a hidden element reports
     // offsetHeight 0, so this only produces a meaningful value once shown.
     positionConversationToolbar();
+    applyVideoDockMode();
   }
   // Mirrors main-active above: a direct #/conversation load (or the
   // zero-click quick-chat flow, which navigates before any hashchange
@@ -1853,19 +1862,89 @@ export function initApp(doc, options) {
         applyRect(computeDefaultRect());
       };
 
-      const persistCurrentRect = () =>
+      const persistCurrentRect = () => {
+        // Section RF21: while docked, the panel's box can change size
+        // purely from normal page reflow (e.g. a window resize) with no
+        // user drag/resize intent at all -- writing THAT to
+        // spirit.floatingVideoRect would corrupt the float-mode position
+        // with meaningless docked-layout numbers. `isDocked` (declared
+        // below, in this same enclosing block) is only ever READ here
+        // once this function is actually CALLED (from endDrag/the
+        // ResizeObserver, both wired further down) -- by then it's always
+        // initialized, ordinary closure lookup, not a hoisting concern.
+        if (isDocked) return;
         saveFloatingVideoRect({
           left: parseFloat(panel.style.left) || panel.offsetLeft,
           top: parseFloat(panel.style.top) || panel.offsetTop,
           width: panel.offsetWidth,
           height: panel.offsetHeight
         });
+      };
+
+      // Section RF21 (specs/ui/design-edit-mode.md, Stage 2): "docked"
+      // means the panel is actually reparented into the conversation
+      // card's content flow, not just a CSS position change -- #floating-video
+      // is NOT a descendant of the card in the real DOM (client/index.html
+      // mounts it right before </body>). Captured once, before any
+      // reparenting: `dockTarget`/`dockAnchor` describe WHERE to insert it
+      // when docked (in front of #video-status, wherever that element's
+      // parent turns out to be -- production wraps it in .card-wide,
+      // tests may not, this works either way since it's not hardcoded to
+      // a specific class); `floatOriginalParent`/`floatOriginalNextSibling`
+      // describe where to put it BACK.
+      const dockAnchor = el("video-status");
+      const dockTarget = dockAnchor?.parentElement;
+      const floatOriginalParent = panel.parentNode;
+      const floatOriginalNextSibling = panel.nextSibling;
+      let isDocked = false;
+      // Exec review finding 1 (specs/reviews/design-edit-mode-RF21-iter1.md):
+      // applyRect() (above) always sets inline left/top/width/height on the
+      // panel -- an inline style always wins over the docked CSS rule's
+      // width:100%/aspect-ratio, so the docked box silently kept whatever
+      // pixel size the float mode last had instead of the intended
+      // responsive box. Captured/cleared on dock, restored byte-for-byte
+      // on undock (not recomputed -- the user's exact float position/size
+      // must survive a dock/undock round-trip unchanged).
+      let savedInlineRect = null;
+      applyVideoDockMode = () => {
+        // Docking only makes sense while the panel is part of the visible
+        // layout (an active call on the conversation route) -- reparenting
+        // it while hidden would be invisible anyway, and the NEXT time
+        // setConversationChromeVisible(true) runs (entering the route),
+        // this function runs again and docks it correctly then.
+        const wantDocked = getDesignSetting("videoMode") === "docked" && !panel.hidden;
+        if (wantDocked === isDocked) return; // no-op: avoids needless DOM churn (losing focus/restarting <video> playback) on every unrelated call.
+        isDocked = wantDocked;
+        if (wantDocked && dockTarget && dockAnchor) {
+          savedInlineRect = { left: panel.style.left, top: panel.style.top, width: panel.style.width, height: panel.style.height };
+          panel.style.removeProperty("left");
+          panel.style.removeProperty("top");
+          panel.style.removeProperty("width");
+          panel.style.removeProperty("height");
+          dockTarget.insertBefore(panel, dockAnchor);
+        } else {
+          floatOriginalParent.insertBefore(panel, floatOriginalNextSibling);
+          if (savedInlineRect) {
+            panel.style.left = savedInlineRect.left;
+            panel.style.top = savedInlineRect.top;
+            panel.style.width = savedInlineRect.width;
+            panel.style.height = savedInlineRect.height;
+            savedInlineRect = null;
+          }
+        }
+      };
 
       if (handle) {
         let dragOffsetX = 0;
         let dragOffsetY = 0;
         let dragging = false;
         handle.addEventListener("pointerdown", (event) => {
+          // Docked mode has no drag/resize affordance (CSS also hides the
+          // handle and disables native `resize`) -- this guard is the
+          // functional backstop: `dragging` never flips true, so the
+          // pointermove/pointerup handlers below (which already guard on
+          // `dragging`) naturally no-op too, with no extra guards needed there.
+          if (isDocked) return;
           dragging = true;
           const panelRect = panel.getBoundingClientRect();
           dragOffsetX = event.clientX - panelRect.left;
@@ -1911,6 +1990,16 @@ export function initApp(doc, options) {
       // large window would otherwise end up off-screen (handle included)
       // after the browser window itself shrinks.
       win.addEventListener("resize", () => {
+        // Exec review finding 3 (specs/reviews/design-edit-mode-RF21-iter1.md):
+        // while docked, panel.offsetLeft/offsetTop are in-FLOW coordinates
+        // inside the conversation card -- a completely different coordinate
+        // space than the fixed-position float rect. Without this guard, a
+        // resize while docked overwrote the panel's inline left/top with
+        // meaningless in-flow numbers, which then got PERSISTED to
+        // spirit.floatingVideoRect on the next undock (persistCurrentRect's
+        // own isDocked guard doesn't help here -- isDocked is already false
+        // by the time undock's ResizeObserver callback fires).
+        if (isDocked) return;
         const current = { left: panel.offsetLeft, top: panel.offsetTop, width: panel.offsetWidth, height: panel.offsetHeight };
         const clamped = clampRect(current);
         panel.style.left = `${clamped.left}px`;
@@ -1919,6 +2008,12 @@ export function initApp(doc, options) {
     }
   }
   el("btn-reset-floating-video")?.addEventListener("click", () => resetFloatingVideoRect());
+  // Section RF21: setConversationChromeVisible's OWN initial call (near its
+  // definition, above) ran before this block existed, so it only ever saw
+  // applyVideoDockMode's no-op placeholder -- one corrective call here,
+  // now that the real implementation is wired, catches a direct
+  // #/conversation load or a returning session that starts already docked.
+  applyVideoDockMode();
 
   // Section H2 (specs/ui/chat-first-redesign.md): the old always-visible top
   // nav collapsed into a "⚙️ Налаштування" dropdown, in the same spirit as
@@ -2185,7 +2280,24 @@ export function initApp(doc, options) {
   // extracted out of this closure -- see settingsPanelUI.js. renderSettingsRegistry/
   // renderDesignSettings are re-called from the lang-select handler above
   // (Section C6) after a locale switch, via these returned bindings.
-  const { renderSettingsRegistry, renderDesignSettings, renderFooterSettings, renderFeatureFlagsSettings } = initSettingsPanelUI({ doc, el, t });
+  const { renderSettingsRegistry, renderDesignSettings, renderFooterSettings, renderFeatureFlagsSettings } = initSettingsPanelUI({
+    doc,
+    el,
+    t,
+    // Section RF21: videoMode's reparenting effect lives in the
+    // floating-video closure above, not reachable from applyDesignSettings()
+    // itself. Exec review finding 4 (specs/reviews/design-edit-mode-RF21-iter1.md):
+    // in TODAY's layout this hook is unreachable while a call is actually
+    // visible (the "server" screen these controls live on and the
+    // "conversation" screen are mutually exclusive, so applyVideoDockMode()'s
+    // own `!panel.hidden` check is always false at click time) -- the
+    // setting genuinely takes effect on the NEXT entry to #/conversation
+    // (onScreenChange's own applyVideoDockMode() call already covers that).
+    // Kept anyway as forward-compatible plumbing (same shape as
+    // advancedModeUI.js's onVisibilityChange) in case a future layout ever
+    // lets this control reach the user while already on that route.
+    onDesignSettingChange: () => applyVideoDockMode()
+  });
 
   withBusyButton(el("btn-admin-login"), async () => {
     const password = el("admin-password").value;

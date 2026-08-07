@@ -1068,6 +1068,42 @@ body.account-modal-suppressed [data-screen="account"].modal-screen {
   z-index: 4;
 }
 
+/* Section RF21 (specs/ui/design-edit-mode.md, Stage 2): "docked" mode --
+   app.js actually reparents #floating-video into the conversation card's
+   content flow (it's not a descendant of the card otherwise, see app.js's
+   own comment on this), so all this needs to do is undo the FLOATING
+   presentation (fixed position, drag handle, native resize) and let it lay
+   out like a normal block. app.js's applyVideoDockMode() clears the
+   float-mode inline left/top/width/height while docked (exec review
+   finding 1 -- an inline style otherwise wins over width:100%/aspect-ratio
+   below, silently keeping whatever pixel size float mode last had) and
+   restores them byte-for-byte on undock.
+
+   position: relative (not static -- exec review finding 2): .video-tile-remote
+   below is `position: absolute; bottom/right` -- its containing block is
+   normally THIS element (.floating-video is position:fixed in float mode).
+   `position: static` would make it establish NO containing block of its
+   own, so the remote peer's thumbnail would resolve against the page's
+   initial containing block instead and visibly escape the panel, floating
+   over the rest of the page. `position: relative` keeps the exact same
+   "this element clips/positions its children" contract as float mode,
+   just without the fixed-to-viewport behavior. */
+:root[data-video-mode="docked"] .floating-video {
+  position: relative;
+  top: auto;
+  left: auto;
+  width: 100%;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  aspect-ratio: 4 / 3;
+  resize: none;
+  margin-bottom: 12px;
+}
+:root[data-video-mode="docked"] .floating-video-handle {
+  display: none;
+}
+
 /* Self-view fills the ENTIRE floating window (per follow-up mockup
    feedback) -- there's usually no remote peer stream yet the moment the
    window appears, so a tiny self-view corner box was mostly wasted

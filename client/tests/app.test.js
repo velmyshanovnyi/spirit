@@ -6632,6 +6632,150 @@ describe("Section RF4: fixed conversation toolbar + floating, draggable video wi
   });
 });
 
+// Section RF21 (specs/ui/design-edit-mode.md, Stage 2): float/docked video
+// mode -- the riskiest RF20-23 section, since #floating-video is NOT a
+// descendant of the conversation card in the real DOM (it sits near
+// </body>, see client/index.html), so "docked" requires actually moving
+// the node, not just a CSS position change.
+describe("Section RF21: layout edit mode -- video float/docked mode", () => {
+  async function navigateToConversation() {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+    location.hash = "#/conversation";
+    window.dispatchEvent(new Event("hashchange"));
+  }
+
+  it("docked mode moves the panel into the conversation card while the route is visible; float mode moves it back to its original position", async () => {
+    await navigateToConversation();
+    const panel = document.getElementById("floating-video");
+    const originalParent = panel.parentElement;
+    const originalNextSibling = panel.nextSibling;
+    expect(panel.hidden).toBe(false);
+
+    document.querySelector('[data-design-choice-key="videoMode"][data-design-choice-value="docked"]').click();
+
+    expect(document.documentElement.dataset.videoMode).toBe("docked");
+    expect(panel.parentElement).toBe(document.getElementById("video-status").parentElement);
+    expect(panel.parentElement).not.toBe(originalParent);
+
+    document.querySelector('[data-design-choice-key="videoMode"][data-design-choice-value="float"]').click();
+
+    expect(document.documentElement.dataset.videoMode).toBe("float");
+    expect(panel.parentElement).toBe(originalParent);
+    expect(panel.nextSibling).toBe(originalNextSibling);
+  });
+
+  it("does NOT dock while the panel is hidden (no active call) -- reparenting only happens once the conversation route becomes visible", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+    const panel = document.getElementById("floating-video");
+    const originalParent = panel.parentElement;
+    expect(panel.hidden).toBe(true);
+
+    document.querySelector('[data-design-choice-key="videoMode"][data-design-choice-value="docked"]').click();
+    expect(panel.parentElement).toBe(originalParent); // still hidden -- no reparent yet
+
+    location.hash = "#/conversation";
+    window.dispatchEvent(new Event("hashchange"));
+    expect(panel.parentElement).toBe(document.getElementById("video-status").parentElement);
+  });
+
+  it("disables drag persistence AND the drag itself while docked -- dragging the handle neither moves the panel nor writes to spirit.floatingVideoRect", async () => {
+    await navigateToConversation();
+    document.querySelector('[data-design-choice-key="videoMode"][data-design-choice-value="docked"]').click();
+    const panel = document.getElementById("floating-video");
+    const handle = document.getElementById("floating-video-handle");
+    panel.getBoundingClientRect = () => ({ left: 100, top: 100, width: 320, height: 240 });
+    // Exec review finding 5 (specs/reviews/design-edit-mode-RF21-iter1.md):
+    // the original version of this test only checked localStorage, which
+    // stayed green even with the pointerdown guard itself removed --
+    // persistCurrentRect's OWN isDocked guard alone was already enough to
+    // pass it, so the pointerdown guard's actual effect (the drag never
+    // visibly moving the panel at all) went unverified.
+    const leftBeforeDrag = panel.style.left;
+
+    const down = new Event("pointerdown");
+    down.clientX = 110;
+    down.clientY = 105;
+    down.pointerId = 1;
+    handle.dispatchEvent(down);
+    const move = new Event("pointermove");
+    move.clientX = 210;
+    move.clientY = 205;
+    handle.dispatchEvent(move);
+    handle.dispatchEvent(new Event("pointerup"));
+
+    expect(panel.style.left).toBe(leftBeforeDrag);
+    expect(localStorage.getItem("spirit.floatingVideoRect")).toBeNull();
+  });
+
+  it("restores the exact pre-dock inline width/height on undock, rather than leaving the docked CSS's inline-shadowing size behind", async () => {
+    // Exec review finding 1: an inline width/height (set by the float-mode
+    // drag/resize logic) always wins over the docked CSS rule's
+    // width:100%/aspect-ratio -- without clearing/restoring them, the
+    // docked box would silently render at whatever fixed pixel size float
+    // mode last had instead of the intended responsive box, AND undocking
+    // would leave the panel using leftover 100%/auto CSS instead of its
+    // real saved rect.
+    await navigateToConversation();
+    const panel = document.getElementById("floating-video");
+    const widthBeforeDock = panel.style.width;
+    const heightBeforeDock = panel.style.height;
+    expect(widthBeforeDock).toBe("320px");
+
+    document.querySelector('[data-design-choice-key="videoMode"][data-design-choice-value="docked"]').click();
+    expect(panel.style.width).toBe("");
+    expect(panel.style.height).toBe("");
+
+    document.querySelector('[data-design-choice-key="videoMode"][data-design-choice-value="float"]').click();
+    expect(panel.style.width).toBe(widthBeforeDock);
+    expect(panel.style.height).toBe(heightBeforeDock);
+  });
+
+  it("does not corrupt spirit.floatingVideoRect via the window-resize clamp while docked", async () => {
+    // Exec review finding 3: the resize-clamp listener wrote
+    // panel.offsetLeft/offsetTop (in-flow docked coordinates, NOT the
+    // fixed-position float rect) into inline left/top whenever the window
+    // resized, regardless of dock state -- persisted as garbage on the
+    // NEXT undock (by which point isDocked is already false again, so
+    // persistCurrentRect's own guard doesn't catch it).
+    await navigateToConversation();
+    document.querySelector('[data-design-choice-key="videoMode"][data-design-choice-value="docked"]').click();
+    const panel = document.getElementById("floating-video");
+    Object.defineProperty(panel, "offsetLeft", { value: 12, configurable: true });
+    Object.defineProperty(panel, "offsetTop", { value: 340, configurable: true });
+
+    window.dispatchEvent(new Event("resize"));
+    document.querySelector('[data-design-choice-key="videoMode"][data-design-choice-value="float"]').click();
+
+    expect(localStorage.getItem("spirit.floatingVideoRect")).toBeNull();
+  });
+
+  it("does not reparent the panel again when the SAME mode is re-selected (no-op guard)", async () => {
+    // Exec review finding 5: removing the `wantDocked === isDocked`
+    // early-return still left the test suite green -- re-docking an
+    // already-docked panel is exactly the kind of unnecessary DOM churn
+    // (remove+reinsert) most likely to disturb a real <video>'s playback
+    // in a live browser, even though jsdom itself can't observe that
+    // directly. Spying on insertBefore is the closest jsdom-visible proxy.
+    await navigateToConversation();
+    document.querySelector('[data-design-choice-key="videoMode"][data-design-choice-value="docked"]').click();
+    const dockTarget = document.getElementById("video-status").parentElement;
+    const insertBeforeSpy = vi.spyOn(dockTarget, "insertBefore");
+
+    document.querySelector('[data-design-choice-key="videoMode"][data-design-choice-value="docked"]').click();
+
+    expect(insertBeforeSpy).not.toHaveBeenCalled();
+    insertBeforeSpy.mockRestore();
+  });
+});
+
 describe("multi-screen navigation (Section N2)", () => {
   it("defaults to the account screen", () => {
     initApp(document, { locale: "uk" });

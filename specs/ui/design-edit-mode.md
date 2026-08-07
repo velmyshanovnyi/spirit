@@ -334,43 +334,42 @@ DOM-переміщення (`appendChild`/`insertBefore`) відео-панел�
 початкової точки монтування при поверненні в "float"-режим -- НЕ просто
 CSS-перемикач, як усі попередні `choice`-записи Stage 1.
 
-- [ ] **Tests**: `client/tests/designSettingsRegistry.test.js` --
+- [x] **Tests**: `client/tests/designSettingsRegistry.test.js` --
       новий `describe("Section RF21: layout edit mode -- video float/docked mode")`
-      (тим самим шаблоном, що й RF17/RF18: default `null`/`"float"`;
-      валідне/невалідне значення через `setDesignSetting`;
-      `applyDesignSettings` виставляє/знімає `data-video-mode`).
-      `client/tests/app.test.js` -- новий тест: під час активного
-      дзвінка (мокнутий `getUserMedia`/RTCPeerConnection, за наявним
-      патерном video-call тестів) перемикання на "docked" переміщує
-      `#floating-video` усередину `.card-wide` (перевірити
-      `parentElement`/`compareDocumentPosition`), вимикає
-      pointerdown/ResizeObserver-логіку (перевірити, що
-      `spirit.floatingVideoRect` НЕ змінюється при спробі "перетягнути"
-      докований елемент); перемикання назад на "float" повертає вузол
-      на початкову позицію (перед `#app-footer`, чи де він фактично
-      змонтований у `index.html`) і відновлює drag/resize.
-- [ ] **Impl**: `client/js/designSettingsRegistry.js` -- новий запис
+      (default `null`/`"float"`; валідне/невалідне значення через
+      `setDesignSetting`; `applyDesignSettings` виставляє/знімає
+      `data-video-mode`). `client/tests/app.test.js` -- 6 тестів (без
+      мокнутого WebRTC -- досить згенерувати ідентичність і перейти на
+      `#/conversation`, той самий патерн, що й у наявних RF4-тестах):
+      docked переміщує панель усередину картки й назад; НЕ докує, доки
+      панель прихована (без активного маршруту); drag вимкнено докований
+      (і по `localStorage`, і по `panel.style.left`, після exec review
+      finding 5); undock відновлює точний inline width/height (finding
+      1); resize-подія під час докінгу не псує `spirit.floatingVideoRect`
+      (finding 3); повторний вибір того самого режиму не викликає
+      `insertBefore` вдруге (finding 5, no-op guard).
+- [x] **Impl**: `client/js/designSettingsRegistry.js` -- новий запис
       `videoMode` (`type: "choice"`, `options: ["float","docked"]`,
-      категорія `layout`, `rootAttribute: "videoMode"`).
-      `client/js/app.js` -- floating-video IIFE зберігає посилання на
-      оригінальний батьківський вузол/наступного сиблінга при ініціалізації
-      (для точного повернення); новий обробник, підписаний і на
-      `designSettingsRegistry`'s зміну (той самий `onVisibilityChange`-
-      подібний коллбек, що й для advanced mode/footer), і на подію
-      "дзвінок почався/закінчився" -- застосовує реальне DOM-переміщення
-      ЛИШЕ коли обидві умови істинні (docked-режим AND активний дзвінок);
-      у docked-режимі pointerdown/ResizeObserver-слухачі на панелі
-      вимкнені (early-return, не видалені -- щоб не плодити повторну
-      підписку при поверненні в float). `client/css/style.css` --
-      `:root[data-video-mode="docked"] .floating-video` скасовує
-      `position:fixed`/`resize`, робить звичайним block-елементом
-      (`position: static; width: 100%; height: auto; margin-bottom: var(--gap)`
-      чи подібне, узгодити з наявною версткою `.card-wide` під час
-      імплементації).
-- [ ] **Exec review**: заплановано (ця секція торкається живого
-      відеодзвінка -- обов'язкова жива перевірка реального
-      pointerdown/pointerup drag-флоу на обох хостах, не лише unit-тести,
-      перш ніж вважати завершеною).
+      категорія `layout`). `client/js/app.js` -- floating-video IIFE
+      зберігає оригінальний батьківський вузол/сиблінга; `applyVideoDockMode`
+      застосовується ЛИШЕ коли обидві умови істинні (docked-режим AND
+      панель видима); pointerdown-обробник має early-return при докінгу
+      (pointermove/pointerup вже самі no-op через це); `onDesignSettingChange`
+      callback у `initSettingsPanelUI` (нова опція в `settingsPanelUI.js`)
+      для миттєвого застосування. `client/css/style.css` --
+      `:root[data-video-mode="docked"] .floating-video` --
+      `position: relative` (НЕ `static` -- exec review finding 2,
+      інакше `.video-tile-remote`'s `position:absolute` втікає з
+      панелі), `width:100%; aspect-ratio:4/3; resize:none`.
+- [x] **Exec review**: 1 ітерація, зійшлося, 6 реальних знахідок
+      виправлено (детально в
+      `specs/reviews/design-edit-mode-RF21-iter1.md`). **Жива перевірка
+      CSS-каскаду докованого режиму (без реальної камери -- Browser pane
+      блокує доступ до камери/мікрофона в цьому середовищі) виконана**;
+      **жива перевірка неперервності відтворення `<video>` під час
+      реального дзвінка при переміщенні DOM-вузла -- ще НЕ виконана**,
+      відкладено до наступної сесії з доступом до камери двох реальних
+      профілів.
 
 ### Секція RF22 -- ширина чат-контейнера
 

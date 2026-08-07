@@ -38,7 +38,7 @@ import { TOGGLEABLE_FEATURE_KEYS, ADVANCED_FEATURES, isFeatureEnabled, setFeatur
  * Section C6 fix (these two renders don't get touched by
  * applyTranslations() since they're built imperatively, no data-i18n).
  */
-export function initSettingsPanelUI({ doc, el, t }) {
+export function initSettingsPanelUI({ doc, el, t, onDesignSettingChange }) {
   // Section RF13 (specs/ui/settings-panel.md), Stage 1: renders SETTINGS
   // structurally -- one heading per category (deduped, in registry order),
   // one row per setting with its label/description/input/reset, so adding a
@@ -276,6 +276,7 @@ export function initSettingsPanelUI({ doc, el, t }) {
     const value = input.type === "checkbox" ? input.checked : input.value;
     if (setDesignSetting(input.dataset.designSettingKey, value)) {
       applyDesignSettings(doc);
+      onDesignSettingChange?.();
     } else {
       renderDesignSettings();
     }
@@ -285,6 +286,13 @@ export function initSettingsPanelUI({ doc, el, t }) {
     if (choiceBtn) {
       if (setDesignSetting(choiceBtn.dataset.designChoiceKey, choiceBtn.dataset.designChoiceValue)) {
         applyDesignSettings(doc);
+        // Section RF21 (specs/ui/design-edit-mode.md, Stage 2): videoMode
+        // is a choice setting whose effect (reparenting #floating-video)
+        // lives entirely in app.js's closure, not reachable from
+        // applyDesignSettings() itself -- this is the same class of
+        // cross-module notification advancedModeUI.js's onVisibilityChange
+        // and footerRegistry's applyFooterSettings(doc) call already use.
+        onDesignSettingChange?.();
       }
       renderDesignSettings();
       return;
@@ -301,6 +309,7 @@ export function initSettingsPanelUI({ doc, el, t }) {
       [next[index], next[swapWith]] = [next[swapWith], next[index]];
       if (setDesignSetting(entry.key, next)) {
         applyDesignSettings(doc);
+        onDesignSettingChange?.();
       }
       renderDesignSettings();
       return;
@@ -309,11 +318,13 @@ export function initSettingsPanelUI({ doc, el, t }) {
     if (!resetBtn) return;
     resetDesignSetting(resetBtn.dataset.resetDesignSettingKey);
     applyDesignSettings(doc);
+    onDesignSettingChange?.();
     renderDesignSettings();
   });
   el("btn-reset-all-design-settings")?.addEventListener("click", () => {
     resetAllDesignSettings();
     applyDesignSettings(doc);
+    onDesignSettingChange?.();
     renderDesignSettings();
   });
 

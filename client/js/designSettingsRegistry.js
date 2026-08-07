@@ -174,6 +174,22 @@ export const DESIGN_SETTINGS = [
     rootAttribute: "noticePosition"
   },
   {
+    // Section RF21 (specs/ui/design-edit-mode.md, Stage 2): float
+    // (default, RF4's original draggable/resizable overlay) vs docked
+    // (rendered inline inside the conversation card, no drag/resize).
+    // "float" MUST be options[0] -- settingsPanelUI.js's choice renderer
+    // highlights options[0] as active when nothing is stored, and CSS's
+    // unconditional default IS float (same invariant RF23 needed).
+    key: "videoMode",
+    category: "layout",
+    labelKey: "designSettings.videoMode.label",
+    descriptionKey: "designSettings.videoMode.description",
+    type: "choice",
+    options: ["float", "docked"],
+    optionLabelKeys: { float: "designSettings.video.float", docked: "designSettings.video.docked" },
+    rootAttribute: "videoMode"
+  },
+  {
     key: "sidebarSide",
     category: "layout",
     labelKey: "designSettings.sidebarSide.label",
