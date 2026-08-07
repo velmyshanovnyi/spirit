@@ -251,6 +251,7 @@ const HTML = `
     ${ROUTES.filter((r) => r !== "account" && r !== "manage")
       .map((r) => `<a class="nav-item" data-route="${r}" href="#/${r}">${r}</a>`)
       .join("")}
+    <a class="nav-item" data-scroll-target="design-settings-list" href="#/server">design</a>
     <button id="btn-logout" type="button" class="nav-item"></button>
   </nav>
   </div>
@@ -1268,6 +1269,42 @@ describe("settings menu replacing the top nav (Section H2)", () => {
     document.querySelector('.nav-item[data-route="profile"]').click();
     expect(menu.hidden).toBe(true);
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  // User request (2026-08-08): a direct "Дизайн" entry in this dropdown --
+  // previously the only way to reach design settings was via "Сервер",
+  // then scrolling/hunting for the right card among several others.
+  it('"Дизайн" navigates to the server screen AND scrolls the design-settings card into view, without claiming a second aria-current="page"', () => {
+    localStorage.setItem("spirit.advancedModeUnlocked", "1");
+    // jsdom doesn't define scrollIntoView on Element.prototype AT ALL (not
+    // even as undefined -- vi.spyOn requires the property to already
+    // exist, so it can't be used directly here). Exec review finding 2
+    // (specs/reviews/design-menu-shortcut-iter1.md): a bare assignment
+    // with no restore would leak a mock into every later test in this
+    // file -- save/restore the original (absent) value explicitly.
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
+    initApp(document, { locale: "uk" });
+
+    document.getElementById("btn-settings-toggle").click();
+    document.querySelector('[data-scroll-target="design-settings-list"]').click();
+
+    expect(location.hash).toBe("#/server");
+    // Exec review finding 1: "Дизайн" must NOT carry its own data-route
+    // (router.js's navItems loop would then mark it aria-current="page"
+    // ALONGSIDE "Сервер" -- both real routes match "server" simultaneously,
+    // the first time two nav items would ever share one route). Confirmed
+    // here: exactly one item is current.
+    expect(document.querySelectorAll('.nav-item[aria-current="page"]')).toHaveLength(1);
+    expect(document.querySelector('.nav-item[data-route="server"]').getAttribute("aria-current")).toBe("page");
+    // Exec review test-quality note: assert the call happened with the
+    // expected args, AFTER the target screen is actually visible (not
+    // just that the hash string changed).
+    expect(document.querySelector('[data-screen="server"]').hidden).toBe(false);
+    expect(scrollSpy).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+
+    Element.prototype.scrollIntoView = originalScrollIntoView;
   });
 
   it("closes the settings menu on an outside click, same as Telegram-style dropdowns", () => {

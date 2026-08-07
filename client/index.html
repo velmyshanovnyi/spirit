@@ -79,6 +79,33 @@
           <a class="nav-item" data-route="server" href="#/server">
             <span class="nav-icon" aria-hidden="true">☁</span><span data-i18n="nav.server">Сервер</span>
           </a>
+          <!-- User request (2026-08-08): a direct, one-click entry point to
+               the Design settings card (RF14+), which otherwise sat buried
+               inside the "Сервер" screen among several other cards
+               (admin/settings-registry/footer/feature-flags). Reuses the
+               EXISTING "server" route (no new screen/route needed) --
+               data-scroll-target is app.js's own hook (wired alongside the
+               other settings-menu listeners) to additionally scroll the
+               design-settings-list card into view once that screen is
+               visible. Reuses design.heading -- same label as the card's
+               own <h2>, already translated for all 11 locales, no new i18n
+               key needed.
+
+               Deliberately NOT data-route="server" (exec review finding,
+               specs/reviews/design-menu-shortcut-iter1.md): router.js's
+               generic navItems loop marks EVERY .nav-item[data-route]
+               matching the current route as aria-current="page" -- sharing
+               "server" with the "Сервер" item above would mark BOTH
+               current simultaneously (visually + for screen readers),
+               the first time two nav items would ever share one route.
+               Navigation is handled by app.js's own dedicated listener
+               instead (same route, same preventDefault/modifier-key
+               guard as router.js's own handler, just scoped to this one
+               element). href is kept for right-click/"open in new
+               tab"/keyboard-Enter-before-JS-loads fallback. -->
+          <a class="nav-item nav-item-shortcut" data-scroll-target="design-settings-list" href="#/server">
+            <span class="nav-icon" aria-hidden="true">🎨</span><span data-i18n="design.heading">Дизайн</span>
+          </a>
           <button id="btn-logout" type="button" class="nav-item">
             <span class="nav-icon" aria-hidden="true">⏻</span><span data-i18n="menu.logout">Вийти</span>
           </button>

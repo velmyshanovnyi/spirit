@@ -2055,6 +2055,28 @@ export function initApp(doc, options) {
       }
     });
   }
+  // User request (2026-08-08): a generic "navigate to the route in this
+  // link's href, then scroll a specific card into view" shortcut --
+  // "Дизайн" (index.html) is the first user, reusing the "server" route
+  // without duplicating a data-route (exec review finding,
+  // specs/reviews/design-menu-shortcut-iter1.md: sharing data-route="server"
+  // with the real "Сервер" nav item would mark BOTH aria-current="page"
+  // simultaneously). Deliberately scoped OUTSIDE the settings-menu guard
+  // above (exec review finding) -- the selector is document-wide by
+  // design, so a future [data-scroll-target] elsewhere in the app
+  // shouldn't silently lose its listener just because it happens to load
+  // on a page/fixture without the settings menu.
+  for (const scrollLink of doc.querySelectorAll("[data-scroll-target]")) {
+    scrollLink.addEventListener("click", (event) => {
+      // Same guard as router.js's own nav-item handler -- preserves
+      // Ctrl/Cmd/Shift-click "open in new tab/window" for this real anchor.
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      const route = scrollLink.getAttribute("href")?.replace(/^#\/?/, "");
+      if (route) router.navigate(route);
+      el(scrollLink.dataset.scrollTarget)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
 
   // Section H3: quick "Створити"/"Увійти" header actions for guests -- reuse
   // the account screen's existing create/login toggle rather than duplicate
