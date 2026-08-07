@@ -184,6 +184,17 @@ export function initApp(doc, options) {
     }, 4000);
   }
 
+  // User request (2026-08-08): the notice alone left a locked-out user
+  // with the real password no actionable path forward -- router.js's
+  // onRestricted (wired below, at initRouter()) now ALSO opens the
+  // password modal directly, remembering which route they actually
+  // wanted here so a successful unlock can take them straight there
+  // instead of leaving them on whatever the redirect happened to land on.
+  // Cleared on cancel (advancedModeUIHandle's onCancel below) so a
+  // canceled attempt never carries over into some LATER, unrelated
+  // unlock (e.g. via the footer toggle).
+  let pendingRestrictedRoute = null;
+
   // renderGuestQuickActions is defined later in this closure (hoisted
   // function declaration) but only CALLED here on a later click, never at
   // this wiring line -- same hoisting-safety pattern as the *UI.js
@@ -200,6 +211,17 @@ export function initApp(doc, options) {
     onVisibilityChange: () => {
       renderGuestQuickActions();
       doc.defaultView.dispatchEvent(new Event("hashchange"));
+      // isAdvancedModeUnlocked() distinguishes "just unlocked" from "just
+      // locked" -- onVisibilityChange fires for both, but only a genuine
+      // unlock should ever auto-navigate anywhere.
+      if (isAdvancedModeUnlocked() && pendingRestrictedRoute) {
+        const route = pendingRestrictedRoute;
+        pendingRestrictedRoute = null;
+        router.navigate(route);
+      }
+    },
+    onCancel: () => {
+      pendingRestrictedRoute = null;
     }
   });
 
@@ -1687,7 +1709,26 @@ export function initApp(doc, options) {
     // flag (self-lockout guard -- it's where the toggle panel itself lives).
     isRestricted: (route) => !isAdvancedModeUnlocked() || !isFeatureEnabled(route),
     restrictedRedirectRoute: "conversation",
-    onRestricted: () => showAdvancedModeNotice()
+    onRestricted: (route) => {
+      showAdvancedModeNotice();
+      // User request (2026-08-08): don't just tell the user the section
+      // is locked -- open the password entry right here, and remember
+      // which route to send them to once they actually unlock it
+      // (onVisibilityChange above, wired to initAdvancedModeUI).
+      //
+      // Exec review finding 2 (specs/reviews/restricted-route-unlock-modal-iter1.md):
+      // ONLY when the MASTER lock is the reason -- a route restricted
+      // purely by its own per-feature flag (GE2/GE3) while already
+      // unlocked must keep the old notice-only behavior. The password
+      // modal can never fix a disabled feature flag (the password is
+      // already known-correct), and opening it there looped forever:
+      // unlock "succeeds" -> re-navigate to the still-flag-disabled route
+      // -> restricted again -> modal re-opens.
+      if (!isAdvancedModeUnlocked()) {
+        pendingRestrictedRoute = route;
+        advancedModeUIHandle?.openUnlockModal();
+      }
+    }
   });
 
   // Section SD1 (specs/ui/persistent-sidebar.md): populate the persistent

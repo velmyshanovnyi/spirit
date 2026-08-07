@@ -1648,6 +1648,69 @@ describe("advanced mode (Section SM2+SM3)", () => {
     expect(document.getElementById("advanced-mode-notice").textContent.length).toBeGreaterThan(0);
   });
 
+  // User request (2026-08-08): the notice alone gave a locked-out user with
+  // the real password no actionable way forward -- they had to already
+  // know to hunt for the tiny footer "Розширений режим" link themselves.
+  // Clicking a restricted item now ALSO opens the password modal directly,
+  // and a successful unlock takes the user straight to the route they
+  // originally wanted (not just back to wherever the notice's redirect
+  // left them).
+  it("opens the password modal directly when a restricted route is clicked, and a successful unlock navigates straight to that route", async () => {
+    adminLogin.mockResolvedValue({ token: "signed.token", expiresAt: 12345 });
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    // "btn-generate"'s own click handler is async and ends with an
+    // UNCONDITIONAL router.navigate("room") once identity generation
+    // settles (app.js's own long-standing test-fixture boilerplate
+    // behavior) -- while locked, THAT is what trips the restricted gate,
+    // not any hash this test sets itself. Waiting only for pub-key-display
+    // (set a few lines before that navigate() call) left a real race: the
+    // still-pending navigate("room") microtask could land AFTER this
+    // test's own later assertions, double-firing onRestricted. Wait for
+    // the actual observable effect of that navigate() instead -- the
+    // modal opening -- so nothing is left in flight.
+    await vi.waitFor(() => expect(document.getElementById("advanced-mode-modal").hidden).toBe(false));
+
+    // Bounced away (SM3's existing gate, unchanged) AND the modal is now
+    // open right there, no separate hunt for the footer link required.
+    expect(location.hash).not.toBe("#/room");
+
+    document.getElementById("advanced-mode-password").value = "correct horse";
+    document.getElementById("btn-advanced-mode-unlock").click();
+
+    await vi.waitFor(() => expect(document.getElementById("advanced-mode-modal").hidden).toBe(true));
+    expect(location.hash).toBe("#/room");
+  });
+
+  it("canceling the modal after a restricted click does not carry a stale pending route into a LATER, unrelated unlock", async () => {
+    adminLogin.mockResolvedValue({ token: "signed.token", expiresAt: 12345 });
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    // Same race as the previous test -- wait for the modal (the real
+    // observable effect of btn-generate's own trailing router.navigate("room")
+    // settling while locked), not just pub-key-display, so nothing from
+    // THAT async chain is still in flight when this test cancels below.
+    await vi.waitFor(() => expect(document.getElementById("advanced-mode-modal").hidden).toBe(false));
+    document.getElementById("btn-advanced-mode-cancel").click();
+    expect(document.getElementById("advanced-mode-modal").hidden).toBe(true);
+
+    // A completely separate, later unlock (e.g. via the footer link) --
+    // must NOT auto-navigate to "room" just because that was pending
+    // before the cancel.
+    location.hash = "#/conversation";
+    window.dispatchEvent(new Event("hashchange"));
+    document.getElementById("footer-advanced-toggle").click();
+    document.getElementById("advanced-mode-password").value = "correct horse";
+    document.getElementById("btn-advanced-mode-unlock").click();
+
+    await vi.waitFor(() => expect(document.getElementById("advanced-mode-modal").hidden).toBe(true));
+    expect(location.hash).toBe("#/conversation");
+  });
+
   it("does not restrict routes once unlocked", () => {
     localStorage.setItem("spirit.advancedModeUnlocked", "1");
     initApp(document, { locale: "uk" });
@@ -1687,6 +1750,52 @@ describe("advanced mode (Section SM2+SM3)", () => {
     expect(location.hash).toBe("#/account");
     expect(document.getElementById("advanced-mode-notice").hidden).toBe(false);
     expect(document.getElementById("advanced-mode-notice").textContent.length).toBeGreaterThan(0);
+  });
+
+  // Exec review finding 2 (specs/reviews/restricted-route-unlock-modal-iter1.md):
+  // the password modal must NOT open when the block is a per-feature flag
+  // while ALREADY unlocked -- entering the (already-known-correct) master
+  // password there can never fix a per-feature flag, and the reviewer
+  // proved it would loop the modal open indefinitely (unlock succeeds ->
+  // onVisibilityChange re-navigates to the still-flag-disabled route ->
+  // onRestricted fires again -> modal re-opens). The password modal is
+  // ONLY for the master lock; a disabled feature flag keeps the
+  // notice-only behavior it always had.
+  it("does NOT open the password modal for a route disabled purely by its own feature flag while already unlocked", () => {
+    localStorage.setItem("spirit.advancedModeUnlocked", "1");
+    localStorage.setItem("spirit.advancedFeatureFlags", JSON.stringify({ room: false }));
+    initApp(document, { locale: "uk" });
+
+    location.hash = "#/room";
+    window.dispatchEvent(new Event("hashchange"));
+
+    expect(document.getElementById("advanced-mode-notice").hidden).toBe(false);
+    expect(document.getElementById("advanced-mode-modal").hidden).toBe(true);
+  });
+
+  // Exec review finding 3 (specs/reviews/restricted-route-unlock-modal-iter1.md):
+  // reachable via the browser Back button re-entering a restricted hash
+  // while the modal is already open mid-typing (the restricted redirect
+  // pushes a new hash, so Back genuinely can land here again).
+  it("does not wipe an in-progress password when onRestricted fires again while the modal is already open", () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+
+    // First restricted hit opens the modal (via btn-generate's own
+    // trailing router.navigate("room"), same as the earlier tests above).
+    return vi.waitFor(() => expect(document.getElementById("advanced-mode-modal").hidden).toBe(false)).then(() => {
+      document.getElementById("advanced-mode-password").value = "typing this...";
+
+      // A second restricted hit (e.g. Back button re-entering "#/room")
+      // while the modal is still open must not reset what's typed.
+      location.hash = "#/room";
+      window.dispatchEvent(new Event("hashchange"));
+
+      expect(document.getElementById("advanced-mode-modal").hidden).toBe(false);
+      expect(document.getElementById("advanced-mode-password").value).toBe("typing this...");
+    });
   });
 
   it("keeps server reachable even if its own feature flag is hand-set to false (self-lockout guard)", () => {

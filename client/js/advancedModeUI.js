@@ -36,7 +36,7 @@ export function applyAdvancedModeVisibility(el) {
   return unlocked;
 }
 
-export function initAdvancedModeUI({ doc, el, t, onVisibilityChange }) {
+export function initAdvancedModeUI({ doc, el, t, onVisibilityChange, onCancel }) {
   const toggleBtn = el("footer-advanced-toggle");
   const modal = el("advanced-mode-modal");
   const passwordInput = el("advanced-mode-password");
@@ -47,6 +47,26 @@ export function initAdvancedModeUI({ doc, el, t, onVisibilityChange }) {
   function refreshToggleLabel() {
     if (!toggleBtn) return;
     toggleBtn.textContent = isAdvancedModeUnlocked() ? t("footer.advancedModeLock") : t("footer.advancedModeUnlock");
+  }
+
+  // User request (2026-08-08): a locked-out user with the real password
+  // previously had NO actionable path forward when clicking a restricted
+  // route -- just the "розділ вимкнено" toast, with the only way to
+  // actually unlock being to already know to hunt for this tiny footer
+  // link. Extracted so router.js's onRestricted callback (wired in
+  // app.js) can open this SAME modal directly on a restricted click, not
+  // just the footer toggle.
+  function openUnlockModal() {
+    if (!modal) return;
+    // Exec review finding 3 (specs/reviews/restricted-route-unlock-modal-iter1.md):
+    // idempotent -- a second onRestricted while the modal is ALREADY open
+    // (reachable via the browser Back button re-entering a restricted
+    // hash) must not wipe a password the user is mid-typing.
+    if (!modal.hidden) return;
+    if (errorEl) errorEl.textContent = "";
+    if (passwordInput) passwordInput.value = "";
+    modal.hidden = false;
+    passwordInput?.focus();
   }
 
   applyAdvancedModeVisibility(el);
@@ -64,12 +84,7 @@ export function initAdvancedModeUI({ doc, el, t, onVisibilityChange }) {
         onVisibilityChange?.();
         return;
       }
-      if (modal) {
-        if (errorEl) errorEl.textContent = "";
-        if (passwordInput) passwordInput.value = "";
-        modal.hidden = false;
-        passwordInput?.focus();
-      }
+      openUnlockModal();
     });
   }
 
@@ -78,6 +93,11 @@ export function initAdvancedModeUI({ doc, el, t, onVisibilityChange }) {
     // Exec review finding 4 (specs/reviews/simplified-ephemeral-mode-SM2-SM3-iter1.md):
     // don't leave a typed password sitting in the DOM after cancel.
     if (passwordInput) passwordInput.value = "";
+    // A restricted-route click may have queued a "navigate here once
+    // unlocked" intent (app.js's pendingRestrictedRoute) -- canceling
+    // must not let that intent silently carry over into some LATER,
+    // unrelated unlock (e.g. via the footer toggle).
+    onCancel?.();
   });
 
   unlockBtn?.addEventListener("click", async () => {
@@ -100,5 +120,5 @@ export function initAdvancedModeUI({ doc, el, t, onVisibilityChange }) {
     }
   });
 
-  return { refreshToggleLabel };
+  return { refreshToggleLabel, openUnlockModal };
 }
