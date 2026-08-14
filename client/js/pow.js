@@ -109,6 +109,68 @@ function randomStartAttempt() {
 // latency behind concurrency -- same total hash work, far less wall time.
 const DEFAULT_BATCH_SIZE = 256;
 
+// Backlog A1 (docs/backlog.md): batching above fixed hash THROUGHPUT but not
+// main-thread STARVATION. `await Promise.all(...)` in a tight loop only ever
+// queues microtasks, and the microtask queue is fully drained before the macrotask
+// queue gets any turn -- so timers, rendering and input events are all frozen
+// for the entire solve. Live-measured on spirit.kolo.media 2026-08-08: ZERO
+// setTimeout callbacks fired during a 5.6s solve, i.e. the whole UI (loading
+// spinner included) was dead on every fresh visit, since the zero-click
+// ephemeral auto-start calls createInvite -> solvePow immediately on load.
+//
+// Yielding a real MACROtask once per batch fixes it. Mechanism matters here:
+// measured A/B in a real browser over identical work (92 batches, same
+// winning nonce) --
+//   no yield                  460ms, 0 timers fired
+//   setTimeout(0) per batch   907ms (+97%: nested setTimeout is clamped to
+//                             ~4ms by every browser), 75 timers fired
+//   MessageChannel per batch  494ms (+7%), 28 timers fired, max lag 12ms
+// MessageChannel is a genuine macrotask with no clamping, so it costs ~7%
+// instead of ~97% for the same responsiveness.
+let yieldChannel = null;
+const yieldResolvers = [];
+
+/**
+ * Resolves on a fresh MACROtask, letting the browser service timers,
+ * rendering and input between PoW batches. Falls back to setTimeout where
+ * MessageChannel is unavailable (the clamping cost is irrelevant there --
+ * correctness first).
+ */
+function macrotaskYield() {
+  if (typeof MessageChannel === "undefined") {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  if (!yieldChannel) {
+    yieldChannel = new MessageChannel();
+    // One shared channel + a FIFO resolver queue rather than a new channel
+    // per yield: each postMessage delivers exactly one message and shifts
+    // exactly one resolver, so concurrent solves interleave safely instead
+    // of clobbering a single onmessage handler.
+    yieldChannel.port1.onmessage = () => {
+      yieldResolvers.shift()?.();
+      // Idle again -- stop holding Node's event loop open (see below).
+      if (yieldResolvers.length === 0) yieldChannel.port1.unref?.();
+    };
+    yieldChannel.port1.unref?.();
+  }
+  return new Promise((resolve) => {
+    yieldResolvers.push(resolve);
+    // ref/unref dance, verified in plain Node (browsers have neither method,
+    // so both calls are no-ops there):
+    //   - unref'd for the whole life  -> Node exits BEFORE delivering the
+    //     message, so this promise never settles and solvePow silently
+    //     hangs ("Detected unsettled top-level await", exit 13). A promise
+    //     alone does not keep Node's event loop alive.
+    //   - never unref'd               -> delivery is correct, but the live
+    //     port keeps the loop alive forever and the process/test runner
+    //     never exits (measured: hung until killed).
+    // Holding a ref only while a yield is actually outstanding gives both
+    // correct delivery and a clean exit.
+    yieldChannel.port1.ref?.();
+    yieldChannel.port2.postMessage(0);
+  });
+}
+
 /**
  * Brute-forces nonces (stringified increasing integers, starting from a
  * randomized offset by default -- see randomStartAttempt) until
@@ -132,14 +194,24 @@ const DEFAULT_BATCH_SIZE = 256;
  *
  * @param {string} challenge
  * @param {number} difficultyBits
- * @param {{maxAttempts?: number, startAttempt?: number, batchSize?: number}} [options]
+ * @param {{maxAttempts?: number, startAttempt?: number, batchSize?: number, yieldFn?: () => Promise<void>}} [options]
  * @returns {Promise<string>}
  * @throws {Error} if no solution is found within maxAttempts
  */
 export async function solvePow(
   challenge,
   difficultyBits,
-  { maxAttempts = DEFAULT_MAX_ATTEMPTS, startAttempt = randomStartAttempt(), batchSize = DEFAULT_BATCH_SIZE } = {}
+  {
+    maxAttempts = DEFAULT_MAX_ATTEMPTS,
+    startAttempt = randomStartAttempt(),
+    batchSize = DEFAULT_BATCH_SIZE,
+    // Injectable purely so tests can assert the yield CONTRACT (see
+    // pow.test.js): under Node, crypto.subtle's own promise resolution
+    // already returns to the macrotask queue between awaits, so the
+    // starvation this guards against is unobservable there and a
+    // behavioral assertion would pass with or without the fix.
+    yieldFn = macrotaskYield
+  } = {}
 ) {
   for (let base = 0; base < maxAttempts; base += batchSize) {
     const count = Math.min(batchSize, maxAttempts - base);
@@ -150,6 +222,9 @@ export async function solvePow(
         return candidates[k];
       }
     }
+    // After the batch, never before returning a hit -- a solved PoW should
+    // resolve immediately rather than pay an extra macrotask hop.
+    await yieldFn();
   }
   throw new Error(
     `solvePow: no nonce found satisfying difficultyBits=${difficultyBits} within maxAttempts=${maxAttempts}`

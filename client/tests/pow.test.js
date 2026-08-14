@@ -128,4 +128,101 @@ describe("solvePow", () => {
     },
     20000
   );
+
+  // Backlog A1 (docs/backlog.md), live-measured on spirit.kolo.media
+  // 2026-08-08: batching (the regression guard above) fixed total hash
+  // THROUGHPUT but left the main thread starved -- `await Promise.all(...)`
+  // in a tight loop only ever queues MICROtasks, and microtasks have
+  // priority over the macrotask queue, so timers/rendering/input never get
+  // a turn until the whole solve finishes. Measured: ZERO setTimeout
+  // callbacks fired during a 5.6s real solve, i.e. the UI (including the
+  // loading spinner added this phase) was completely frozen for the entire
+  // duration on every fresh visit, since the zero-click ephemeral
+  // auto-start calls createInvite -> solvePow immediately on load.
+  //
+  // A/B measured in a real browser, identical work (92 batches, same
+  // winning nonce) per variant:
+  //   no yield                460ms, 0 timers fired
+  //   setTimeout(0) per batch 907ms (+97%, 4ms clamping), 75 timers
+  //   MessageChannel per batch 494ms (+7%),  28 timers, max lag 12ms  <-- chosen
+  //
+  // IMPORTANT -- why this is tested via an injected yieldFn rather than by
+  // observing timer starvation directly: under Node/vitest,
+  // crypto.subtle.digest's promise resolution ALREADY hands control back to
+  // the macrotask queue between awaits, so a "did a setTimeout fire during
+  // the solve?" assertion passes identically with AND without the fix
+  // (verified: it passed against the unfixed implementation). That property
+  // is real in browsers and absent in Node -- exactly the jsdom blindness
+  // documented in docs/backlog.md. Asserting the yield CONTRACT (one yield
+  // per batch boundary) is the only thing that can actually fail here if
+  // the yield is removed.
+  it("yields once per batch boundary so a real browser's macrotask queue is not starved", async () => {
+    // Deterministic multi-batch work: "probe-a" at 12 bits is solved by
+    // nonce 744, i.e. inside the 3rd 256-candidate batch -- verified with an
+    // independent Node script, same style as the VECTORS above. A
+    // single-batch solve would satisfy the yield count trivially.
+    const CHALLENGE = "probe-a";
+    const DIFFICULTY = 12;
+    const yieldCalls = [];
+
+    const nonce = await solvePow(CHALLENGE, DIFFICULTY, {
+      startAttempt: 0,
+      yieldFn: () => {
+        yieldCalls.push(Date.now());
+        return Promise.resolve();
+      }
+    });
+
+    expect(nonce).toBe("744"); // pins the multi-batch precondition itself
+    // Exactly 2, not ">= 2" (exec review F1, mutation-proven): 744 is in
+    // batch 3 (0-255, 256-511, 512-767), so batches 1 and 2 each yield and
+    // batch 3 returns the hit WITHOUT yielding -- pow.js deliberately places
+    // the yield after the found-nonce check so a solved PoW resolves
+    // immediately instead of paying one more macrotask hop. A ">= 2"
+    // assertion passes against a mutant that yields before the check
+    // (3 yields), silently losing that property.
+    expect(yieldCalls.length).toBe(2);
+  });
+
+  it("still resolves correctly when no yieldFn is injected (production path uses its own default)", async () => {
+    const nonce = await solvePow("probe-a", 12, { startAttempt: 0 });
+    expect(nonce).toBe("744");
+    expect(await verifyPow("probe-a", nonce, 12)).toBe(true);
+  });
+
+  // The default yield uses a MessageChannel, whose Node-side ref/unref
+  // semantics are a trap this test exists to pin -- and one that vitest
+  // itself CANNOT catch, because the runner keeps the event loop alive for
+  // its own reasons, masking both failure modes. Measured in plain Node:
+  //   * port unref'd for its whole life -> Node exits BEFORE delivering the
+  //     message; the yield promise never settles, so solvePow hangs forever
+  //     ("Detected unsettled top-level await", exit 13).
+  //   * port never unref'd -> delivery is fine, but the live port keeps the
+  //     loop alive and the process never exits (hangs until killed) --
+  //     which in CI means a stuck job, not a failed one.
+  // Only ref-while-pending / unref-when-idle satisfies both. A subprocess is
+  // the only place that distinction is observable.
+  it("resolves AND lets the process exit cleanly in plain Node (MessageChannel ref/unref regression)", async () => {
+    const { execFileSync } = await import("node:child_process");
+    // Already an absolute file:// URL -- do NOT round-trip it through
+    // pathToFileURL(.pathname), which double-prefixes the drive letter on
+    // Windows ("file:///C:/C:/...").
+    const powUrl = new URL("../js/pow.js", import.meta.url).href;
+
+    const script = `
+      import { solvePow, verifyPow } from ${JSON.stringify(powUrl)};
+      const nonce = await solvePow("probe-a", 12, { startAttempt: 0 });
+      if (nonce !== "744") { console.error("BAD_NONCE:" + nonce); process.exit(2); }
+      if (!(await verifyPow("probe-a", nonce, 12))) { console.error("BAD_VERIFY"); process.exit(3); }
+      console.log("OK");
+    `;
+
+    // A hang (either failure mode) surfaces as a timeout kill here rather
+    // than as a silently-passing test.
+    const stdout = execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+      timeout: 20000,
+      encoding: "utf8"
+    });
+    expect(stdout.trim()).toBe("OK");
+  }, 30000);
 });
