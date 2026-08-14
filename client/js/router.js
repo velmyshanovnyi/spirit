@@ -59,6 +59,16 @@ export function initRouter(
   // exist or how they're configured relative to each other.
   const MAX_REDIRECT_HOPS = 10;
 
+  // True only for the duration of a navigation the USER actively triggered:
+  // a nav-item click, a caller passing { userInitiated: true }, or a TRUSTED
+  // hashchange (Back/Forward, address bar, bookmark, session restore). Read
+  // by render() when reporting a restricted route -- see onRestricted below.
+  // Safe as a plain flag rather than a parameter threaded through render()'s
+  // recursion because render() is fully synchronous: nothing else can run
+  // between setting and clearing it. Declared ABOVE render() (its only
+  // reader) so an early call could never hit its temporal dead zone.
+  let navigationWasUserInitiated = false;
+
   function render(hopCount = 0) {
     if (hopCount > MAX_REDIRECT_HOPS) {
       throw new Error(
@@ -90,7 +100,15 @@ export function initRouter(
         // handled by cascading through this function again, not a loop.)
         throw new Error(`initRouter: restrictedRedirectRoute "${restrictedRedirectRoute}" must not itself be a restricted route`);
       }
-      onRestricted?.(route);
+      // Backlog A2+A3 (docs/backlog.md): this is a RENDER-level hook, so it
+      // fires the same whether the user clicked a nav item, the app
+      // navigated itself (postIdentityRoute() after login/recovery), or a
+      // re-render was triggered by LOCKING advanced mode. Callers that
+      // answer a restricted route with a password prompt must only do so
+      // for a genuine user click -- otherwise an ordinary login pops an
+      // unrequested admin-password modal, and locking instantly re-prompts
+      // (and, once unlocked, undoes the very lock the user asked for).
+      onRestricted?.(route, { userInitiated: navigationWasUserInitiated });
       doc.defaultView.location.hash = `#/${restrictedRedirectRoute}`;
       render(hopCount + 1);
       return;
@@ -118,12 +136,23 @@ export function initRouter(
     }
   }
 
-  function navigate(route) {
-    // Set the hash for deep-linking/back-button support, but don't wait for
-    // the browser's own (potentially async) hashchange event -- render
-    // synchronously so callers can rely on the screen having switched.
-    doc.defaultView.location.hash = `#/${route}`;
-    render();
+  function navigate(route, { userInitiated = false } = {}) {
+    navigationWasUserInitiated = userInitiated;
+    try {
+      // Set the hash for deep-linking/back-button support, but don't wait for
+      // the browser's own (potentially async) hashchange event -- render
+      // synchronously so callers can rely on the screen having switched.
+      doc.defaultView.location.hash = `#/${route}`;
+      render();
+    } finally {
+      // Defense in depth, deliberately NOT load-bearing: every entry point
+      // into render() (this function, the hashchange listener, and the
+      // init-time call below) assigns the flag before rendering, so no
+      // stale value can be read even without this reset -- a mutation that
+      // deletes it correctly survives the suite. Kept because it costs
+      // nothing and makes the flag's lifetime obvious to a reader.
+      navigationWasUserInitiated = false;
+    }
   }
 
   for (const item of navItems) {
@@ -145,7 +174,7 @@ export function initRouter(
       // "clicking does nothing.")
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
-      navigate(item.dataset.route);
+      navigate(item.dataset.route, { userInitiated: true });
     });
   }
 
@@ -166,7 +195,22 @@ export function initRouter(
   // navigate()-time calls (both call render() with no args) were ever
   // actually protected. Wrapping ensures hopCount always starts at its
   // real default (0) regardless of caller.
-  const hashChangeListener = () => render();
+  const hashChangeListener = (event) => {
+    // Exec review finding 2 (backlog A2+A3): a TRUSTED hashchange is a real
+    // user action that simply doesn't route through navigate() -- Back/
+    // Forward, an edited address bar, a bookmarked or shared deep link, a
+    // restored session. Treating those as programmatic silently denied the
+    // password prompt to precisely the person this feature is for: someone
+    // who knows the password and opens #/server directly. A SYNTHETIC event
+    // (app.js dispatches one after locking advanced mode) is untrusted and
+    // must stay programmatic, which is what keeps A3 fixed.
+    navigationWasUserInitiated = event?.isTrusted === true;
+    try {
+      render();
+    } finally {
+      navigationWasUserInitiated = false;
+    }
+  };
   win.__spiritRouterHashListener = hashChangeListener;
   win.addEventListener("hashchange", hashChangeListener);
 

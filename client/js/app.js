@@ -1709,7 +1709,7 @@ export function initApp(doc, options) {
     // flag (self-lockout guard -- it's where the toggle panel itself lives).
     isRestricted: (route) => !isAdvancedModeUnlocked() || !isFeatureEnabled(route),
     restrictedRedirectRoute: "conversation",
-    onRestricted: (route) => {
+    onRestricted: (route, { userInitiated } = {}) => {
       showAdvancedModeNotice();
       // User request (2026-08-08): don't just tell the user the section
       // is locked -- open the password entry right here, and remember
@@ -1724,7 +1724,17 @@ export function initApp(doc, options) {
       // already known-correct), and opening it there looped forever:
       // unlock "succeeds" -> re-navigate to the still-flag-disabled route
       // -> restricted again -> modal re-opens.
-      if (!isAdvancedModeUnlocked()) {
+      // Backlog A2+A3 (docs/backlog.md): only a genuine user click may be
+      // answered with a password prompt. onRestricted is a render-level
+      // hook, so without this it also fired for (A2) the app navigating
+      // itself to postIdentityRoute() after login/recovery/profile-unlock/
+      // backup-skip -- both "room" and "profile" are advanced routes, so an
+      // ordinary login popped an admin-password modal nobody asked for --
+      // and for (A3) the synthetic hashchange dispatched when LOCKING
+      // advanced mode, which re-prompted immediately and, since the pending
+      // route was recorded during that lock, sent the user straight back to
+      // the screen they had just locked once they typed the password.
+      if (!isAdvancedModeUnlocked() && userInitiated) {
         pendingRestrictedRoute = route;
         advancedModeUIHandle?.openUnlockModal();
       }
@@ -2114,7 +2124,11 @@ export function initApp(doc, options) {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
       const route = scrollLink.getAttribute("href")?.replace(/^#\/?/, "");
-      if (route) router.navigate(route);
+      // userInitiated: this IS a real click, it just isn't wired by
+      // router.js's own nav-item loop (backlog A2+A3) -- without saying so,
+      // clicking "Дизайн" while locked would show only the notice and never
+      // offer the password prompt.
+      if (route) router.navigate(route, { userInitiated: true });
       el(scrollLink.dataset.scrollTarget)?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   }

@@ -212,6 +212,110 @@ describe("initRouter", () => {
     expect(shiftClick.defaultPrevented).toBe(false);
   });
 
+  // Backlog A2+A3 (docs/backlog.md): onRestricted is a RENDER-level hook, so
+  // it fires identically whether the user clicked a nav item, the app
+  // navigated itself (e.g. postIdentityRoute() after login), or a re-render
+  // was triggered by locking advanced mode. app.js needs to tell those
+  // apart -- only a real click should be answered with a password prompt.
+  it("reports userInitiated:true to onRestricted for a real nav-item click", () => {
+    const onRestricted = vi.fn();
+    initRouter(document, {
+      routes: ROUTES,
+      defaultRoute: "conversation",
+      hasIdentity: () => true,
+      restrictedRoutes: ["room"],
+      isRestricted: () => true,
+      restrictedRedirectRoute: "conversation",
+      onRestricted
+    });
+
+    document.querySelector('.nav-item[data-route="room"]').dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true })
+    );
+
+    expect(onRestricted).toHaveBeenCalledWith("room", expect.objectContaining({ userInitiated: true }));
+  });
+
+  it("reports userInitiated:false for a programmatic navigate() and for a hashchange re-render", () => {
+    const onRestricted = vi.fn();
+    const { navigate } = initRouter(document, {
+      routes: ROUTES,
+      defaultRoute: "conversation",
+      hasIdentity: () => true,
+      restrictedRoutes: ["room"],
+      isRestricted: () => true,
+      restrictedRedirectRoute: "conversation",
+      onRestricted
+    });
+
+    // (a) the app navigating itself -- e.g. app.js's postIdentityRoute()
+    navigate("room");
+    expect(onRestricted).toHaveBeenLastCalledWith("room", expect.objectContaining({ userInitiated: false }));
+
+    // (b) a re-render driven by a hashchange -- e.g. app.js dispatches a
+    // synthetic one after locking advanced mode
+    onRestricted.mockClear();
+    location.hash = "#/room";
+    window.dispatchEvent(new Event("hashchange"));
+    expect(onRestricted).toHaveBeenLastCalledWith("room", expect.objectContaining({ userInitiated: false }));
+  });
+
+  // Exec review finding 2: a REAL browser hashchange (Back/Forward button,
+  // address bar, a bookmarked/deep link, session restore) IS a user action
+  // -- it just doesn't go through navigate(). Treating every hashchange as
+  // programmatic silently dropped the password prompt for exactly the user
+  // this feature exists for: someone who knows the password and opens
+  // #/server directly. A synthetic Event dispatched by app code (app.js
+  // does this after LOCKING) must still count as programmatic, and
+  // isTrusted is precisely that distinction.
+  it("treats a TRUSTED hashchange (Back button / deep link) as user-initiated, but a synthetic one as programmatic", () => {
+    const onRestricted = vi.fn();
+    const addEventListenerSpy = vi.spyOn(window, "addEventListener");
+    initRouter(document, {
+      routes: ROUTES,
+      defaultRoute: "conversation",
+      hasIdentity: () => true,
+      restrictedRoutes: ["room"],
+      isRestricted: () => true,
+      restrictedRedirectRoute: "conversation",
+      onRestricted
+    });
+    const listener = addEventListenerSpy.mock.calls.find((c) => c[0] === "hashchange")[1];
+    addEventListenerSpy.mockRestore();
+
+    // jsdom cannot construct a trusted event, so drive the registered
+    // listener directly with each shape -- the same technique the
+    // hop-counter test above already uses.
+    location.hash = "#/room";
+    listener({ isTrusted: true });
+    expect(onRestricted).toHaveBeenLastCalledWith("room", expect.objectContaining({ userInitiated: true }));
+
+    onRestricted.mockClear();
+    location.hash = "#/room";
+    listener({ isTrusted: false });
+    expect(onRestricted).toHaveBeenLastCalledWith("room", expect.objectContaining({ userInitiated: false }));
+  });
+
+  it("lets a caller opt into userInitiated explicitly (for app-owned links that ARE user clicks)", () => {
+    // app.js's "Дизайн" settings-menu shortcut is a real user click, but it
+    // is wired by app.js rather than by router.js's own nav-item loop, so it
+    // has to be able to say so.
+    const onRestricted = vi.fn();
+    const { navigate } = initRouter(document, {
+      routes: ROUTES,
+      defaultRoute: "conversation",
+      hasIdentity: () => true,
+      restrictedRoutes: ["room"],
+      isRestricted: () => true,
+      restrictedRedirectRoute: "conversation",
+      onRestricted
+    });
+
+    navigate("room", { userInitiated: true });
+
+    expect(onRestricted).toHaveBeenCalledWith("room", expect.objectContaining({ userInitiated: true }));
+  });
+
   it("prevents the nav item's own native anchor navigation on a plain click -- the JS click handler is the ONLY thing that navigates", () => {
     initRouter(document, { routes: ROUTES, defaultRoute: "account", hasIdentity: () => true });
     const roomLink = document.querySelector('.nav-item[data-route="room"]');
@@ -243,7 +347,7 @@ describe("initRouter", () => {
 
     expect(visibleScreens()).toEqual(["conversation"]);
     expect(location.hash).toBe("#/conversation");
-    expect(onRestricted).toHaveBeenCalledWith("server");
+    expect(onRestricted).toHaveBeenCalledWith("server", expect.objectContaining({ userInitiated: false }));
   });
 
   it("allows a restricted route once isRestricted() returns false, without touching onRestricted", () => {
@@ -290,7 +394,7 @@ describe("initRouter", () => {
     location.hash = "#/server";
     window.dispatchEvent(new Event("hashchange"));
     expect(visibleScreens()).toEqual(["conversation"]);
-    expect(onRestricted).toHaveBeenCalledWith("server");
+    expect(onRestricted).toHaveBeenCalledWith("server", expect.objectContaining({ userInitiated: false }));
   });
 
   it("cascades correctly (no infinite loop) when the restricted redirect target is itself identity-gated", () => {
@@ -315,7 +419,7 @@ describe("initRouter", () => {
 
     expect(visibleScreens()).toEqual(["account"]);
     expect(location.hash).toBe("#/account");
-    expect(onRestricted).toHaveBeenCalledWith("server");
+    expect(onRestricted).toHaveBeenCalledWith("server", expect.objectContaining({ userInitiated: false }));
     expect(onRestricted).toHaveBeenCalledTimes(1);
   });
 
