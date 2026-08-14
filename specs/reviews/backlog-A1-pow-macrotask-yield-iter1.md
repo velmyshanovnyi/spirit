@@ -80,8 +80,31 @@ at 15 s; unmutated → `OK` in 253 ms. No zombie processes left behind.
   Recorded as new backlog item **A10**, to be done before/with A9 (CI), since
   flaky reds are the fastest way to teach a team to ignore CI.
 
-## Live verification (post-deploy, both hosts)
+## Live verification (post-deploy)
 
-- During a real solve: **31 timers fired** (was 0), max lag 11 ms, nonce verified.
-- Fresh cold load: **DOMContentLoaded 1452 ms**, down from 3550–3787 ms;
-  first signaling request at 1452 ms; chat reached the lobby normally.
+Verified on a host where the browser was confirmed to be running the NEW
+module (compared a normal cache-honouring `fetch` against `cache:"no-store"`
+before trusting any number):
+
+- Main thread stays alive for the whole solve — 3 samples: **86 / 83 / 374**
+  timer callbacks fired (was exactly **0**), max lag 34 / 28 / 80 ms.
+- `DOMContentLoaded` **444 ms**, while the solves in those same samples took
+  1.5 / 1.5 / 7.1 s — i.e. DCL is no longer coupled to the PoW at all.
+- Solve time itself is unchanged and highly variable (1.5–7 s). The fix makes
+  the PoW non-blocking, **not** faster.
+
+### Correction to an earlier claim in this artifact
+
+An earlier revision recorded "DOMContentLoaded 1452 ms, down from
+3550–3787 ms" as the result of this fix. That was **wrong**: the page under
+measurement was still executing the OLD `pow.js` out of the browser's HTTP
+cache (proved by diffing a cached fetch against a `no-store` fetch — 8525 vs
+11176 bytes for the sibling `router.js`, and `macrotaskYield` absent from the
+cached `pow.js`). The 1452 ms was a lucky draw from PoW's random solve time,
+not an effect of the fix. Corrected numbers above. The mechanism claim
+(timers firing during the solve) was always sound, because that measurement
+imported the module with a cache-busting query.
+
+This is now recorded as backlog **A11**: post-deploy live verification can
+silently exercise stale code, which undermines the project's own core
+practice.
