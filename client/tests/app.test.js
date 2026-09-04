@@ -378,6 +378,10 @@ const HTML = `
       <option value="custom">Custom</option>
     </select>
     <input id="stun-url" type="text" value="stun:stun.example:19302">
+    <select id="turn-preset">
+      <option value="custom">Custom</option>
+      <option value="metered-openrelay">Open Relay Project</option>
+    </select>
     <input id="turn-url" type="text" value="">
     <input id="turn-username" type="text" value="">
     <input id="turn-credential" type="password" value="">
@@ -855,6 +859,82 @@ describe("STUN preset selector (Section C8)", () => {
   });
 });
 
+// User request (2026-08-08): TURN is optional and forceTurnRelay's own hint
+// already explains a real TURN server (login+password) is needed for it to
+// do anything -- most users have neither. #turn-preset offers a free,
+// no-signup public relay (Open Relay Project's shared-secret endpoint,
+// client/js/turnCredentials.js) as one click, same spirit as #stun-preset.
+// UNLIKE the STUN preset, the credential is TIME-LIMITED (HMAC over an
+// embedded expiry timestamp) and must be freshly computed on selection --
+// it cannot be a fixed string to match against, so there is no "typing a
+// value that happens to match a preset re-selects it" test here (that
+// would require inverting an HMAC).
+describe("TURN preset selector (free public relay)", () => {
+  it("selecting the free relay preset fills turn-url/turn-username/turn-credential", async () => {
+    initApp(document, { locale: "uk" });
+    const preset = document.getElementById("turn-preset");
+
+    preset.value = "metered-openrelay";
+    preset.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(document.getElementById("turn-credential").value).not.toBe(""));
+
+    expect(document.getElementById("turn-url").value).toBe("turn:staticauth.openrelay.metered.ca:443?transport=tcp");
+    // username embeds a future unix-timestamp expiry -- assert the SHAPE
+    // (":spirit" suffix, numeric prefix), not an exact value (it depends on
+    // the real clock at test time).
+    expect(document.getElementById("turn-username").value).toMatch(/^\d+:spirit$/);
+    expect(document.getElementById("turn-credential").value.length).toBeGreaterThan(0);
+  });
+
+  it("selecting 'custom' does not overwrite whatever is currently in the three TURN fields", () => {
+    initApp(document, { locale: "uk" });
+    const preset = document.getElementById("turn-preset");
+    document.getElementById("turn-url").value = "turn:my-own-turn.example:3478";
+    document.getElementById("turn-username").value = "me";
+    document.getElementById("turn-credential").value = "secret";
+
+    preset.value = "custom";
+    preset.dispatchEvent(new Event("change"));
+
+    expect(document.getElementById("turn-url").value).toBe("turn:my-own-turn.example:3478");
+    expect(document.getElementById("turn-username").value).toBe("me");
+    expect(document.getElementById("turn-credential").value).toBe("secret");
+  });
+
+  it("manually editing any of the three TURN fields flips the dropdown back to 'custom'", async () => {
+    initApp(document, { locale: "uk" });
+    const preset = document.getElementById("turn-preset");
+    preset.value = "metered-openrelay";
+    preset.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(document.getElementById("turn-credential").value).not.toBe(""));
+
+    document.getElementById("turn-url").value = "turn:something-else.example:3478";
+    document.getElementById("turn-url").dispatchEvent(new Event("input"));
+    expect(preset.value).toBe("custom");
+  });
+
+  it("re-selecting the preset regenerates a fresh (different) credential rather than reusing the last one", async () => {
+    initApp(document, { locale: "uk" });
+    const preset = document.getElementById("turn-preset");
+    const usernameEl = document.getElementById("turn-username");
+
+    preset.value = "metered-openrelay";
+    preset.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(usernameEl.value).not.toBe(""));
+    const firstUsername = usernameEl.value;
+
+    // Force a different expiry by advancing the clock, then re-select.
+    vi.useFakeTimers();
+    vi.advanceTimersByTime(60_000);
+    preset.value = "custom";
+    preset.dispatchEvent(new Event("change"));
+    preset.value = "metered-openrelay";
+    preset.dispatchEvent(new Event("change"));
+    vi.useRealTimers();
+    await vi.waitFor(() => expect(usernameEl.value).not.toBe(firstUsername));
+  });
+});
+
 describe("multi-node signaling UI (specs/phase4/multi-node-ui.md)", () => {
   it("shows the empty-list hint and does not touch the server/stun/relay fields' defaults when no node is saved", () => {
     initApp(document, { locale: "uk" });
@@ -908,6 +988,96 @@ describe("multi-node signaling UI (specs/phase4/multi-node-ui.md)", () => {
     expect(document.getElementById("server-url").value).toBe("https://b.example/index.php");
     expect(document.getElementById("stun-url").value).toBe("turn:b.example:3478");
     expect(document.getElementById("force-turn-relay").checked).toBe(true);
+  });
+
+  it("saving with the free TURN preset active records WHICH preset, not the credential itself", () => {
+    initApp(document, { locale: "uk" });
+    const turnPreset = document.getElementById("turn-preset");
+    turnPreset.value = "metered-openrelay";
+    turnPreset.dispatchEvent(new Event("change"));
+    return vi.waitFor(() => expect(document.getElementById("turn-credential").value).not.toBe("")).then(() => {
+      document.getElementById("signaling-node-name").value = "Free relay node";
+      document.getElementById("btn-save-signaling-node").click();
+
+      const stored = JSON.parse(localStorage.getItem("spirit.signalingNodes"));
+      expect(stored[0].turnPreset).toBe("metered-openrelay");
+    });
+  });
+
+  // Exec review finding 2 (specs/reviews/turn-preset-iter1.md): the HMAC
+  // credential computed by the free-relay preset expires (24h TTL,
+  // client/js/turnCredentials.js). Saving it verbatim into
+  // spirit.signalingNodes and restoring it VERBATIM later meant a node
+  // saved today and reopened in a few days would silently populate an
+  // EXPIRED credential -- the TURN server would reject it and the only
+  // symptom is a generic ICE-gathering timeout, indistinguishable from
+  // "the relay is just down" (exactly the ambiguity turnCredentials.js's
+  // own header comment says the old static-credential pair was rejected
+  // for). Selecting a preset-backed saved node must regenerate a FRESH
+  // credential instead of restoring the stale one.
+  it("selecting a saved node that used the free TURN preset regenerates a FRESH credential instead of restoring the stale one", async () => {
+    localStorage.setItem(
+      "spirit.signalingNodes",
+      JSON.stringify([
+        {
+          id: "node-c",
+          name: "Old free-relay node",
+          serverUrl: "https://c.example/index.php",
+          stunUrl: "stun:c.example:19302",
+          turnPreset: "metered-openrelay",
+          // Deliberately a long-expired credential (unix epoch 0) -- if this
+          // ever gets restored verbatim, it's a stale value the test can
+          // catch by checking it does NOT survive.
+          turnUrl: "turn:staticauth.openrelay.metered.ca:443?transport=tcp",
+          turnUsername: "0:spirit",
+          turnCredential: "STALE-EXPIRED-VALUE",
+          forceTurnRelay: false
+        }
+      ])
+    );
+    initApp(document, { locale: "uk" });
+
+    document.querySelector('[data-signaling-node-select="node-c"]').click();
+
+    // Wait for the POSITIVE condition (the async fill completing), not for
+    // "not equal to the stale value" -- the field is simply empty ("",
+    // the fixture's own default) during the async gap, since selecting a
+    // saved node never auto-fills on page load, only on click. "not equal
+    // to a specific stale string" would trivially and immediately pass on
+    // that empty intermediate state, checking nothing.
+    await vi.waitFor(() => expect(document.getElementById("turn-username").value).not.toBe(""));
+    expect(document.getElementById("turn-credential").value).not.toBe("STALE-EXPIRED-VALUE");
+    expect(document.getElementById("turn-username").value).toMatch(/^\d+:spirit$/);
+    // The regenerated username's embedded expiry must be in the future.
+    const expiry = Number(document.getElementById("turn-username").value.split(":")[0]);
+    expect(expiry).toBeGreaterThan(Date.now() / 1000);
+    expect(document.getElementById("turn-preset").value).toBe("metered-openrelay");
+  });
+
+  it("selecting a saved node with a CUSTOM (non-preset) TURN config restores it verbatim, unchanged", () => {
+    localStorage.setItem(
+      "spirit.signalingNodes",
+      JSON.stringify([
+        {
+          id: "node-d",
+          name: "Custom TURN node",
+          serverUrl: "https://d.example/index.php",
+          stunUrl: "stun:d.example:19302",
+          turnUrl: "turn:my-own-turn.example:3478",
+          turnUsername: "myuser",
+          turnCredential: "mypassword",
+          forceTurnRelay: true
+        }
+      ])
+    );
+    initApp(document, { locale: "uk" });
+
+    document.querySelector('[data-signaling-node-select="node-d"]').click();
+
+    expect(document.getElementById("turn-url").value).toBe("turn:my-own-turn.example:3478");
+    expect(document.getElementById("turn-username").value).toBe("myuser");
+    expect(document.getElementById("turn-credential").value).toBe("mypassword");
+    expect(document.getElementById("turn-preset").value).toBe("custom");
   });
 
   it("deletes a saved node from both the DOM list and localStorage", () => {

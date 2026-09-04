@@ -72,6 +72,7 @@ import {
   applyRenegotiationAnswer,
   buildRtcConfig
 } from "./webrtc.js";
+import { computeTurnRestCredential } from "./turnCredentials.js";
 import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer } from "./signalingClient.js";
 import { deriveSessionKey, encryptMessage, decryptMessage } from "./e2ee.js";
 import { deriveRootKey, deriveInitialChainKeys, ratchetStep } from "./ratchet.js";
@@ -2232,6 +2233,52 @@ export function initApp(doc, options) {
     stunPresetEl.value = match ? match[0] : "custom";
   });
 
+  // User request (2026-08-08): a free, no-signup TURN preset -- same
+  // fill-in-convenience spirit as STUN_PRESETS above, but with one real
+  // difference: forceTurnRelay's own hint already says a real TURN server
+  // (login+password) is required for it to do anything at all, and most
+  // users have neither, so this closes that gap with one click.
+  //
+  // UNLIKE a STUN preset, the credential is TIME-LIMITED (Metered's
+  // shared-secret "TURN REST API" scheme, client/js/turnCredentials.js) --
+  // there is no fixed string to fill in once, it must be computed fresh on
+  // selection. Consequently there is no reverse "does turn-url happen to
+  // match a known preset" sync on manual edits (unlike stun-url above) --
+  // any manual edit to any of the three TURN fields just flips to "custom",
+  // since a freshly-typed value can never coincidentally equal a live HMAC.
+  const TURN_PRESETS = {
+    "metered-openrelay": {
+      // Port 443 (not 80): the vendor's own docs highlight 443 specifically
+      // for bypassing restrictive/corporate firewalls that only allow
+      // HTTPS-shaped traffic; ?transport=tcp on top of that covers networks
+      // that additionally block UDP outright. buildRtcConfig's turn-url
+      // field only holds one URI, so this is the single most broadly-
+      // compatible choice rather than the bare default.
+      url: "turn:staticauth.openrelay.metered.ca:443?transport=tcp",
+      // Published by Metered specifically for this no-signup use (their own
+      // documented example use case: embedding directly in an app like
+      // Nextcloud Talk, as opposed to their per-account API-key endpoint,
+      // which requires signup and is NOT reproduced here). Not a secret
+      // Spirit is leaking -- it's the vendor's own public, shared value.
+      sharedSecret: "openrelayprojectsecret"
+    }
+  };
+  el("turn-preset")?.addEventListener("change", async () => {
+    const preset = el("turn-preset").value;
+    const def = TURN_PRESETS[preset];
+    if (!def) return; // "custom" (or any future unrecognized value): leave the three fields untouched
+    el("turn-url").value = def.url;
+    const { username, credential } = await computeTurnRestCredential(def.sharedSecret);
+    el("turn-username").value = username;
+    el("turn-credential").value = credential;
+  });
+  for (const turnFieldId of ["turn-url", "turn-username", "turn-credential"]) {
+    el(turnFieldId)?.addEventListener("input", () => {
+      const turnPresetEl = el("turn-preset");
+      if (turnPresetEl) turnPresetEl.value = "custom";
+    });
+  }
+
   // Section: multi-node signaling/TURN UI (specs/phase4/multi-node-ui.md).
   // localStorage, not the "profile" IndexedDB store -- this is a
   // browser/device-level setting (which signaling node this machine talks
@@ -2321,6 +2368,15 @@ export function initApp(doc, options) {
       turnUrl: el("turn-url").value,
       turnUsername: el("turn-username").value,
       turnCredential: el("turn-credential").value,
+      // Exec review finding 2 (specs/reviews/turn-preset-iter1.md): a preset
+      // like "metered-openrelay" produces a credential that EXPIRES
+      // (turnCredentials.js's HMAC embeds a TTL) -- recording WHICH preset
+      // was active lets the select-node handler below regenerate a fresh
+      // one instead of silently restoring a possibly-stale value. "custom"
+      // (or an older saved node with no turnPreset field at all, from
+      // before this existed) means "just restore the raw fields verbatim",
+      // unchanged from the original behavior.
+      turnPreset: el("turn-preset")?.value ?? "custom",
       forceTurnRelay: el("force-turn-relay").checked
     });
     saveSignalingNodes(nodes);
@@ -2328,7 +2384,7 @@ export function initApp(doc, options) {
     renderSignalingNodesList();
   });
 
-  el("signaling-nodes-list")?.addEventListener("click", (event) => {
+  el("signaling-nodes-list")?.addEventListener("click", async (event) => {
     const selectButton = event.target.closest("[data-signaling-node-select]");
     if (selectButton) {
       const node = loadSignalingNodes().find((n) => n.id === selectButton.dataset.signalingNodeSelect);
@@ -2338,10 +2394,27 @@ export function initApp(doc, options) {
         // note): no auto-reconnect of any in-progress session.
         el("server-url").value = node.serverUrl;
         el("stun-url").value = node.stunUrl;
-        el("turn-url").value = node.turnUrl ?? "";
-        el("turn-username").value = node.turnUsername ?? "";
-        el("turn-credential").value = node.turnCredential ?? "";
         el("force-turn-relay").checked = !!node.forceTurnRelay;
+        // Exec review finding 2: a preset-backed node's saved credential
+        // may have expired since it was saved -- regenerate a fresh one
+        // rather than restoring the stale value (a TURN server rejecting
+        // an expired HMAC surfaces only as a generic ICE-gathering
+        // timeout, indistinguishable from "the relay is just down").
+        // "custom", or any older saved node with no turnPreset field at
+        // all (from before this existed), falls through to the original
+        // verbatim-restore behavior.
+        const def = TURN_PRESETS[node.turnPreset];
+        if (el("turn-preset")) el("turn-preset").value = def ? node.turnPreset : "custom";
+        if (def) {
+          el("turn-url").value = def.url;
+          const { username, credential } = await computeTurnRestCredential(def.sharedSecret);
+          el("turn-username").value = username;
+          el("turn-credential").value = credential;
+        } else {
+          el("turn-url").value = node.turnUrl ?? "";
+          el("turn-username").value = node.turnUsername ?? "";
+          el("turn-credential").value = node.turnCredential ?? "";
+        }
       }
       return;
     }

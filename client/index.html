@@ -441,6 +441,24 @@
              credentials (RFC 5766) need their own fields, they can't be
              typed into the STUN field above. Optional: buildRtcConfig
              only adds a TURN iceServers entry when turn-url is non-empty. -->
+        <!-- User request (2026-08-08): free, no-signup public TURN relay,
+             one click away -- most users have no TURN server at all, which
+             makes "Форсувати TURN-релей" below unusable without this.
+             client/js/turnCredentials.js computes a fresh, time-limited
+             credential (Metered's shared-secret "TURN REST API" scheme) the
+             moment this is selected; #turn-url/-username/-credential stay
+             the single fields buildRtcConfig() actually reads, same
+             fill-in-convenience relationship as #stun-preset above. -->
+        <label class="field"><span data-i18n="label.turnPreset">TURN-пресет:</span>
+          <select id="turn-preset">
+            <option value="custom" data-i18n="turn.presetCustom" selected>Власний</option>
+            <option value="metered-openrelay" data-i18n="turn.presetMeteredOpenrelay">Open Relay Project (безкоштовний)</option>
+          </select>
+        </label>
+        <p class="hint" data-i18n="turn.presetHint">
+          Спільний громадський релей, без реєстрації. Не приватний і не гарантовано
+          стабільний сервер — для критичних сценаріїв варто мати власний TURN.
+        </p>
         <label class="field"><span data-i18n="label.turnUrl">TURN (опційно):</span>
           <input id="turn-url" type="text" placeholder="turn:example.org:3478">
         </label>
