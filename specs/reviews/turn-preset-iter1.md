@@ -104,3 +104,32 @@ verified against a real two-peer WebRTC connection through the actual
 `staticauth.openrelay.metered.ca` server. Live verification after deploy
 should specifically attempt a real forced-TURN-relay connection using this
 preset on both hosts, not just confirm the UI fills the fields correctly.
+
+## Post-deploy live verification (2026-08-08): INCONCLUSIVE, filed as backlog A12
+
+Attempted exactly the check called out above. Results:
+
+- UI wiring confirmed correct on a verified-fresh deploy (compared
+  cache-honouring vs. `cache:"no-store"` fetches first, per backlog A11's
+  lesson): selecting the preset fills all three TURN fields with a live
+  HMAC credential.
+- Control checks in the same harness work: STUN to `stun.l.google.com`
+  gathers real candidates in seconds; Metered's OTHER endpoint
+  (`global.relay.metered.ca`) returns a real protocol-level TURN Allocate
+  error (400, expected -- it needs their per-account API-key credential
+  scheme, not this one), proving the network path to the vendor's
+  infrastructure is open in this environment.
+- `staticauth.openrelay.metered.ca` itself never responded at all --
+  tried UDP and TCP on ports 80/443, `turns:` (TLS), and a direct
+  connection to its DNS-resolved IP bypassing hostname lookup entirely
+  (`216.39.253.123`, confirmed live via an independent DNS-over-HTTPS
+  query to 1.1.1.1). No ICE candidates, no `icecandidateerror` events,
+  across waits up to 20s per variant.
+
+This does not prove the endpoint is dead -- it could be this session's
+browser sandbox silently dropping traffic to that one host specifically,
+and public search found no recent reports of an outage. But it is a real,
+reproducible negative result against the one thing this whole feature
+depends on, so it is not honest to call this section fully verified.
+Recorded as **docs/backlog.md A12** for a check from a real (non-sandboxed)
+browser with two live peers before relying on this preset.
