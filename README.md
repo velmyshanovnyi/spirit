@@ -23,6 +23,7 @@
 - [`docs/oauth-verification.md`](docs/oauth-verification.md) — автоматизована OAuth-версія верифікації (Google/Yandex зараз, Telegram/FB заплановано).
 - [`docs/roadmap.md`](docs/roadmap.md) — фазований план розробки.
 - [`docs/decisions.md`](docs/decisions.md) — журнал ключових архітектурних рішень.
+- [`SPIRIT.md`](SPIRIT.md) — журнал стану для розробників: домовленості, граблі, поточні пріоритети.
 
 ## Статус
 

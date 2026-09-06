@@ -1,3 +1,11 @@
 node_modules/
 deploy/*.local.*
 server/config.secrets.php
+
+# Claude Code — особисті/машинні налаштування (не в git)
+.claude/settings.local.json
+# Claude Code — робочі артефакти сесій (машинні, не переносяться)
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+# Сирі транскрипти сесій — не в git (можливі секрети)
+.history-archive/
