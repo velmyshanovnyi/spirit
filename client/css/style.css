@@ -743,6 +743,16 @@ button:disabled {
   color: var(--muted);
 }
 
+/* Section P2c (security-hardening.md, backlog A6): placeholder for an
+   incoming chat message that could not be decrypted -- visibly "not a
+   message", but occupying the slot so the user knows something was lost. */
+.bubble-undecryptable {
+  font-style: italic;
+  color: var(--muted);
+  border: 1px dashed var(--muted);
+  background: transparent;
+}
+
 .chat-input-row {
   display: flex;
   gap: 8px;

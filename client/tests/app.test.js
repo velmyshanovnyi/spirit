@@ -3634,12 +3634,13 @@ describe("btn-send", () => {
 
     document.getElementById("message-input").value = "привіт";
     document.getElementById("btn-send").click();
-    await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith("R1:ENCRYPTED_PAYLOAD"));
+    await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith("R2:0:ENCRYPTED_PAYLOAD"));
 
     // Chat text is ratchet-encrypted (Section P2b), NOT the static session key.
+    // Section P2c: the wire format carries the send-chain index (0 for the first message).
     expect(encryptMessage).toHaveBeenCalledWith({ __tag: "ratchet-message-key" }, "привіт");
     expect(encryptMessage).not.toHaveBeenCalledWith({ __tag: "session-key" }, "привіт");
-    expect(channel.send).toHaveBeenCalledWith("R1:ENCRYPTED_PAYLOAD");
+    expect(channel.send).toHaveBeenCalledWith("R2:0:ENCRYPTED_PAYLOAD");
     expect(channel.send).not.toHaveBeenCalledWith("привіт");
   });
 
@@ -3698,7 +3699,7 @@ describe("btn-send", () => {
 
     // Must queue (no live channel yet), never reach peer A's channel.
     await vi.waitFor(() => expect(document.getElementById("chat-send-status").hidden).toBe(false));
-    expect(channelA.send).not.toHaveBeenCalledWith(expect.stringContaining("R1:"));
+    expect(channelA.send).not.toHaveBeenCalledWith(expect.stringContaining("R2:"));
   });
 
   it("Section RF9: sends a message queued before any connection existed, in order, the moment a peer connects", async () => {
@@ -3743,7 +3744,7 @@ describe("btn-send", () => {
     onChannelOpen(channel);
     await capturedOnLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
 
-    await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith("R1:ENCRYPTED_PAYLOAD"));
+    await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith("R2:0:ENCRYPTED_PAYLOAD"));
     expect(encryptMessage).toHaveBeenCalledWith({ __tag: "ratchet-message-key" }, "привіт до з'єднання");
     expect(queuedRow.querySelector(".pending-badge")).toBeNull();
     expect(document.getElementById("chat-send-status").hidden).toBe(true);
@@ -3783,7 +3784,7 @@ describe("btn-send", () => {
 
     document.getElementById("message-input").value = "перше";
     document.getElementById("btn-send").click();
-    await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith("R1:ENCRYPTED_PAYLOAD"));
+    await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith("R2:0:ENCRYPTED_PAYLOAD"));
     // Baseline instead of an exact count -- the handshake's own
     // identity-announce also goes over this channel and isn't this test's
     // concern; only the DELTA from here on matters.
@@ -3801,7 +3802,8 @@ describe("btn-send", () => {
     // Reconnects (same session key survives -- only the channel is new).
     const newChannel = fakeChannel();
     onChannelOpen(newChannel);
-    await vi.waitFor(() => expect(newChannel.send).toHaveBeenCalledWith("R1:ENCRYPTED_PAYLOAD"));
+    // Same session key and send chain survive the channel drop, so the index continues at 1.
+    await vi.waitFor(() => expect(newChannel.send).toHaveBeenCalledWith("R2:1:ENCRYPTED_PAYLOAD"));
     expect(encryptMessage).toHaveBeenCalledWith({ __tag: "ratchet-message-key" }, "друге, під час обриву");
   });
 
@@ -3915,7 +3917,7 @@ describe("btn-send", () => {
     input.value = "привіт з Enter";
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 
-    await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith("R1:ENCRYPTED_PAYLOAD"));
+    await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith("R2:0:ENCRYPTED_PAYLOAD"));
     expect(encryptMessage).toHaveBeenCalledWith({ __tag: "ratchet-message-key" }, "привіт з Enter");
     expect(input.value).toBe("");
   });
@@ -4107,10 +4109,10 @@ describe("btn-send", () => {
     onChannelOpen(channel);
     await capturedOnLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
 
-    for (const word of ["один", "два", "три"]) {
+    for (const [index, word] of ["один", "два", "три"].entries()) {
       document.getElementById("message-input").value = word;
       document.getElementById("btn-send").click();
-      await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith(`R1:ENC(${word})`));
+      await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith(`R2:${index}:ENC(${word})`));
     }
 
     const log = document.getElementById("chat-log").textContent;
@@ -4442,6 +4444,82 @@ describe("identity announce in chat flows (Section 12)", () => {
     expect(ratchetStep.mock.calls.length).toBe(2);
     expect(ratchetStep.mock.calls[1][0]).toEqual(new Uint8Array(32).fill(1));
     expect(ratchetStep.mock.calls[0][0]).not.toEqual(ratchetStep.mock.calls[1][0]);
+  });
+
+  // Section P2c (backlog A6): indexed wire format + skipped-message-key window.
+  async function establishedChatWithVerifiedPeer() {
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    encryptMessage.mockResolvedValue("X");
+    verifyIdentityAnnounce.mockResolvedValue({ identityPublicKey: {}, identityPubkeyWire: "PEER", fingerprint: "peer-fp" });
+    const { captured } = await establishedInitiatorChat();
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+    await vi.waitFor(() => expect(document.getElementById("connection-status").textContent).toContain("peer-fp"));
+    ratchetStep.mockReset();
+    ratchetStep.mockImplementation(async (chainKeyBytes) => {
+      await Promise.resolve();
+      return { messageKey: { __tag: `recv-key-${chainKeyBytes[0]}` }, nextChainKeyBytes: new Uint8Array(32).fill(chainKeyBytes[0] + 1) };
+    });
+    return captured;
+  }
+  // Restores the file-level default ratchetStep mock (exec-review finding):
+  // vi.clearAllMocks() in the global beforeEach clears calls but NOT
+  // implementations, so without this the recv-key-* implementation above
+  // would leak into every later test in the file.
+  function restoreDefaultRatchetStep() {
+    ratchetStep.mockReset();
+    ratchetStep.mockResolvedValue({ messageKey: { __tag: "ratchet-message-key" }, nextChainKeyBytes: new Uint8Array(32).fill(3) });
+  }
+  afterEach(restoreDefaultRatchetStep);
+
+  it("Section P2c: decrypts R2 messages that arrive out of order (index 1 before 0) using the skipped-key window, stepping the chain exactly once per index", async () => {
+    const captured = await establishedChatWithVerifiedPeer();
+    decryptMessage.mockResolvedValueOnce("друге прийшло першим").mockResolvedValueOnce("перше прийшло другим");
+
+    await captured.onMessage("R2:1:CT_ONE");
+    await captured.onMessage("R2:0:CT_ZERO");
+
+    await vi.waitFor(() => expect(document.getElementById("chat-log").textContent).toContain("перше прийшло другим"));
+    expect(document.getElementById("chat-log").textContent).toContain("друге прийшло першим");
+    // receive chain starts at fill(2) (mock deriveInitialChainKeys): index 0 -> key from chain 2, index 1 -> key from chain 3
+    expect(decryptMessage).toHaveBeenCalledWith({ __tag: "recv-key-3" }, "CT_ONE");
+    expect(decryptMessage).toHaveBeenCalledWith({ __tag: "recv-key-2" }, "CT_ZERO");
+    expect(ratchetStep).toHaveBeenCalledTimes(2); // index 0's key was served from the window, not re-derived
+  });
+
+  it("Section P2c: a replayed / already-consumed index is NOT silently dropped -- the chat log shows an 'undecryptable' bubble and the chain stays intact", async () => {
+    const captured = await establishedChatWithVerifiedPeer();
+    decryptMessage.mockResolvedValueOnce("нормальне");
+    await captured.onMessage("R2:0:CT_ZERO");
+    await vi.waitFor(() => expect(document.getElementById("chat-log").textContent).toContain("нормальне"));
+    const decryptCallsBefore = decryptMessage.mock.calls.length;
+
+    await expect(captured.onMessage("R2:0:CT_ZERO_AGAIN")).resolves.toBeUndefined();
+
+    const log = document.getElementById("chat-log").textContent;
+    expect(log).toContain("не розшифровано");
+    expect(log).toContain("#0");
+    expect(decryptMessage.mock.calls.length).toBe(decryptCallsBefore); // no key -> nothing to decrypt with
+    expect(ratchetStep).toHaveBeenCalledTimes(1); // chain not advanced by the replay
+
+    // The chain is still usable afterwards: index 1 decrypts normally.
+    decryptMessage.mockResolvedValueOnce("наступне");
+    await captured.onMessage("R2:1:CT_ONE");
+    await vi.waitFor(() => expect(document.getElementById("chat-log").textContent).toContain("наступне"));
+  });
+
+  it("Section P2c: a malformed R2 payload and an AES-GCM failure both surface as an 'undecryptable' bubble instead of silence", async () => {
+    const captured = await establishedChatWithVerifiedPeer();
+
+    await captured.onMessage("R2:not-a-number");
+    await vi.waitFor(() => expect(document.getElementById("chat-log").textContent).toContain("не розшифровано"));
+    expect(document.getElementById("chat-log").textContent).toContain("#?"); // no index to show, never "#undefined"
+    expect(document.getElementById("chat-log").textContent).not.toContain("undefined");
+
+    decryptMessage.mockRejectedValueOnce(new Error("bad tag"));
+    await captured.onMessage("R2:0:CORRUPTED");
+    await vi.waitFor(() => expect(document.getElementById("chat-log").textContent).toContain("#0"));
+    expect(document.getElementById("connection-status").textContent).toContain("bad tag");
   });
 
   it("drops an R1 message that arrives in the window where sessionKey is set but the receive chain isn't yet (Section P2b review finding)", async () => {

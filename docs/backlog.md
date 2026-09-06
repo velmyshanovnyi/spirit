@@ -236,7 +236,20 @@ footer і feature-флаги).
 
 ---
 
-### [ ] A6. Ratchet: повідомлення тихо зникають при розсинхроні
+### [x] A6. Ratchet: повідомлення тихо зникають при розсинхроні ✅ ЗАКРИТО 2026-09-06
+
+**Виправлено (Секція P2c у `specs/phase5/security-hardening.md`).** Обрано «максимум» із
+пропозиції: wire-формат `R2:<index>:<ciphertext>` з лічильником send-chain + вікно
+skipped-message-keys (64) на приймачі (`client/js/ratchetChain.js`, чиста логіка з
+інжектованим `ratchetStep`) — переставлені/пропущені повідомлення розшифровуються;
+replay або стрибок понад вікно — відмова без просування ланцюга. І «мінімум» теж:
+жодна відмова більше не мовчить — у чат-лозі з'являється бульбашка «повідомлення #n
+не розшифровано» (`chat.undecryptable`, 11 локалей) плюс статус. Legacy `R1:` (без
+індексу) приймається послідовно, як раніше. Exec-review iter1 — PASS_WITH_NOTES, 4
+нотатки виправлено (`specs/reviews/security-hardening-P2c-iter1.md`). Не зроблено
+(поза обсягом, як і в P2a): DH-ratchet для post-compromise security.
+
+<details><summary>Первісний опис проблеми</summary>
 
 **Файл:** `client/js/app.js:3520`
 ```js
@@ -254,6 +267,8 @@ if (isRatcheted && !state.receiveChainKey) return; // тихий drop
 **Пропозиція:** мінімум — не мовчати: показати користувачеві стан «повідомлення
 не розшифровано» замість тиші. Максимум — тримати невелике вікно skipped-message
 keys (як у Double Ratchet) для стійкості до перестановок.
+
+</details>
 
 ---
 

@@ -76,6 +76,12 @@ import { computeTurnRestCredential } from "./turnCredentials.js";
 import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer } from "./signalingClient.js";
 import { deriveSessionKey, encryptMessage, decryptMessage } from "./e2ee.js";
 import { deriveRootKey, deriveInitialChainKeys, ratchetStep } from "./ratchet.js";
+import {
+  encodeRatchetPayload,
+  parseRatchetPayload,
+  createReceiveChain,
+  receiveMessageKeyForIndex
+} from "./ratchetChain.js";
 import { promptGoogleSignIn, verifyGoogleIdToken } from "./googleOAuth.js";
 import { t, setLocale, detectLocale, applyTranslations, getLocale, SUPPORTED_LOCALES } from "./i18n.js";
 import { initTheme, toggleTheme } from "./theme.js";
@@ -499,6 +505,8 @@ export function initApp(doc, options) {
       sessionEcdhWires: null,
       sendChainKey: null,
       receiveChainKey: null,
+      sendIndex: 0, // Section P2c: index of the NEXT outgoing chat message in the send chain
+      receiveChain: null, // Section P2c: { chainKey, nextIndex, skipped } for R2 payloads
       peerFingerprint: null,
       peerIdentityPublicKey: null,
       isInviteOwner: false,
@@ -600,6 +608,8 @@ export function initApp(doc, options) {
     "sessionEcdhWires",
     "sendChainKey",
     "receiveChainKey",
+    "sendIndex",
+    "receiveChain",
     "peerFingerprint",
     "peerIdentityPublicKey",
     "isInviteOwner"
@@ -786,6 +796,30 @@ export function initApp(doc, options) {
     log.scrollTop = log.scrollHeight;
     return row;
   };
+  // Section P2c (backlog A6): an incoming chat message that could not be
+  // decrypted (lost/reordered beyond the skipped-key window, replay, corrupted
+  // ciphertext, malformed header) is rendered as a visible placeholder in the
+  // peer's position of the log instead of being dropped in silence. Not
+  // written to history -- there is no text to persist. `index` may be null
+  // (legacy R1 payloads / malformed headers).
+  function appendUndecryptable(index) {
+    const log = el("chat-log");
+    if (!log) return null;
+    const row = doc.createElement("div");
+    row.className = "row-in";
+    const bubble = doc.createElement("div");
+    bubble.className = "bubble bubble-undecryptable";
+    bubble.appendChild(doc.createTextNode(t("chat.undecryptable", { index: index === null ? "?" : String(index) })));
+    const meta = doc.createElement("span");
+    meta.className = "bubble-meta";
+    meta.textContent = formatClockTime(Date.now());
+    bubble.appendChild(meta);
+    row.appendChild(bubble);
+    log.appendChild(row);
+    log.appendChild(doc.createTextNode("\n"));
+    log.scrollTop = log.scrollHeight;
+    return row;
+  }
   // Clears a row's pending badge once its message actually goes out --
   // no-op if the row was never marked pending (or is gone/undefined).
   function clearPendingBadge(row) {
@@ -3603,16 +3637,32 @@ export function initApp(doc, options) {
           if (ownerConnectionIdAtWireTime !== null) state.activeConnectionId = ownerConnectionIdAtWireTime;
           try {
             if (!state.sessionKey) return; // message arrived before session key derived; drop rather than throw
-            const isRatcheted = payload.startsWith(RATCHET_WIRE_PREFIX);
-            if (isRatcheted && !state.receiveChainKey) return; // arrived in the brief window before the chain was derived; drop rather than throw
+            const ratcheted = parseRatchetPayload(payload);
+            if (ratcheted && !state.receiveChainKey) return; // arrived in the brief window before the chain was derived; drop rather than throw
+            let decrypted = false;
             try {
-              const text = isRatcheted
-                ? await decryptMessage(await nextReceiveMessageKey(), payload.slice(RATCHET_WIRE_PREFIX.length))
-                : await decryptMessage(state.sessionKey, payload);
+              let text;
+              if (!ratcheted) {
+                text = await decryptMessage(state.sessionKey, payload);
+              } else if (ratcheted.malformed) {
+                throw new Error("malformed ratchet header");
+              } else if (ratcheted.version === 1) {
+                // Legacy peer without message indexes (pre-P2c): strictly sequential chain.
+                text = await decryptMessage(await nextReceiveMessageKey(), ratcheted.ciphertext);
+              } else {
+                text = await decryptMessage(await receiveMessageKeyAt(ratcheted.index), ratcheted.ciphertext);
+              }
+              decrypted = true;
               await onDecryptedMessage(text);
             } catch (err) {
               // This callback runs detached from any button handler, so nothing
               // upstream can catch a rejection here.
+              // Section P2c (backlog A6): a chat message that cannot be decrypted
+              // must never vanish silently -- the peer sent SOMETHING, and the
+              // user needs to know a message was lost, not just see nothing.
+              // Only for failures BEFORE decryption succeeded: a rejected history
+              // write after a good decrypt is not an undecryptable message.
+              if (ratcheted && !decrypted) appendUndecryptable(ratcheted.index);
               setStatus(t("status.error", { msg: err.message }));
             }
           } finally {
@@ -3654,10 +3704,9 @@ export function initApp(doc, options) {
     };
   }
 
-  // Wire-format marker for ratchet-encrypted payloads (chat text only, Section
-  // P2b). Everything else (announces, calls, device-linking) stays on the
-  // unmarked static sessionKey, unchanged from before this section.
-  const RATCHET_WIRE_PREFIX = "R1:";
+  // Wire-format markers for ratchet-encrypted payloads (chat text only, Section
+  // P2b/P2c) live in ratchetChain.js. Everything else (announces, calls,
+  // device-linking) stays on the unmarked static sessionKey, unchanged.
 
   // ratchetStep is a stateful, sequential step over shared mutable state
   // (state.sendChainKey/receiveChainKey): each call must read the current
@@ -3683,10 +3732,18 @@ export function initApp(doc, options) {
     const connectionIdAtStart = state.activeConnectionId;
     const step = state[lockField].then(async () => {
       const { messageKey, nextChainKeyBytes } = await ratchetStep(state[chainField]);
+      let index = null;
       if (state.activeConnectionId === connectionIdAtStart) {
         state[chainField] = nextChainKeyBytes;
+        if (chainField === "sendChainKey") {
+          // Section P2c: the wire index is allocated in the SAME serialized
+          // step as the key, so index N always means "the N-th step of the
+          // send chain" -- never off by one under concurrent sends.
+          index = state.sendIndex;
+          state.sendIndex = index + 1;
+        }
       }
-      return messageKey;
+      return { messageKey, index };
     });
     state[lockField] = step.then(
       () => {},
@@ -3695,12 +3752,32 @@ export function initApp(doc, options) {
     return step;
   }
 
+  // Resolves to { messageKey, index } for the next outgoing chat message.
   async function nextSendMessageKey() {
     return serializedChainStep("sendChainLock", "sendChainKey");
   }
 
+  // Legacy (R1, pre-P2c peers): strictly sequential receive chain.
   async function nextReceiveMessageKey() {
-    return serializedChainStep("receiveChainLock", "receiveChainKey");
+    return (await serializedChainStep("receiveChainLock", "receiveChainKey")).messageKey;
+  }
+
+  // Section P2c: message key for an R2 payload carrying its send-chain index.
+  // Runs under the same receiveChainLock as the legacy path so the two can
+  // never interleave; the chain object is snapshotted BEFORE the await so a
+  // logout/reconnect during the crypto step can't resurrect a phantom peer
+  // entry through the state proxy (same concern as serializedChainStep).
+  function receiveMessageKeyAt(index) {
+    const chain = state.receiveChain;
+    const step = state.receiveChainLock.then(() => {
+      if (!chain) throw new Error("receive chain not ready");
+      return receiveMessageKeyForIndex(chain, index, ratchetStep);
+    });
+    state.receiveChainLock = step.then(
+      () => {},
+      () => {}
+    );
+    return step;
   }
 
   // Signaling sender_key for the device-linking flows: an opaque one-off
@@ -3761,6 +3838,8 @@ export function initApp(doc, options) {
           const rootKey = await deriveRootKey(ecdhKeyPair.privateKey, peerEcdhPubkey);
           ({ sendChainKey: state.sendChainKey, receiveChainKey: state.receiveChainKey } =
             await deriveInitialChainKeys(rootKey, ecdhPubkey, peerEcdhPubkeyWire));
+          state.sendIndex = 0; // Section P2c: fresh session -> fresh indexes and an empty skipped-key window
+          state.receiveChain = createReceiveChain(state.receiveChainKey);
           if (onSessionReady) await onSessionReady();
           void flushPendingOutgoingMessages(); // Section RF9: session key just landed -- channel may already be open
         } catch (err) {
@@ -3806,6 +3885,8 @@ export function initApp(doc, options) {
           const rootKey = await deriveRootKey(ecdhKeyPair.privateKey, peerEcdhPubkey);
           ({ sendChainKey: state.sendChainKey, receiveChainKey: state.receiveChainKey } =
             await deriveInitialChainKeys(rootKey, ecdhPubkey, peerEcdhPubkeyWire));
+          state.sendIndex = 0; // Section P2c: fresh session -> fresh indexes and an empty skipped-key window
+          state.receiveChain = createReceiveChain(state.receiveChainKey);
           if (onSessionReady) await onSessionReady();
           void flushPendingOutgoingMessages(); // Section RF9: session key just landed -- channel may already be open
         } catch (err) {
@@ -4725,8 +4806,14 @@ export function initApp(doc, options) {
   // the already-rendered bubble from when the message was first queued;
   // its pending badge is cleared once the send actually succeeds.
   async function sendSingleChatMessage(text, sentAt, row) {
-    const messageKey = await nextSendMessageKey();
-    const payload = RATCHET_WIRE_PREFIX + (await encryptMessage(messageKey, text));
+    const { messageKey, index } = await nextSendMessageKey();
+    // Section P2c: a null index means serializedChainStep saw the active
+    // connection change mid-step and did NOT advance the chain -- there is no
+    // valid position on the wire for this message. Throwing keeps it queued
+    // (flushPendingOutgoingMessages leaves the item in place) instead of
+    // emitting an "R2:null:" header the peer can only reject.
+    if (index === null) throw new Error("connection changed while preparing the message");
+    const payload = encodeRatchetPayload(index, await encryptMessage(messageKey, text));
     state.channel.send(payload);
     clearPendingBadge(row);
     if (state.identityKeyPair && state.identityKeyPair.vaultKey && state.peerFingerprint) {
