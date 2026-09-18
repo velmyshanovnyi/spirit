@@ -74,3 +74,30 @@ declarations, тож виклик `initGroupMesh` на місці блоку н�
 - [x] **Tests**: наявні mesh/GC4-сценарії `app.test.js` без змін і зелені; новий `client/tests/groupMesh.test.js` — модуль існує, `initGroupMesh` повертає 4 функції; `relayGroupMeshMessage` шле re-encrypted control лише verified same-groupId peer-у і мовчки дропає без шляху (RED до створення модуля).
 - [x] **Impl**: новий `client/js/groupMesh.js`; `client/js/app.js` — блок замінено викликом `initGroupMesh`, деструктуризація 4 функцій під наявними іменами.
 - [x] **Exec review**: iter1 — [reviews/app-decomposition-R2-iter1.md](../reviews/app-decomposition-R2-iter1.md). PASS_WITH_NOTES, 0 знахідок, 1 нотатка прийнята; жива перевірка — в артефакті.
+
+## Секція R3: конфіг сервера/адмінка/вузли → `client/js/serverConfigUI.js`
+
+Примітка про зміну плану: кандидат «дзвінки/медіа (`callMedia.js`)» відкладено —
+розвідка показала, що це НЕ суцільний домен (renegotiation-гілки всередині
+`handleChatMessage`, video-dock всередині рендер-замикання роутера, обробники
+кнопок окремо) — його винос був би high-risk cut-and-stitch, а не verbatim-move.
+Натомість узято наступний за чистотою суцільний кластер.
+
+Обсяг (~250 рядків, два блоки app.js):
+1. 2035–2266: `setAdminStatus`, `renderAdminConfig` (+`ADMIN_CONFIG_FIELDS`
+   з module-scope), STUN/TURN-пресети (константи + 4 слухачі полів),
+   signaling-вузли (`SIGNALING_NODES_KEY`, `loadSignalingNodes`,
+   `saveSignalingNodes`, `randomSignalingNodeId`, `renderSignalingNodesList`
+   + стартовий виклик + обробники save/select/delete).
+2. ~2294–2309: обробник `btn-admin-login`.
+
+Межа доведена grep-ом: **нуль** зовнішніх споживачів — усі вживання символів
+кластера всередині нього. `initServerConfigUI(...)` нічого не повертає.
+Залежності: stateless напряму (`adminAuth.js`, `turnCredentials.js`);
+ін'єктується лише `doc`, `el`, `t`, `withBusyButton`. `state` НЕ потрібен.
+Стартовий виклик `renderSignalingNodesList()` виконується всередині init —
+виклик `initServerConfigUI` ставиться на місце блоку 1, тайминг ідентичний.
+
+- [x] **Tests**: наявні server/admin/signaling-nodes/STUN/TURN-сценарії `app.test.js` без змін і зелені (harness); новий `client/tests/serverConfigUI.test.js` — модуль існує й `initServerConfigUI` рендерить список вузлів із localStorage при init (RED до створення).
+- [x] **Impl**: новий `client/js/serverConfigUI.js`; `client/js/app.js` — два блоки замінено одним викликом; `ADMIN_CONFIG_FIELDS` переїжджає в модуль.
+- [x] **Exec review**: iter1 — [reviews/app-decomposition-R3-iter1.md](../reviews/app-decomposition-R3-iter1.md). PASS, 0 знахідок; жива перевірка — в артефакті.
