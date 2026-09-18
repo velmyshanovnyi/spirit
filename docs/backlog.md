@@ -200,7 +200,9 @@ footer і feature-флаги).
 `client/js/recoveryUI.js` за G1-патерном ін'єкції залежностей; app.js 5095→4757.
 **Секція R2 (той самий день):** mesh-реле GC4 (~200 рядків) → `client/js/groupMesh.js`;
 app.js 4757→4564. **Секція R3 (2026-09-19):** конфіг сервера/адмінка/signaling-вузли
-(~250 рядків) → `client/js/serverConfigUI.js`; app.js 4564→4307. Кандидата
+(~250 рядків) → `client/js/serverConfigUI.js`; app.js 4564→4306. **Секція R4 (той самий
+день):** імпортовані контакти I2/I3 (~215 рядків) → `client/js/importedContactsUI.js`;
+app.js 4306→4093. Кандидата
 «дзвінки/медіа» розвідано й відкладено: НЕ суцільний домен (renegotiation всередині
 handleChatMessage, video-dock у рендер-замиканні) — його винос буде cut-and-stitch,
 не verbatim-move; потребує окремого підходу.

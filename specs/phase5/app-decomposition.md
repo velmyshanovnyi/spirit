@@ -101,3 +101,25 @@ declarations, тож виклик `initGroupMesh` на місці блоку н�
 - [x] **Tests**: наявні server/admin/signaling-nodes/STUN/TURN-сценарії `app.test.js` без змін і зелені (harness); новий `client/tests/serverConfigUI.test.js` — модуль існує й `initServerConfigUI` рендерить список вузлів із localStorage при init (RED до створення).
 - [x] **Impl**: новий `client/js/serverConfigUI.js`; `client/js/app.js` — два блоки замінено одним викликом; `ADMIN_CONFIG_FIELDS` переїжджає в модуль.
 - [x] **Exec review**: iter1 — [reviews/app-decomposition-R3-iter1.md](../reviews/app-decomposition-R3-iter1.md). PASS, 0 знахідок; жива перевірка — в артефакті.
+
+## Секція R4: імпортовані контакти (I2/I3) → `client/js/importedContactsUI.js`
+
+Обсяг (~215 рядків, один суцільний блок app.js 1239–1451): `setImportStatus`,
+`renderImportedContactsScreen`, евристики `deriveImportedHistoryDisplayName` /
+`inferImportedDirection`, обробник `import-file-input` (парсинг vcard/telegram/
+whatsapp) і делегований обробник `import-pending-list` (match/delete + єдина
+точка запису імпортованої історії в historyStore).
+
+Межа доведена grep-ом: назовні використовується лише
+`renderImportedContactsScreen` (2 колсайти: `checkContactProofs`,
+`onScreenChange`) — його повертає `initImportedContactsUI(...)`.
+Залежності: stateless напряму (`importedContacts.js` повним набором,
+`importParsers.js`, `historyStore.js:appendMessage`, `contacts.js:listContacts`,
+`spiritId.js:formatSpiritId`); ін'єктується `doc`, `el`, `t`, `state`
+(читає nickname / identityKeyPair.vaultKey / senderKey — за посиланням,
+як у R1/R2). Виклик init — на місці блоку; тайминг реєстрації слухачів
+ідентичний.
+
+- [x] **Tests**: наявні import-сценарії `app.test.js` (Секції I2/I3) без змін і зелені; новий `client/tests/importedContactsUI.test.js` — модуль існує, `initImportedContactsUI` повертає `renderImportedContactsScreen`, евристика напрямку «out» лише для власного нікнейму (RED до створення).
+- [x] **Impl**: новий `client/js/importedContactsUI.js`; `client/js/app.js` — блок замінено викликом init.
+- [x] **Exec review**: iter1 — [reviews/app-decomposition-R4-iter1.md](../reviews/app-decomposition-R4-iter1.md). PASS, 0 знахідок; жива перевірка — в артефакті.
