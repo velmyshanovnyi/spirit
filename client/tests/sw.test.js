@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
-import { parsePushData, buildNotificationOptions, buildJoinUrl, focusOrOpenClient, NOTIFICATION_TAG } from "../sw.js";
+import { parsePushData, buildNotificationOptions, buildJoinUrl, focusOrOpenClient, shouldForceRevalidate, NOTIFICATION_TAG } from "../sw.js";
 
 describe("parsePushData", () => {
   it("returns { room, token } for a well-formed invite payload", () => {
@@ -104,5 +104,28 @@ describe("focusOrOpenClient", () => {
     expect(navigate).toHaveBeenCalled();
     expect(focus).toHaveBeenCalled();
     expect(clientsApi.openWindow).not.toHaveBeenCalled();
+  });
+});
+
+describe("shouldForceRevalidate (Section F1, specs/phase5/deploy-freshness.md)", () => {
+  const ORIGIN = "https://spirit.kolo.media";
+
+  it("forces revalidation for a same-origin GET", () => {
+    expect(shouldForceRevalidate({ method: "GET", url: ORIGIN + "/js/app.js" }, ORIGIN)).toBe(true);
+    expect(shouldForceRevalidate({ method: "GET", url: ORIGIN + "/" }, ORIGIN)).toBe(true);
+  });
+
+  it("never intercepts non-GET requests (POST/PUT pass through untouched)", () => {
+    expect(shouldForceRevalidate({ method: "POST", url: ORIGIN + "/spirit/api.php" }, ORIGIN)).toBe(false);
+    expect(shouldForceRevalidate({ method: "PUT", url: ORIGIN + "/x" }, ORIGIN)).toBe(false);
+  });
+
+  it("never intercepts cross-origin requests", () => {
+    expect(shouldForceRevalidate({ method: "GET", url: "https://accounts.google.com/x.js" }, ORIGIN)).toBe(false);
+  });
+
+  it("treats a different scheme or port on the same host as cross-origin", () => {
+    expect(shouldForceRevalidate({ method: "GET", url: "http://spirit.kolo.media/js/app.js" }, ORIGIN)).toBe(false);
+    expect(shouldForceRevalidate({ method: "GET", url: "https://spirit.kolo.media:8443/js/app.js" }, ORIGIN)).toBe(false);
   });
 });

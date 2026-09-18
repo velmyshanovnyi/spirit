@@ -76,9 +76,41 @@ export async function focusOrOpenClient(windowClients, joinUrl, clientsApi) {
   return clientsApi.openWindow(joinUrl);
 }
 
+/**
+ * Section F1 (specs/phase5/deploy-freshness.md, backlog A11/G7): the hosts
+ * serve static files with no Cache-Control, so browsers apply heuristic
+ * freshness and silently keep running stale code for days after a deploy.
+ * Same-origin GETs are re-fetched with `cache: "no-cache"`, which forces a
+ * conditional revalidation (If-None-Match) on every request: unchanged files
+ * cost a 304, changed files arrive immediately. No SW-side cache, no state.
+ * @param {{ method: string, url: string }} request
+ * @param {string} origin the SW scope's origin (self.location.origin).
+ */
+export function shouldForceRevalidate(request, origin) {
+  return request.method === "GET" && new URL(request.url).origin === origin;
+}
+
 /* c8 ignore start -- runtime glue, not exercised by jsdom-based unit tests
-   (no PushEvent/NotificationEvent/Clients constructors available there) */
+   (no PushEvent/NotificationEvent/Clients constructors there, and no
+   FetchEvent/ServiceWorkerGlobalScope for the F1 install/activate/fetch
+   listeners either -- those are covered by the mandatory live check) */
 if (typeof self !== "undefined" && typeof self.addEventListener === "function") {
+  // Take control immediately: without these, an updated SW waits for every
+  // tab to close, and the freshness guarantee would lag a whole session.
+  self.addEventListener("install", () => self.skipWaiting());
+  self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
+
+  self.addEventListener("fetch", (event) => {
+    if (!shouldForceRevalidate(event.request, self.location.origin)) return;
+    // Constructing a Request from a navigate-mode request with an init dict
+    // resets its mode to "same-origin" per spec, so navigations need no
+    // special branch. On network failure fall back to a plain pass-through
+    // fetch -- offline behaves exactly as it did without this handler.
+    event.respondWith(
+      fetch(event.request, { cache: "no-cache" }).catch(() => fetch(event.request))
+    );
+  });
+
   self.addEventListener("push", (event) => {
     event.waitUntil(
       (async () => {
