@@ -43,3 +43,34 @@
 - [x] **Tests**: наявні recovery-сценарії `app.test.js` без змін і зелені (harness незмінної поведінки); новий `client/tests/recoveryUI.test.js` — модуль існує й експортує `initRecoveryUI`, а `initRecoveryUI` повертає `{ renderRecoveryCard, drainRecoveryShareOutboxForPeer }` (RED до створення модуля).
 - [x] **Impl**: новий `client/js/recoveryUI.js`; `client/js/app.js` — три блоки замінено одним викликом `initRecoveryUI`, деструктуризація двох повернених функцій під наявними іменами.
 - [x] **Exec review**: iter1 — [reviews/app-decomposition-R1-iter1.md](../reviews/app-decomposition-R1-iter1.md). PASS_WITH_NOTES, 2 знахідки виправлено; verbatim-еквівалентність підтверджено мультимножинним порівнянням; жива перевірка — в артефакті.
+
+## Секція R2: mesh-реле (GC4) → `client/js/groupMesh.js`
+
+Обсяг (~194 рядки, один суцільний блок app.js): `wireMeshRelayChannelCallbacks`
+(внутрішня), `initiateMeshRelayConnect`, `relayGroupMeshMessage`,
+`handleIncomingMeshRelayOffer`, `handleIncomingMeshRelayAnswer` — увесь
+GC4-домен «фонові пари через реле» переноситься verbatim.
+
+Межа доведена grep-ом: назовні використовуються лише 4 функції
+(`initiateMeshRelayConnect` — 1 колсайт, `relayGroupMeshMessage`,
+`handleIncomingMeshRelayOffer`, `handleIncomingMeshRelayAnswer` — по 1
+колсайту в `handleChatMessage`); саме їх повертає `initGroupMesh(...)`.
+`state.pendingMeshRelays` / `state.messageDispatchLock` — поля спільного
+`state`, що передається за посиланням (як у R1/G1), нових полів немає.
+
+Залежності: stateless — напряму (`webrtc.js`: startAsInitiator/startAsJoiner/
+applyRemoteAnswer; `identity.js`: generateEcdhKeyPair/export/importEcdhPublicKeyForWire;
+`e2ee.js`: deriveSessionKey/encryptMessage/decryptMessage). Ін'єктується
+замиканнєве: `state`, `handleChatMessage`, `randomConnectionId`,
+`createPeerEntry`, `getGroupPeerByFingerprint`, `makeEntryIdentityAnnouncer`,
+`currentRtcConfig`, `ensureLocalGroupRecord` — усі hoisted function
+declarations, тож виклик `initGroupMesh` на місці блоку не має TDZ-ризиків;
+усі 4 зовнішні колсайти живуть в обробниках повідомлень (виконуються після
+завершення ініціалізації).
+
+Інваріант секції: жодної зміни поведінки; наявні GC4/mesh-тести в
+`app.test.js` — основний harness.
+
+- [x] **Tests**: наявні mesh/GC4-сценарії `app.test.js` без змін і зелені; новий `client/tests/groupMesh.test.js` — модуль існує, `initGroupMesh` повертає 4 функції; `relayGroupMeshMessage` шле re-encrypted control лише verified same-groupId peer-у і мовчки дропає без шляху (RED до створення модуля).
+- [x] **Impl**: новий `client/js/groupMesh.js`; `client/js/app.js` — блок замінено викликом `initGroupMesh`, деструктуризація 4 функцій під наявними іменами.
+- [x] **Exec review**: iter1 — [reviews/app-decomposition-R2-iter1.md](../reviews/app-decomposition-R2-iter1.md). PASS_WITH_NOTES, 0 знахідок, 1 нотатка прийнята; жива перевірка — в артефакті.

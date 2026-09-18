@@ -198,8 +198,8 @@ footer і feature-флаги).
 **Прогрес 2026-09-18 (Секція R1, `specs/phase5/app-decomposition.md`):** recovery-домен
 (картка Shamir-setup + outbox часток + відновлення з часток, ~330 рядків) винесено в
 `client/js/recoveryUI.js` за G1-патерном ін'єкції залежностей; app.js 5095→4757.
-Назовні лишилось 2 символи (`renderRecoveryCard`, `drainRecoveryShareOutboxForPeer`).
-Наступні кандидати — mesh-реле (`groupMesh.js`), дзвінки/медіа (`callMedia.js`).
+**Секція R2 (той самий день):** mesh-реле GC4 (~200 рядків) → `client/js/groupMesh.js`;
+app.js 4757→4564. Наступний кандидат — дзвінки/медіа (`callMedia.js`).
 
 **Докази.** `client/js/app.js` — 4921 рядок, 51 статичний імпорт, 237 KB.
 Секція G1 винесла 5 UI-модулів (5499→4551), але з того часу файл **знову виріс**
