@@ -1,0 +1,25 @@
+# Backlog A9: the minimal CI gate for the Claude Country model -- several
+# independent volunteer accounts push to main with no shared conversation,
+# so a broken push must become visible without waiting for the next manual
+# run. Prerequisite A10 (flaky tests under load) was closed first, so a red
+# build here means a real regression, not noise.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  vitest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx vitest run
