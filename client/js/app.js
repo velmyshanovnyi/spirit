@@ -2356,8 +2356,17 @@ export function initApp(doc, options) {
 
   function armIceTimeout() {
     let settled = false;
+    // Section T1 (specs/phase5/test-stability.md): tie the pending timeout to
+    // the connection it was armed for. Without this, a timer from an
+    // abandoned attempt (user gave up, logged out, or started a new session)
+    // fires later and stamps the ICE-failure status over whatever the
+    // CURRENT session is showing -- setStatus looks the element up at fire
+    // time, so the stale write lands on live UI.
+    const connectionIdAtArm = state.activeConnectionId;
     const timeoutId = setTimeout(() => {
-      if (!settled) setStatus(t("status.iceTimeout"));
+      if (settled) return;
+      if (state.activeConnectionId !== connectionIdAtArm) return; // stale: that session is gone
+      setStatus(t("status.iceTimeout"));
     }, iceTimeoutMs);
     return () => {
       settled = true;

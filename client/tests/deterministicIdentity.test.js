@@ -3,7 +3,7 @@ import { deriveAccountMaterial, generateAccountName } from "../js/deterministicI
 
 // Argon2id at production parameters (128 MiB, t=3) is intentionally slow --
 // give these tests headroom well above the default 5s.
-const TIMEOUT_MS = 20000;
+const TIMEOUT_MS = 60000; // Argon2id is legitimately slow; match the global Section T2 ceiling
 
 describe("generateAccountName", () => {
   it("returns a 10-character lowercase alphanumeric string", () => {

@@ -81,9 +81,10 @@ describe("loadPermanentProfile", () => {
     expect(isValid).toBe(true);
   });
 
-  // 5 PBKDF2 derivations at 600k iterations -- legitimately slow; the
-  // default 5s timeout is flaky under full-suite load.
-  it("unlocks the RIGHT profile among several, each under its own passphrase", { timeout: 20000 }, async () => {
+  // 5 PBKDF2 derivations at 600k iterations -- legitimately slow; relies on
+  // the global 60s testTimeout (Section T2) rather than a local override,
+  // which would only LOWER the ceiling back into flake territory.
+  it("unlocks the RIGHT profile among several, each under its own passphrase", async () => {
     const first = await createPermanentProfile("pass one");
     const second = await createPermanentProfile("pass two");
 

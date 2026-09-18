@@ -521,7 +521,24 @@ function fakeChannel() {
   return { onopen: null, onmessage: null, onclose: null, send: vi.fn() };
 }
 
+// Section T3 (specs/phase5/test-stability.md, backlog A10): every test boots
+// its own initApp() instance, and an abandoned instance's pending REAL timers
+// (e.g. the 15s armIceTimeout default) fire during a LATER test and write to
+// the shared document -- the app-side staleness guard (Section T1) can't see
+// that, since each instance has its own `state`. Register every real timer a
+// test creates and clear the survivors afterwards, so no timer outlives its
+// test. Fake-timer suites are unaffected: vi.useFakeTimers() installs its own
+// setTimeout on top of this spy, and vi.useRealTimers() drops those.
+const nativeSetTimeout = globalThis.setTimeout;
+let testTimeoutIds = [];
+
 beforeEach(() => {
+  testTimeoutIds = [];
+  vi.spyOn(globalThis, "setTimeout").mockImplementation((...args) => {
+    const id = nativeSetTimeout(...args);
+    testTimeoutIds.push(id);
+    return id;
+  });
   location.hash = "";
   document.body.innerHTML = HTML;
   localStorage.clear();
@@ -553,6 +570,11 @@ beforeEach(() => {
     value: { getUserMedia: vi.fn(() => new Promise(() => {})) },
     configurable: true
   });
+});
+
+afterEach(() => {
+  if (globalThis.setTimeout.mockRestore) globalThis.setTimeout.mockRestore();
+  for (const id of testTimeoutIds) clearTimeout(id);
 });
 
 function visibleScreens() {
@@ -8578,6 +8600,29 @@ describe("ICE gathering timeout", () => {
     await vi.advanceTimersByTimeAsync(5000);
 
     expect(document.getElementById("connection-status").textContent).toMatch(/не вдалося зібрати ICE-кандидати/);
+  });
+
+  it("a stale ICE timeout from an abandoned session does not stamp a failure over the next session (Section T1, specs/phase5/test-stability.md)", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    startAsInitiator.mockImplementation(() => ({ __fakePc: true })); // gathering never completes
+
+    initApp(document, { locale: "uk", iceTimeoutMs: 5000 });
+    document.getElementById("btn-generate").click();
+    await vi.advanceTimersByTimeAsync(0);
+    document.getElementById("btn-initiate").click();
+    await vi.advanceTimersByTimeAsync(0);
+
+    // The user gives up on this attempt: logout resets the active connection.
+    document.getElementById("btn-logout").click();
+    await vi.advanceTimersByTimeAsync(0);
+    document.getElementById("connection-status").textContent = "";
+
+    // The abandoned attempt's timer fires -- it must stay silent.
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(document.getElementById("connection-status").textContent).not.toMatch(/не вдалося/);
   });
 
   it("does not show the failure status if ICE gathering completes before the timeout", async () => {
