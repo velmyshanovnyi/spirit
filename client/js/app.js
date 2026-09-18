@@ -70,7 +70,7 @@ import {
   receiveMessageKeyForIndex
 } from "./ratchetChain.js";
 import { promptGoogleSignIn, verifyGoogleIdToken } from "./googleOAuth.js";
-import { t, setLocale, detectLocale, applyTranslations, getLocale, SUPPORTED_LOCALES } from "./i18n.js";
+import { t, setLocale, detectLocale, applyTranslations, getLocale, ensureLocale, SUPPORTED_LOCALES } from "./i18n.js";
 import { initTheme, toggleTheme } from "./theme.js";
 import { formatSpiritId } from "./spiritId.js";
 import { initRouter } from "./router.js";
@@ -127,7 +127,11 @@ export function initApp(doc, options) {
   } = options || {};
   const el = (id) => doc.getElementById(id);
   // Locale: explicit option (tests) -> stored choice -> browser language.
-  setLocale(locale ?? detectLocale(typeof navigator !== "undefined" ? navigator.language : undefined));
+  // Section A5/L4: only en/uk are inline; for a lazy locale this first
+  // setLocale is a guarded no-op (stays en) and the catch-up below the
+  // lang-select wiring finishes the job once the dictionary arrives.
+  const desiredLocale = locale ?? detectLocale(typeof navigator !== "undefined" ? navigator.language : undefined);
+  setLocale(desiredLocale);
   initTheme(doc);
   // Section RF14: applies any stored color/shape/typography overrides as
   // inline :root custom properties -- must run on every load regardless of
@@ -217,8 +221,11 @@ export function initApp(doc, options) {
       langSelect.appendChild(option);
     }
     langSelect.value = getLocale();
-    langSelect.addEventListener("change", () => {
-      setLocale(langSelect.value);
+    // Section A5/L4: shared by the change handler and the startup catch-up
+    // below. A hoisted declaration: the four render consts it references
+    // are created later in initApp, but initApp's body is fully synchronous,
+    // so any caller (event or promise .then) runs after they exist.
+    function refreshAfterLocaleChange() {
       applyTranslations(doc);
       // Section C6 (specs/reviews/spirit-evaluation-triage.md):
       // renderSettingsRegistry()/renderDesignSettings() read entry.labelKey/
@@ -243,7 +250,38 @@ export function initApp(doc, options) {
       // by current lock state, not a fixed data-i18n key), so it needs its
       // own explicit re-render on language switch too.
       advancedModeUIHandle?.refreshToggleLabel();
+    }
+    langSelect.addEventListener("change", async () => {
+      const next = langSelect.value;
+      try {
+        await ensureLocale(next);
+      } catch {
+        langSelect.value = getLocale(); // dictionary failed to load -- keep the working locale
+        return;
+      }
+      // Out-of-order guard (exec-review N1): a second switch made while this
+      // dictionary was loading wins -- if the select no longer shows `next`,
+      // this resolution is stale and must not clobber the newer choice.
+      if (langSelect.value !== next) return;
+      setLocale(next);
+      refreshAfterLocaleChange();
     });
+    // Startup catch-up for a lazy stored/browser locale: the synchronous
+    // setLocale above stayed on en, so pull the dictionary in and re-apply.
+    if (getLocale() !== desiredLocale) {
+      ensureLocale(desiredLocale)
+        .then(() => {
+          // Same staleness guard as the change handler (exec-review N1): a
+          // manual switch made while the stored locale was still loading
+          // must not be overwritten by this catch-up.
+          if (langSelect.value !== desiredLocale && langSelect.value !== getLocale()) return;
+          if (getLocale() !== "en") return; // user already landed somewhere via the handler
+          setLocale(desiredLocale);
+          langSelect.value = desiredLocale;
+          refreshAfterLocaleChange();
+        })
+        .catch(() => {}); // stay on en -- same degraded state as before L4 on a broken fetch
+    }
   }
 
   // Cross-origin rendezvous (Section N6): two independent signaling nodes

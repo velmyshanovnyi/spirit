@@ -1739,11 +1739,12 @@ describe("theme and language switchers (Section U2)", () => {
 
     langSelect.value = "en";
     langSelect.dispatchEvent(new Event("change"));
-    expect(document.getElementById("account-heading").textContent).toBe("Account");
+    // Section A5/L4: the change handler awaits ensureLocale now.
+    await vi.waitFor(() => expect(document.getElementById("account-heading").textContent).toBe("Account"));
 
     langSelect.value = "de";
     langSelect.dispatchEvent(new Event("change"));
-    expect(document.getElementById("account-heading").textContent).toBe("Konto");
+    await vi.waitFor(() => expect(document.getElementById("account-heading").textContent).toBe("Konto"));
   });
 
   // Section footer-1 (2026-07-31, user request): a footer with LICENSE/
@@ -1774,7 +1775,9 @@ describe("theme and language switchers (Section U2)", () => {
     langSelect.value = "en";
     langSelect.dispatchEvent(new Event("change"));
 
-    expect(list.querySelector(".settings-row .field span").textContent).toBe("ICE connection timeout (ms)");
+    await vi.waitFor(() =>
+      expect(list.querySelector(".settings-row .field span").textContent).toBe("ICE connection timeout (ms)")
+    );
     expect(designList.querySelector(".settings-row .field span").textContent).toBe("Accent color");
   });
 
@@ -1791,7 +1794,7 @@ describe("theme and language switchers (Section U2)", () => {
     langSelect.dispatchEvent(new Event("change"));
 
     // Static text re-translated, runtime values untouched.
-    expect(document.getElementById("account-heading").textContent).toBe("Account");
+    await vi.waitFor(() => expect(document.getElementById("account-heading").textContent).toBe("Account"));
     expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001live-fingerprint");
   });
 });
@@ -2146,7 +2149,7 @@ describe("advanced mode (Section SM2+SM3)", () => {
     expect(document.querySelector('[data-screen="account"]').hidden).toBe(false);
   });
 
-  it("the footer toggle label re-translates on a language switch, in both lock states", () => {
+  it("the footer toggle label re-translates on a language switch, in both lock states", async () => {
     // Exec review finding 5: refreshToggleLabel() wasn't re-run when
     // applyTranslations() re-stamped every data-i18n element on a language
     // switch, so the footer button silently reverted to English/whatever
@@ -2157,12 +2160,12 @@ describe("advanced mode (Section SM2+SM3)", () => {
 
     document.getElementById("lang-select").value = "en";
     document.getElementById("lang-select").dispatchEvent(new Event("change"));
-    expect(toggle.textContent).toBe("Advanced mode");
+    await vi.waitFor(() => expect(toggle.textContent).toBe("Advanced mode"));
 
     localStorage.setItem("spirit.advancedModeUnlocked", "1");
     document.getElementById("lang-select").value = "uk";
     document.getElementById("lang-select").dispatchEvent(new Event("change"));
-    expect(toggle.textContent).toBe("Заблокувати розширений режим");
+    await vi.waitFor(() => expect(toggle.textContent).toBe("Заблокувати розширений режим"));
   });
 
   // Section SM3 exec review (specs/reviews/simplified-ephemeral-mode-SM2-SM3-iter1.md):
@@ -2462,7 +2465,7 @@ describe("footer settings UI panel (Section FC3)", () => {
     expect(document.querySelector(`#app-footer [data-footer-block-id="${id}"]`).innerHTML).toBe("<p>keep me</p>");
   });
 
-  it("a language switch re-renders the panel's static labels", () => {
+  it("a language switch re-renders the panel's static labels", async () => {
     initApp(document, { locale: "uk" });
     expect(document.querySelector("h2[data-i18n='footerSettings.heading']").textContent).toBe("Підвал сайту");
 
@@ -2472,8 +2475,10 @@ describe("footer settings UI panel (Section FC3)", () => {
     // rows), same as settingsRegistry/designSettings -- re-render must be
     // wired into the SAME language-switch handler, not just the static
     // heading via applyTranslations().
-    const label = footerSettingsList().querySelector('[data-footer-order-entry="license"] span');
-    expect(label.textContent).toBe("License link");
+    await vi.waitFor(() => {
+      const label = footerSettingsList().querySelector('[data-footer-order-entry="license"] span');
+      expect(label.textContent).toBe("License link");
+    });
   });
 });
 
@@ -2532,7 +2537,7 @@ describe("feature flags settings UI panel (Section GE3)", () => {
     expect(featureFlagsList().querySelector('input[data-feature-toggle-key="room"]').checked).toBe(true);
   });
 
-  it("a language switch re-renders the panel's row labels", () => {
+  it("a language switch re-renders the panel's row labels", async () => {
     initApp(document, { locale: "uk" });
     const label = () => featureFlagsList().querySelector('[data-feature-key="room"] span');
     const ukLabel = label().textContent;
@@ -2540,7 +2545,7 @@ describe("feature flags settings UI panel (Section GE3)", () => {
     document.getElementById("lang-select").value = "en";
     document.getElementById("lang-select").dispatchEvent(new Event("change"));
 
-    expect(label().textContent).not.toBe(ukLabel);
+    await vi.waitFor(() => expect(label().textContent).not.toBe(ukLabel));
     expect(label().textContent.length).toBeGreaterThan(0);
   });
 });

@@ -45,8 +45,24 @@ await прозорий).
 - [x] **Impl**: qr.js async + 2 await у recoveryUI.js.
 - [x] **Exec review**: спільний iter1-артефакт (див. L1).
 
-## Секція L4: i18n — файл на локаль (ОКРЕМИЙ коміт, не в цьому)
+## Секція L4: i18n — файл на локаль
 
-- [ ] **Tests**: TBD при взятті секції.
-- [ ] **Impl**: TBD.
-- [ ] **Exec review**: TBD.
+Дизайн: `en` (фолбек-ланцюг t()) і `uk` (база тестів і основна аудиторія)
+лишаються інлайн у `i18n.js`; решта 9 локалей (de/es/fr/it/ru/lt/lv/et/no)
+виносяться verbatim у `client/js/locales/<code>.js` (default-export словника).
+Нове API: `ensureLocale(locale)` — кешований лінивий import (з retry-скиданням
+при відмові, як L1–L3), що інсталює словник у `MESSAGES`. `setLocale`
+ЛИШАЄТЬСЯ синхронним (працює лише для завантажених) — це зберігає повністю
+синхронний `initApp` і всі наявні тести. `SUPPORTED_LOCALES` стає літералом
+(11 кодів); `detectLocale` перевіряє по ньому.
+
+app.js: обробник lang-select стає async (`await ensureLocale` → `setLocale` →
+спільний `refreshAfterLocaleChange()`, у який винесено наявне тіло ре-рендерів);
+на старті, якщо детектована локаль не інлайнова, `setLocale` тихо лишає en,
+а `ensureLocale(...).then(setLocale + refresh)` доводить UI до потрібної мови —
+безпечно, бо initApp синхронний і будь-який .then() виконується після повної
+ініціалізації (включно з const-ами settingsPanelUI).
+
+- [x] **Tests**: `i18n.test.js` — нові кейси: `MESSAGES.de` відсутній до `ensureLocale("de")` і присутній після, `t()` німецькою після ensure (RED на моноліті); тест паритету ключів 11 локалей — через ensureLocale усіх; наявні i18n/app-сюїти зелені.
+- [x] **Impl**: 9 файлів `client/js/locales/*.js` (verbatim-виніс); `i18n.js` — реєстр en+uk + ensureLocale + літеральний SUPPORTED_LOCALES; `app.js` — async-обробник, refreshAfterLocaleChange, стартовий догон локалі.
+- [x] **Exec review**: iter1 — [reviews/lazy-loading-L4-iter1.md](../reviews/lazy-loading-L4-iter1.md). PASS_WITH_NOTES: гонка подвійного перемикання виправлена staleness-guard-ами; жива перевірка — в артефакті.

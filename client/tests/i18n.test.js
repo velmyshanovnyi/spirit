@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach } from "vitest";
-import { t, setLocale, getLocale, detectLocale, applyTranslations, SUPPORTED_LOCALES, MESSAGES } from "../js/i18n.js";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { t, setLocale, getLocale, detectLocale, applyTranslations, ensureLocale, SUPPORTED_LOCALES, MESSAGES } from "../js/i18n.js";
 
 beforeEach(() => {
   localStorage.clear();
@@ -8,11 +8,12 @@ beforeEach(() => {
 });
 
 describe("t", () => {
-  it("returns the active locale's translation", () => {
+  it("returns the active locale's translation", async () => {
     setLocale("uk");
     expect(t("status.connected")).toBe("з'єднано");
     setLocale("en");
     expect(t("status.connected")).toBe("connected");
+    await ensureLocale("de"); // Section L4: lazy locale must be loaded first
     setLocale("de");
     expect(t("status.connected")).toBe("verbunden");
   });
@@ -31,7 +32,8 @@ describe("t", () => {
 });
 
 describe("locale persistence and detection", () => {
-  it("setLocale persists to localStorage and getLocale reads it back", () => {
+  it("setLocale persists to localStorage and getLocale reads it back", async () => {
+    await ensureLocale("fr"); // Section L4
     setLocale("fr");
     expect(localStorage.getItem("spirit.locale")).toBe("fr");
     expect(getLocale()).toBe("fr");
@@ -70,8 +72,9 @@ describe("applyTranslations", () => {
     expect(document.querySelector("input").placeholder).toBe(t("chat.placeholder"));
   });
 
-  it("sets title and aria-label for data-i18n-title (icon-only controls)", () => {
+  it("sets title and aria-label for data-i18n-title (icon-only controls)", async () => {
     document.body.innerHTML = `<button data-i18n-title="theme.toggle">◐</button>`;
+    await ensureLocale("de"); // Section L4: self-sufficient, no cross-test order dependence
     setLocale("de");
     applyTranslations(document);
     const button = document.querySelector("button");
@@ -86,7 +89,8 @@ describe("dictionary completeness", () => {
     expect([...SUPPORTED_LOCALES].sort()).toEqual(["de", "en", "es", "et", "fr", "it", "lt", "lv", "no", "ru", "uk"]);
   });
 
-  it("every locale has every key the EN dictionary has (no partial locales)", () => {
+  it("every locale has every key the EN dictionary has (no partial locales)", async () => {
+    await Promise.all(SUPPORTED_LOCALES.map((code) => ensureLocale(code))); // Section L4
     const enKeys = Object.keys(MESSAGES.en).sort();
     expect(enKeys.length).toBeGreaterThan(30);
     for (const locale of SUPPORTED_LOCALES) {
@@ -100,5 +104,28 @@ describe("dictionary completeness", () => {
     expect(t("status.iceTimeout")).toBe("не вдалося зібрати ICE-кандидати (тайм-аут)");
     expect(t("status.noActiveConnection")).toBe("немає активного з'єднання");
     expect(t("status.waitingAnswer")).toBe("очікування відповіді співрозмовника...");
+  });
+});
+
+describe("Section L4 (specs/phase5/lazy-loading.md): per-locale lazy dictionaries", () => {
+  it("non-inline locales are absent from MESSAGES until ensureLocale loads them", async () => {
+    // A fresh module registry: other tests in this file may have already
+    // loaded "de" into the shared MESSAGES object.
+    vi.resetModules();
+    const fresh = await import("../js/i18n.js");
+    // "de" must NOT ship in the startup bundle -- only en and uk stay inline.
+    expect(fresh.MESSAGES.de).toBeUndefined();
+    expect(fresh.MESSAGES.en).toBeDefined();
+    expect(fresh.MESSAGES.uk).toBeDefined();
+    await fresh.ensureLocale("de");
+    expect(fresh.MESSAGES.de).toBeDefined();
+    fresh.setLocale("de");
+    expect(fresh.t("status.connected")).toBe("verbunden");
+  });
+
+  it("ensureLocale is a no-op for inline and unsupported locales", async () => {
+    await expect(ensureLocale("uk")).resolves.toBeUndefined();
+    await expect(ensureLocale("xx")).resolves.toBeUndefined();
+    expect(MESSAGES.xx).toBeUndefined();
   });
 });
