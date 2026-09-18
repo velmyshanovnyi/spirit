@@ -3,7 +3,21 @@
 // No DOM dependency, no app.js/state dependency -- integration into the
 // live chat flow (control messages, backpressure, UI) is Section FT2.
 
-import { createSHA256 } from "./vendor/hash-wasm.esm.js";
+// Section A5/L1 (specs/phase5/lazy-loading.md): the 265KB hash-wasm vendor
+// is only needed when a file transfer is hashed, so it is imported lazily
+// at first use (cached promise). All callers were already async.
+let hashWasmPromise = null;
+function loadHashWasm() {
+  if (!hashWasmPromise) {
+    // A failed import must not poison the cache forever (exec-review note):
+    // drop it so the next call retries the fetch.
+    hashWasmPromise = import("./vendor/hash-wasm.esm.js").catch((err) => {
+      hashWasmPromise = null;
+      throw err;
+    });
+  }
+  return hashWasmPromise;
+}
 
 /**
  * Splits an ArrayBuffer into an array of Uint8Array chunks of exactly
@@ -81,6 +95,7 @@ const HASH_STREAM_WINDOW_BYTES = 1024 * 1024;
  * fileTransfer.test.js against Web Crypto's own known test vectors.
  */
 export async function computeFileHashStreaming(blob) {
+  const { createSHA256 } = await loadHashWasm();
   const hasher = await createSHA256();
   hasher.init();
   for (let offset = 0; offset < blob.size; offset += HASH_STREAM_WINDOW_BYTES) {

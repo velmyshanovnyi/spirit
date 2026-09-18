@@ -1,4 +1,19 @@
-import { argon2id } from "./vendor/hash-wasm.esm.js";
+// Section A5/L1 (specs/phase5/lazy-loading.md): the 265KB hash-wasm vendor
+// is only needed when a deterministic account is derived, so it is imported
+// lazily at first use (cached promise) instead of riding along on every
+// startup. deriveAccountMaterial was already async.
+let hashWasmPromise = null;
+function loadHashWasm() {
+  if (!hashWasmPromise) {
+    // A failed import must not poison the cache forever (exec-review note):
+    // drop it so the next call retries the fetch.
+    hashWasmPromise = import("./vendor/hash-wasm.esm.js").catch((err) => {
+      hashWasmPromise = null;
+      throw err;
+    });
+  }
+  return hashWasmPromise;
+}
 
 // Section H1 (specs/phase3/deterministic-accounts.md): portable, cross-node
 // accounts. identity = Argon2id(password, salt=name) -- any independent
@@ -50,6 +65,7 @@ function toBase64Url(bytes) {
  * exposes the private key.
  */
 export async function deriveAccountMaterial(name, password) {
+  const { argon2id } = await loadHashWasm();
   const output = await argon2id({
     password,
     salt: name,

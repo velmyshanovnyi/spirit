@@ -2764,9 +2764,9 @@ export function initApp(doc, options) {
   // Section H3: offer a generated password by default when the user opts
   // into a portable account, without clobbering anything they've already
   // typed (e.g. re-checking the box after editing the field).
-  el("portable-account-checkbox").addEventListener("change", () => {
+  el("portable-account-checkbox").addEventListener("change", async () => {
     if (el("portable-account-checkbox").checked && !el("profile-passphrase").value) {
-      el("profile-passphrase").value = generateStrongPassword();
+      el("profile-passphrase").value = await generateStrongPassword();
     }
   });
 

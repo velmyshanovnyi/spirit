@@ -1,4 +1,19 @@
-import { BIP39_ENGLISH_WORDLIST } from "./bip39-wordlist-en.js";
+// Section A5/L2 (specs/phase5/lazy-loading.md): the 23KB wordlist is only
+// needed when a portable-account password is generated (or a mnemonic is
+// handled, mnemonic.js), so it is imported lazily at first use. This makes
+// generateStrongPassword async.
+let wordlistPromise = null;
+function loadWordlist() {
+  if (!wordlistPromise) {
+    // A failed import must not poison the cache forever (exec-review note):
+    // drop it so the next call retries the fetch.
+    wordlistPromise = import("./bip39-wordlist-en.js").then((m) => m.BIP39_ENGLISH_WORDLIST).catch((err) => {
+      wordlistPromise = null;
+      throw err;
+    });
+  }
+  return wordlistPromise;
+}
 
 // Section H2 (specs/phase3/deterministic-accounts.md): a default, generated
 // password offered at portable-account creation -- 6 words from the same
@@ -8,11 +23,12 @@ import { BIP39_ENGLISH_WORDLIST } from "./bip39-wordlist-en.js";
 // input the user can also freely replace, not a recoverable seed encoding.
 const WORD_COUNT = 6;
 
-function pickRandomWord() {
-  const index = crypto.getRandomValues(new Uint32Array(1))[0] % BIP39_ENGLISH_WORDLIST.length;
-  return BIP39_ENGLISH_WORDLIST[index];
+function pickRandomWord(wordlist) {
+  const index = crypto.getRandomValues(new Uint32Array(1))[0] % wordlist.length;
+  return wordlist[index];
 }
 
-export function generateStrongPassword() {
-  return Array.from({ length: WORD_COUNT }, pickRandomWord).join(" ");
+export async function generateStrongPassword() {
+  const wordlist = await loadWordlist();
+  return Array.from({ length: WORD_COUNT }, () => pickRandomWord(wordlist)).join(" ");
 }

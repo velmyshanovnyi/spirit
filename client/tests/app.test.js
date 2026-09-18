@@ -2945,23 +2945,31 @@ describe("permanent profile creation UI", () => {
 });
 
 describe("portable account creation (Section H3, exec-reviewed Argon2id core)", () => {
-  it("auto-fills the passphrase field with a generated password when the portable checkbox is checked", () => {
+  it("auto-fills the passphrase field with a generated password when the portable checkbox is checked", async () => {
     initApp(document, { locale: "uk" });
     document.getElementById("btn-create-profile").click();
 
     document.getElementById("portable-account-checkbox").click();
 
-    expect(document.getElementById("profile-passphrase").value).toBe("alpha bravo charlie delta echo foxtrot");
+    // Section A5/L2: the change handler awaits the lazily-loaded wordlist
+    // (mocked here), so the fill lands a microtask after the click.
+    await vi.waitFor(() =>
+      expect(document.getElementById("profile-passphrase").value).toBe("alpha bravo charlie delta echo foxtrot")
+    );
   });
 
-  it("does not overwrite a password the user already typed before checking the box", () => {
+  it("does not overwrite a password the user already typed before checking the box", async () => {
     initApp(document, { locale: "uk" });
     document.getElementById("btn-create-profile").click();
     document.getElementById("profile-passphrase").value = "my own chosen password";
 
     document.getElementById("portable-account-checkbox").click();
 
+    // Section A5/L2: the handler is async now -- flush its microtasks before
+    // asserting, so a guard moved after the await could not slip through.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(document.getElementById("profile-passphrase").value).toBe("my own chosen password");
+    expect(generateStrongPassword).not.toHaveBeenCalled();
   });
 
   it("does NOT use the deterministic path when the portable checkbox is left unchecked (default, no regression)", async () => {
@@ -3044,7 +3052,9 @@ describe("social recovery S3: trustee-side held-shares view (specs/phase5/social
     // text, not just a copyable string.
     const qrEl = document.getElementById("recovery-held-share-qr");
     expect(qrEl.hidden).toBe(false);
-    expect(qrEl.querySelector("svg")).not.toBeNull();
+    // Section A5/L3: qrSvgMarkup now lazily imports the vendor, so the SVG
+    // lands after an extra await inside the click handler.
+    await vi.waitFor(() => expect(qrEl.querySelector("svg")).not.toBeNull());
   });
 });
 

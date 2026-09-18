@@ -1,4 +1,18 @@
-import { BIP39_ENGLISH_WORDLIST } from "./bip39-wordlist-en.js";
+// Section A5/L2 (specs/phase5/lazy-loading.md): the 23KB wordlist is only
+// needed for mnemonic backup/restore, so it is imported lazily at first use
+// (cached promise). Both public functions were already async.
+let wordlistPromise = null;
+function loadWordlist() {
+  if (!wordlistPromise) {
+    // A failed import must not poison the cache forever (exec-review note):
+    // drop it so the next call retries the fetch.
+    wordlistPromise = import("./bip39-wordlist-en.js").then((m) => m.BIP39_ENGLISH_WORDLIST).catch((err) => {
+      wordlistPromise = null;
+      throw err;
+    });
+  }
+  return wordlistPromise;
+}
 
 const ENTROPY_BYTES = 32; // matches the P-256 private scalar size (D8: encodes raw key bytes, not a derivation)
 const BITS_PER_WORD = 11; // 2^11 = 2048 = wordlist size
@@ -37,6 +51,7 @@ export async function bytesToMnemonic(entropyBytes) {
     throw new Error(`Invalid entropy length: expected exactly ${ENTROPY_BYTES} bytes, got ${entropyBytes.length}`);
   }
 
+  const wordlist = await loadWordlist();
   const entropyBits = bytesToBinaryString(entropyBytes);
   const checksumBits = await checksumBitsFor(entropyBytes);
   const combinedBits = entropyBits + checksumBits;
@@ -44,7 +59,7 @@ export async function bytesToMnemonic(entropyBytes) {
   const words = [];
   for (let i = 0; i < combinedBits.length; i += BITS_PER_WORD) {
     const index = parseInt(combinedBits.slice(i, i + BITS_PER_WORD), 2);
-    words.push(BIP39_ENGLISH_WORDLIST[index]);
+    words.push(wordlist[index]);
   }
   return words;
 }
@@ -60,8 +75,9 @@ export async function mnemonicToBytes(words) {
     throw new Error(`Invalid mnemonic: expected exactly ${WORD_COUNT} words, got ${words.length}`);
   }
 
+  const wordlist = await loadWordlist();
   const indices = words.map((word) => {
-    const index = BIP39_ENGLISH_WORDLIST.indexOf(word);
+    const index = wordlist.indexOf(word);
     if (index === -1) {
       throw new Error(`Invalid mnemonic word: "${word}" is not in the BIP39 English wordlist`);
     }

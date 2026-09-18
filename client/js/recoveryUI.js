@@ -117,7 +117,7 @@ export function initRecoveryUI({
     const qrEl = el("recovery-held-share-qr");
     if (qrEl) {
       qrEl.hidden = false;
-      qrEl.innerHTML = qrSvgMarkup(shareText);
+      qrEl.innerHTML = await qrSvgMarkup(shareText);
     }
   });
 
@@ -234,7 +234,7 @@ export function initRecoveryUI({
         row.appendChild(text);
         const qr = doc.createElement("div");
         qr.className = "recovery-share-qr";
-        qr.innerHTML = qrSvgMarkup(shareText);
+        qr.innerHTML = await qrSvgMarkup(shareText);
         row.appendChild(qr);
         exportEl.appendChild(row);
       }
