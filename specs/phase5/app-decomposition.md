@@ -123,3 +123,27 @@ whatsapp) і делегований обробник `import-pending-list` (matc
 - [x] **Tests**: наявні import-сценарії `app.test.js` (Секції I2/I3) без змін і зелені; новий `client/tests/importedContactsUI.test.js` — модуль існує, `initImportedContactsUI` повертає `renderImportedContactsScreen`, евристика напрямку «out» лише для власного нікнейму (RED до створення).
 - [x] **Impl**: новий `client/js/importedContactsUI.js`; `client/js/app.js` — блок замінено викликом init.
 - [x] **Exec review**: iter1 — [reviews/app-decomposition-R4-iter1.md](../reviews/app-decomposition-R4-iter1.md). PASS, 0 знахідок; жива перевірка — в артефакті.
+
+## Секція R5: екран контактів + proof-перевірка → `client/js/contactsUI.js`
+
+Обсяг (~300 рядків, три блоки app.js): (1) `proofVerification`-мапа + ключ +
+`renderContactsScreen` (сайдбар-список: контакти з trust-щитом і proof-бейджами,
+ghost-рядок ефемерної сесії, групи, drag&drop-хуки); (2) делегований клік
+`contacts-list` («Написати» → initiateChatSession); (3) `checkContactProofs`
+(живі перевірки proof-ів + ре-рендер карток).
+
+Межа: назовні лише `renderContactsScreen` (стартовий виклик + onScreenChange)
+і `checkContactProofs` (кнопка «Перевірити зараз» + періодичний інтервал) —
+їх повертає `initContactsUI(...)`. Залежності: stateless напряму
+(contacts/groups/identicon/spiritId/settingsRegistry/fetchProof/proofs);
+ін'єктується doc, el, t, state, win, `navigate`-thunk (ghost-row → conversation;
+той самий прийом, що R1), і 6 замиканнєвих функцій (applyContactsFilter,
+setContactDragFingerprint, setGroupDragId — const-и з initSidebarFoldersUI;
+openGroupConversation, initiateChatSession — hoisted; renderGroupsCard,
+renderImportedContactsScreen — const-и попередніх init-ів). Виклик init —
+після `initImportedContactsUI` (усі const-залежності вже існують); обидва
+зовнішні колсайти виконуються пізніше — TDZ немає.
+
+- [x] **Tests**: наявні contacts/proofs-сценарії `app.test.js` без змін і зелені; новий `client/tests/contactsUI.test.js` — модуль існує, `initContactsUI` повертає обидві функції, рендер порожнього списку ховає/показує empty-стан і рендерить контакт із кнопкою «Написати» (RED до створення).
+- [x] **Impl**: новий `client/js/contactsUI.js`; `client/js/app.js` — три блоки замінено одним викликом init після initImportedContactsUI.
+- [x] **Exec review**: iter1 — [reviews/app-decomposition-R5-iter1.md](../reviews/app-decomposition-R5-iter1.md). PASS, 0 знахідок; жива перевірка (включно з ghost-row + navigate-thunk) — в артефакті.

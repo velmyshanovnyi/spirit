@@ -202,7 +202,9 @@ footer і feature-флаги).
 app.js 4757→4564. **Секція R3 (2026-09-19):** конфіг сервера/адмінка/signaling-вузли
 (~250 рядків) → `client/js/serverConfigUI.js`; app.js 4564→4306. **Секція R4 (той самий
 день):** імпортовані контакти I2/I3 (~215 рядків) → `client/js/importedContactsUI.js`;
-app.js 4306→4093. Кандидата
+app.js 4306→4093. **Секція R5 (той самий день):** екран контактів + proof-перевірка
+(~300 рядків) → `client/js/contactsUI.js`; app.js 4093→3845. Разом R1–R5: 5095→3845
+(−25%). Залишок — переплетене ядро (WebRTC/handleChatMessage/дзвінки/роутінг). Кандидата
 «дзвінки/медіа» розвідано й відкладено: НЕ суцільний домен (renegotiation всередині
 handleChatMessage, video-dock у рендер-замиканні) — його винос буде cut-and-stitch,
 не verbatim-move; потребує окремого підходу.
