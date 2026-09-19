@@ -33,6 +33,31 @@
      Applied as min-height/min-width on interactive controls -- the audit
      found every header control at 33-43px, below any platform guideline. */
   --control-min: 44px;
+  /* Backlog D3: the page's z-index ladder, one named token per tier with
+     the EXACT values the stack already used (behavior-preserving) -- the
+     hierarchy previously lived in 13 scattered literals and comments like
+     "101: above .modal-overlay's 100". Two intra-component values inside
+     .floating-video (2/4) stay literal: they stack within that element's
+     own context, not on this page ladder. */
+  --z-nav: 9;
+  --z-header: 10;
+  --z-footer: 80;
+  --z-notice: 85;
+  --z-toolbar: 90;
+  --z-floating-video: 95;
+  --z-modal-screen: 99;   /* below --z-modal: the welcome modal must win over full-screen modals */
+  --z-modal: 100;
+  --z-menu-over-modal: 101; /* the settings menu stays reachable from inside a modal */
+  --z-toast: 200;
+  /* Backlog D3: spacing scale for GRADUAL adoption (86 hardcoded px paddings
+     exist; per the backlog they migrate opportunistically, not in one sweep).
+     New/edited rules should reach for these instead of raw px. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
 }
 
 :root[data-theme="dark"] {
@@ -98,7 +123,7 @@ body {
 .app-header {
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: var(--z-header);
   display: grid;
   /* First column matches #app-sidebar's own width (300px) exactly, so
      centering the brand within it centers the logo over the SIDEBAR
@@ -373,7 +398,7 @@ body.conversation-toolbar-visible .app-body {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -623,7 +648,7 @@ button:disabled {
   white-space: nowrap;
   pointer-events: none;
   opacity: 0;
-  z-index: 200;
+  z-index: var(--z-toast);
   transition: opacity 0.15s ease-in-out;
 }
 
@@ -795,7 +820,7 @@ button:disabled {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  z-index: 101; /* above .modal-overlay's 100 -- a menu opened from within a
+  z-index: var(--z-menu-over-modal); /* a menu opened from within a
                    modal (e.g. future H4 forms) must still be reachable */
   display: flex;
   flex-direction: column;
@@ -828,7 +853,7 @@ button:disabled {
 .app-nav {
   position: sticky;
   top: 49px; /* right under the header */
-  z-index: 9;
+  z-index: var(--z-nav);
   display: flex;
   overflow-x: auto;
   gap: 2px;
@@ -905,7 +930,7 @@ button:disabled {
      modal must win so its confirm button stays reachable and its
      localStorage seen-flag can actually get set. Below the H2 settings-menu
      (101) too, so it stays reachable if opened from within this modal. */
-  z-index: 99;
+  z-index: var(--z-modal-screen);
   align-items: center;
   justify-content: center;
   background: rgba(0, 0, 0, 0.55);
@@ -936,7 +961,7 @@ body.account-modal-suppressed [data-screen="account"].modal-screen {
 .auto-start-loading {
   position: fixed;
   inset: 0;
-  z-index: 90;
+  z-index: var(--z-toolbar);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -994,7 +1019,7 @@ body.account-modal-suppressed [data-screen="account"].modal-screen {
   position: fixed;
   left: 0;
   right: 0;
-  z-index: 90;
+  z-index: var(--z-toolbar);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1077,7 +1102,7 @@ body.account-modal-suppressed [data-screen="account"].modal-screen {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  z-index: 95;
+  z-index: var(--z-floating-video);
 }
 
 .floating-video-handle {
@@ -1580,7 +1605,7 @@ body.account-modal-suppressed [data-screen="account"].modal-screen {
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 80;
+  z-index: var(--z-footer);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1651,7 +1676,7 @@ body.account-modal-suppressed [data-screen="account"].modal-screen {
   left: 50%;
   bottom: 40px;
   transform: translateX(-50%);
-  z-index: 85;
+  z-index: var(--z-notice);
   padding: 8px 16px;
   background: var(--card-bg);
   border: 1px solid var(--border);
