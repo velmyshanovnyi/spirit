@@ -236,7 +236,7 @@ import { deriveRootKey, deriveInitialChainKeys, ratchetStep } from "../js/ratche
 import { promptGoogleSignIn, verifyGoogleIdToken } from "../js/googleOAuth.js";
 import { initApp } from "../js/app.js";
 
-const ROUTES = ["account", "profile", "server", "room", "conversation", "manage", "history"];
+const ROUTES = ["account", "profile", "settings", "node", "room", "conversation", "manage", "history"];
 
 // Section X1 (specs/phase5/test-fixture-fidelity.md, backlog A7): the
 // fixture is GENERATED from the real client/index.html instead of a
@@ -1241,18 +1241,18 @@ describe("settings menu replacing the top nav (Section H2)", () => {
     document.getElementById("btn-settings-toggle").click();
     document.querySelector('[data-scroll-target="design-settings-list"]').click();
 
-    expect(location.hash).toBe("#/server");
+    expect(location.hash).toBe("#/settings");
     // Exec review finding 1: "Дизайн" must NOT carry its own data-route
     // (router.js's navItems loop would then mark it aria-current="page"
     // ALONGSIDE "Сервер" -- both real routes match "server" simultaneously,
     // the first time two nav items would ever share one route). Confirmed
     // here: exactly one item is current.
     expect(document.querySelectorAll('.nav-item[aria-current="page"]')).toHaveLength(1);
-    expect(document.querySelector('.nav-item[data-route="server"]').getAttribute("aria-current")).toBe("page");
+    expect(document.querySelector('.nav-item[data-route="settings"]').getAttribute("aria-current")).toBe("page");
     // Exec review test-quality note: assert the call happened with the
     // expected args, AFTER the target screen is actually visible (not
     // just that the hash string changed).
-    expect(document.querySelector('[data-screen="server"]').hidden).toBe(false);
+    expect(document.querySelector('[data-screen="settings"]').hidden).toBe(false);
     expect(scrollSpy).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
 
     Element.prototype.scrollIntoView = originalScrollIntoView;
@@ -1588,15 +1588,15 @@ describe("advanced mode (Section SM2+SM3)", () => {
   it("redirects an advanced route to conversation and shows a notice when locked", () => {
     initApp(document, { locale: "uk" });
 
-    location.hash = "#/server";
+    location.hash = "#/settings";
     location.dispatchEvent ? null : null; // hashchange fires via jsdom's own mechanism below
     window.dispatchEvent(new Event("hashchange"));
 
     // Cascades through TWO independent gates in one settle (documented in
-    // the spec): restricted "server" -> redirect target "conversation" ->
+    // the spec): restricted "settings" -> redirect target "conversation" ->
     // "conversation" is ALSO identity-gated and no identity exists yet in
     // this test -> settles on the identity gate's own "account" fallback.
-    // The notice still fires for the originally attempted "server" route.
+    // The notice still fires for the originally attempted "settings" route.
     expect(location.hash).toBe("#/account");
     expect(document.getElementById("advanced-mode-notice").hidden).toBe(false);
     expect(document.getElementById("advanced-mode-notice").textContent.length).toBeGreaterThan(0);
@@ -1671,10 +1671,10 @@ describe("advanced mode (Section SM2+SM3)", () => {
     localStorage.setItem("spirit.advancedModeUnlocked", "1");
     initApp(document, { locale: "uk" });
 
-    location.hash = "#/server";
+    location.hash = "#/settings";
     window.dispatchEvent(new Event("hashchange"));
 
-    expect(location.hash).toBe("#/server");
+    expect(location.hash).toBe("#/settings");
     expect(document.getElementById("advanced-mode-notice").hidden).toBe(true);
   });
 
@@ -1684,7 +1684,7 @@ describe("advanced mode (Section SM2+SM3)", () => {
   // unlocked), then exercise a flag written directly to localStorage (the
   // same external-write path GE1's own tests cover for isFeatureEnabled).
   it("redirects an individually-disabled route to conversation even while unlocked, but leaves other advanced routes alone", () => {
-    // "room" and "server" are advanced routes that are NOT also
+    // "room" and "settings" are advanced routes that are NOT also
     // identity-gated (unlike "profile"/"manage"/"history") -- picking one
     // of those isolates the restricted-route gate's own behavior from the
     // identity gate, which this test (no identity established) would
@@ -1693,9 +1693,9 @@ describe("advanced mode (Section SM2+SM3)", () => {
     localStorage.setItem("spirit.advancedFeatureFlags", JSON.stringify({ room: false }));
     initApp(document, { locale: "uk" });
 
-    location.hash = "#/server";
+    location.hash = "#/settings";
     window.dispatchEvent(new Event("hashchange"));
-    expect(location.hash).toBe("#/server");
+    expect(location.hash).toBe("#/settings");
 
     location.hash = "#/room";
     window.dispatchEvent(new Event("hashchange"));
@@ -1749,23 +1749,23 @@ describe("advanced mode (Section SM2+SM3)", () => {
     fingerprint.mockResolvedValue("sender-fp");
     initApp(document, { locale: "uk" });
 
-    // Exec review finding 1: reach #/server by CLICKING, not by assigning
+    // Exec review finding 1: reach #/settings by CLICKING, not by assigning
     // the hash. Only a click sets router.js's userInitiated flag, so only
     // this arrival path exercises the flag being correctly cleared
     // afterwards. With a hash assignment the flag is never set, and a
     // mutant that deletes router.js's `finally` reset (leaving the flag
     // latched true, so the very next lock re-opens the modal) survived the
     // entire 999-test suite.
-    document.querySelector('.nav-item[data-route="server"]').dispatchEvent(
+    document.querySelector('.nav-item[data-route="settings"]').dispatchEvent(
       new MouseEvent("click", { bubbles: true, cancelable: true })
     );
-    expect(location.hash).toBe("#/server");
+    expect(location.hash).toBe("#/settings");
 
     document.getElementById("footer-advanced-toggle").click(); // lock
 
     expect(localStorage.getItem("spirit.advancedModeUnlocked")).toBeNull();
     expect(document.getElementById("advanced-mode-modal").hidden).toBe(true);
-    expect(location.hash).not.toBe("#/server");
+    expect(location.hash).not.toBe("#/settings");
   });
 
   // Guards the A2+A3 fix from over-reaching: the "Дизайн" shortcut is a real
@@ -1810,21 +1810,21 @@ describe("advanced mode (Section SM2+SM3)", () => {
     // The settings menu (z-index 101) sits ABOVE the modal overlay (100),
     // so a second nav item really is clickable while the prompt is open --
     // it must not reset what the user has already typed.
-    clickRestrictedNavItem("server");
+    clickRestrictedNavItem("settings");
 
     expect(document.getElementById("advanced-mode-modal").hidden).toBe(false);
     expect(document.getElementById("advanced-mode-password").value).toBe("typing this...");
   });
 
-  it("keeps server reachable even if its own feature flag is hand-set to false (self-lockout guard)", () => {
+  it("keeps the settings screen reachable even if its own feature flag is hand-set to false (self-lockout guard)", () => {
     localStorage.setItem("spirit.advancedModeUnlocked", "1");
-    localStorage.setItem("spirit.advancedFeatureFlags", JSON.stringify({ server: false }));
+    localStorage.setItem("spirit.advancedFeatureFlags", JSON.stringify({ settings: false }));
     initApp(document, { locale: "uk" });
 
-    location.hash = "#/server";
+    location.hash = "#/settings";
     window.dispatchEvent(new Event("hashchange"));
 
-    expect(location.hash).toBe("#/server");
+    expect(location.hash).toBe("#/settings");
     expect(document.getElementById("advanced-mode-notice").hidden).toBe(true);
   });
 
@@ -1888,22 +1888,22 @@ describe("advanced mode (Section SM2+SM3)", () => {
   it("clicking the toggle while unlocked locks immediately without confirmation and re-hides everything, including the currently-visible advanced screen", () => {
     // Exec review finding 1 (simplified-ephemeral-mode-SM2-SM3-iter1.md):
     // locking used to leave whatever advanced screen was currently open
-    // (e.g. #/server) fully visible -- only the sidebar/gear hid.
+    // (e.g. #/settings) fully visible -- only the sidebar/gear hid.
     localStorage.setItem("spirit.advancedModeUnlocked", "1");
     initApp(document, { locale: "uk" });
 
-    location.hash = "#/server";
+    location.hash = "#/settings";
     window.dispatchEvent(new Event("hashchange"));
-    expect(document.querySelector('[data-screen="server"]').hidden).toBe(false);
+    expect(document.querySelector('[data-screen="settings"]').hidden).toBe(false);
 
     document.getElementById("footer-advanced-toggle").click();
 
     expect(document.getElementById("app-sidebar").hidden).toBe(true);
     expect(localStorage.getItem("spirit.advancedModeUnlocked")).toBeNull();
-    expect(document.querySelector('[data-screen="server"]').hidden).toBe(true);
+    expect(document.querySelector('[data-screen="settings"]').hidden).toBe(true);
     // No identity in this test -- "conversation" is itself identity-gated,
     // so it cascades one step further to "account" (see the router cascade
-    // tests). The important assertion is simply that "server" no longer
+    // tests). The important assertion is simply that "settings" no longer
     // sits there fully visible.
     expect(document.querySelector('[data-screen="account"]').hidden).toBe(false);
   });
@@ -2259,8 +2259,8 @@ describe("feature flags settings UI panel (Section GE3)", () => {
     initApp(document, { locale: "uk" });
 
     const rows = [...featureFlagsList().children];
-    expect(rows.map((row) => row.dataset.featureKey).sort()).toEqual(["history", "manage", "profile", "room"].sort());
-    expect(featureFlagsList().querySelector('[data-feature-key="server"]')).toBeNull();
+    expect(rows.map((row) => row.dataset.featureKey).sort()).toEqual(["history", "manage", "node", "profile", "room"].sort());
+    expect(featureFlagsList().querySelector('[data-feature-key="settings"]')).toBeNull();
   });
 
   it("a checkbox reflects the currently stored enabled state", () => {
@@ -6444,7 +6444,7 @@ describe("invite-link rendezvous (Section N6)", () => {
     });
 
     initApp(document, { locale: "uk", locationSearch: "?room=room-from-link&token=token-from-link" });
-    location.hash = "#/server"; // leave the default screen so the navigation is observable
+    location.hash = "#/settings"; // leave the default screen so the navigation is observable
     window.dispatchEvent(new Event("hashchange"));
     await vi.waitFor(() => expect(document.getElementById("profile-select").options.length).toBe(1));
 
@@ -7050,12 +7050,12 @@ describe("multi-screen navigation (Section N2)", () => {
     expect(visibleScreens()).toEqual(["account"]);
   });
 
-  it("allows ungated screens (server, room) without any identity", () => {
+  it("allows ungated screens (settings, room) without any identity", () => {
     initApp(document, { locale: "uk" });
 
-    location.hash = "#/server";
+    location.hash = "#/settings";
     window.dispatchEvent(new Event("hashchange"));
-    expect(visibleScreens()).toEqual(["server"]);
+    expect(visibleScreens()).toEqual(["settings"]);
 
     location.hash = "#/room";
     window.dispatchEvent(new Event("hashchange"));
@@ -7083,7 +7083,7 @@ describe("multi-screen navigation (Section N2)", () => {
 
     initApp(document, { locale: "uk" });
     // Leave the default account screen first so the navigation is observable.
-    location.hash = "#/server";
+    location.hash = "#/settings";
     window.dispatchEvent(new Event("hashchange"));
     await vi.waitFor(() => expect(document.getElementById("profile-select").options.length).toBe(1));
 
@@ -9664,13 +9664,13 @@ describe("real-trigger unlock (Section X2, specs/phase5/test-fixture-fidelity.md
     expect(modal.hidden).toBe(true);
 
     // Programmatic navigation to a restricted route: toast path, NO modal (A2).
-    location.hash = "#/server";
+    location.hash = "#/settings";
     window.dispatchEvent(new Event("hashchange"));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(modal.hidden).toBe(true);
 
     // The real production trigger: a trusted-like click on the nav item.
-    const navItem = document.querySelector('.nav-item[data-route="server"]');
+    const navItem = document.querySelector('.nav-item[data-route="settings"]');
     expect(navItem).not.toBeNull();
     navItem.click();
     await vi.waitFor(() => expect(modal.hidden).toBe(false));
@@ -9703,5 +9703,23 @@ describe("accessibility (backlog D4)", () => {
       expect(log.getAttribute("role")).toBe("log");
       expect(log.getAttribute("aria-live")).toBe("polite");
     }
+  });
+});
+
+describe("server screen split (Section V1, specs/ui/server-screen-split.md)", () => {
+  it("the old server screen is split into node (infra+admin) and settings (registry+design+footer+flags)", () => {
+    expect(document.querySelector('[data-screen="server"]')).toBeNull();
+    const node = document.querySelector('[data-screen="node"]');
+    const settings = document.querySelector('[data-screen="settings"]');
+    expect(node).not.toBeNull();
+    expect(settings).not.toBeNull();
+    expect(node.querySelector("#server-url")).not.toBeNull();
+    expect(node.querySelector("#admin-config-list")).not.toBeNull();
+    expect(settings.querySelector("#settings-registry-list")).not.toBeNull();
+    expect(settings.querySelector("#design-settings-list")).not.toBeNull();
+    expect(settings.querySelector("#footer-settings-list")).not.toBeNull();
+    expect(settings.querySelector("#feature-flags-list")).not.toBeNull();
+    expect(document.querySelector('.nav-item[data-route="node"]')).not.toBeNull();
+    expect(document.querySelector('.nav-item[data-route="settings"]')).not.toBeNull();
   });
 });

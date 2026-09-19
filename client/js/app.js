@@ -76,13 +76,13 @@ import { formatSpiritId } from "./spiritId.js";
 import { initRouter } from "./router.js";
 import { rememberSession, getRememberedProfileId, recordRecentAccount, getRecentAccounts, forgetSession } from "./session.js";
 
-const ROUTES = ["account", "profile", "server", "room", "conversation", "manage", "history"];
+const ROUTES = ["account", "profile", "settings", "node", "room", "conversation", "manage", "history"];
 const GATED_ROUTES = ["profile", "conversation", "manage", "history"];
 // Section SM3 (specs/ui/simplified-ephemeral-mode.md): everything except the
 // ephemeral conversation itself, hidden by default until Advanced Mode is
 // unlocked. "account" is deliberately excluded -- see the spec for why
 // (it would cascade-loop against "conversation"'s own identity gate).
-const ADVANCED_ROUTES = ["profile", "server", "room", "manage", "history"];
+const ADVANCED_ROUTES = ["profile", "settings", "node", "room", "manage", "history"];
 
 // Per-profile own device list record key in the "profile" store (Section 15:
 // multiple accounts each maintain their own list).
@@ -184,7 +184,7 @@ export function initApp(doc, options) {
   // hashchange so the router (created further down, also hoisting-safe
   // since this only runs on a later click) re-evaluates the CURRENT route
   // against the now-changed lock state -- exec review finding 1: without
-  // this, locking while on an advanced screen (e.g. #/server) left that
+  // this, locking while on an advanced screen (e.g. #/settings) left that
   // whole screen visible, only the sidebar/gear actually hid.
   const advancedModeUIHandle = initAdvancedModeUI({
     doc,
@@ -1093,8 +1093,8 @@ export function initApp(doc, options) {
     // password unlock is checked first (short-circuits -- locked means
     // EVERY advanced route is restricted regardless of per-feature
     // flags); isFeatureEnabled(route) then layers the per-route toggle on
-    // top once unlocked. isFeatureEnabled("server") is hard-coded true in
-    // advancedMode.js, so "server" can never be restricted by its own
+    // top once unlocked. isFeatureEnabled("settings") is hard-coded true in
+    // advancedMode.js, so "settings" can never be restricted by its own
     // flag (self-lockout guard -- it's where the toggle panel itself lives).
     isRestricted: (route) => !isAdvancedModeUnlocked() || !isFeatureEnabled(route),
     restrictedRedirectRoute: "conversation",
@@ -1289,7 +1289,7 @@ export function initApp(doc, options) {
           // Best-effort, same reasoning as saveFloatingVideoRect.
         }
         // Exec review finding 1 (specs/reviews/design-edit-mode-RF20-iter1.md):
-        // the reset button lives on the "server" screen (index.html), and
+        // the reset button lives on the "settings" screen (index.html), and
         // the panel is only ever un-hidden on the "conversation" route
         // (setConversationChromeVisible) -- so `panel.hidden` is ALWAYS
         // true at the moment this can be clicked in real usage. Gating the
@@ -1497,9 +1497,9 @@ export function initApp(doc, options) {
   }
   // User request (2026-08-08): a generic "navigate to the route in this
   // link's href, then scroll a specific card into view" shortcut --
-  // "Дизайн" (index.html) is the first user, reusing the "server" route
+  // "Дизайн" (index.html) is the first user, reusing the "settings" route
   // without duplicating a data-route (exec review finding,
-  // specs/reviews/design-menu-shortcut-iter1.md: sharing data-route="server"
+  // specs/reviews/design-menu-shortcut-iter1.md: sharing the real nav item's data-route
   // with the real "Сервер" nav item would mark BOTH aria-current="page"
   // simultaneously). Deliberately scoped OUTSIDE the settings-menu guard
   // above (exec review finding) -- the selector is document-wide by
@@ -1593,7 +1593,7 @@ export function initApp(doc, options) {
     // floating-video closure above, not reachable from applyDesignSettings()
     // itself. Exec review finding 4 (specs/reviews/design-edit-mode-RF21-iter1.md):
     // in TODAY's layout this hook is unreachable while a call is actually
-    // visible (the "server" screen these controls live on and the
+    // visible (the "settings" screen these controls live on and the
     // "conversation" screen are mutually exclusive, so applyVideoDockMode()'s
     // own `!panel.hidden` check is always false at click time) -- the
     // setting genuinely takes effect on the NEXT entry to #/conversation

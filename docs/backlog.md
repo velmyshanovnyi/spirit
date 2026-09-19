@@ -183,7 +183,18 @@ btn-send           104×43      message-input       26×43
 
 ---
 
-### [ ] D2. Екран «Сервер» — смітник із 6 непов'язаних карток
+### [x] D2. Екран «Сервер» — смітник із 6 непов'язаних карток ✅ ЗАКРИТО 2026-09-19
+
+**Виправлено (Секція V1 у `specs/ui/server-screen-split.md`)**: два маршрути —
+`#/node` (інфраструктура + адмінка вузла) і `#/settings` (реєстр параметрів +
+дизайн + підвал + feature-флаги). Роутер без змін (автодискавері екранів);
+feature-флаги: hard-enabled дім панелі тепер "settings", "node" — новий
+toggleable ключ; i18n ×11 локалей. Свідоме відхилення від прогнозу беклогу:
+ярлик «Дизайн» ЛИШИВСЯ (юзер-реквест 2026-08-08; картка дизайну й далі серед
+чотирьох) — лише ретаргетнутий на #/settings. Legacy `#/server` падає на
+defaultRoute (задокументовано в спеці). Рев'ю виловило й закрило вакуумність
+self-lockout-guard-тесту після bulk-rename.
+Рев'ю: `specs/reviews/server-screen-split-V1-iter1.md`.
 
 **Докази.** У `data-screen="server"` живуть **6 карток**: `infra.heading`,
 `admin.heading`, `settings.heading`, `design.heading`, `footerSettings.heading`,

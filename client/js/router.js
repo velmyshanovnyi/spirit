@@ -201,7 +201,7 @@ export function initRouter(
     // Forward, an edited address bar, a bookmarked or shared deep link, a
     // restored session. Treating those as programmatic silently denied the
     // password prompt to precisely the person this feature is for: someone
-    // who knows the password and opens #/server directly. A SYNTHETIC event
+    // who knows the password and opens #/settings directly. A SYNTHETIC event
     // (app.js dispatches one after locking advanced mode) is untrusted and
     // must stay programmatic, which is what keeps A3 fixed.
     navigationWasUserInitiated = event?.isTrusted === true;

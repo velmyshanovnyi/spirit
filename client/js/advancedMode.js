@@ -49,22 +49,23 @@ export function lockAdvancedMode() {
  */
 export const ADVANCED_FEATURES = [
   { key: "profile", labelKey: "featureFlags.feature.profile" },
-  // "server" deliberately has no labelKey -- it's never rendered as a
+  // "settings" deliberately has no labelKey -- it's never rendered as a
   // toggle (see TOGGLEABLE_FEATURE_KEYS below), so there's no i18n key for
-  // it in GE3's planned list.
-  { key: "server" },
+  // it. (Was "server" before the D2 screen split, Section V1.)
+  { key: "settings" },
+  { key: "node", labelKey: "featureFlags.feature.node" },
   { key: "room", labelKey: "featureFlags.feature.room" },
   { key: "manage", labelKey: "featureFlags.feature.manage" },
   { key: "history", labelKey: "featureFlags.feature.history" }
 ];
 
-// "server" is where the granular toggle panel itself lives -- letting its
+// "settings" is where the granular toggle panel itself lives -- letting its
 // own flag disable it would strand the user with no way back short of
 // hand-editing localStorage (same self-lockout class as
 // footerRegistry.js's "advancedToggle" exclusion). Excluded from the
 // toggleable subset entirely; isFeatureEnabled below hard-codes it to
 // always-enabled regardless of stored state.
-export const TOGGLEABLE_FEATURE_KEYS = ADVANCED_FEATURES.map((f) => f.key).filter((key) => key !== "server");
+export const TOGGLEABLE_FEATURE_KEYS = ADVANCED_FEATURES.map((f) => f.key).filter((key) => key !== "settings");
 
 const FEATURE_FLAGS_KEY = "spirit.advancedFeatureFlags";
 
@@ -86,13 +87,13 @@ function readFeatureFlags() {
 }
 
 export function isFeatureEnabled(key) {
-  if (key === "server") return true;
+  if (key === "settings") return true;
   const stored = readFeatureFlags();
   return stored[key] !== false;
 }
 
 export function setFeatureEnabled(key, enabled) {
-  if (key === "server") return; // no-op: see TOGGLEABLE_FEATURE_KEYS comment above
+  if (key === "settings") return; // no-op: see TOGGLEABLE_FEATURE_KEYS comment above
   const stored = readFeatureFlags();
   stored[key] = enabled;
   try {

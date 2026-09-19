@@ -471,7 +471,7 @@ export function initSettingsPanelUI({ doc, el, t, onDesignSettingChange }) {
   // isn't a visible list to sequence, it's an access-control list, and one
   // shared "Скинути" button (below) is enough, same as design settings'
   // resetAllDesignSettings. No re-render/router notification needed on
-  // toggle -- this panel only lives on the "server" screen, which can never
+  // toggle -- this panel only lives on the "settings" screen, which can never
   // be the SAME screen a just-toggled route refers to.
   function renderFeatureFlagsSettings() {
     const list = el("feature-flags-list");

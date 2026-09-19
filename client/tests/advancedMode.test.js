@@ -95,12 +95,12 @@ describe("lockAdvancedMode", () => {
 // Section GE1 (specs/ui/granular-feature-flags.md): per-route toggles on top
 // of the master password unlock.
 describe("ADVANCED_FEATURES / TOGGLEABLE_FEATURE_KEYS", () => {
-  it("covers exactly the five advanced routes, with server excluded from the toggleable subset", () => {
+  it("covers exactly the six advanced routes, with settings excluded from the toggleable subset", () => {
     // [...array] before .sort() -- Array.prototype.sort mutates in place,
     // and these are the module's own exported consts (exec review finding 4).
-    expect([...ADVANCED_FEATURES.map((f) => f.key)].sort()).toEqual(["history", "manage", "profile", "room", "server"].sort());
-    expect(TOGGLEABLE_FEATURE_KEYS).not.toContain("server");
-    expect([...TOGGLEABLE_FEATURE_KEYS].sort()).toEqual(["history", "manage", "profile", "room"].sort());
+    expect([...ADVANCED_FEATURES.map((f) => f.key)].sort()).toEqual(["history", "manage", "node", "profile", "room", "settings"].sort());
+    expect(TOGGLEABLE_FEATURE_KEYS).not.toContain("settings");
+    expect([...TOGGLEABLE_FEATURE_KEYS].sort()).toEqual(["history", "manage", "node", "profile", "room"].sort());
   });
 });
 
@@ -131,8 +131,8 @@ describe("isFeatureEnabled / setFeatureEnabled", () => {
   });
 
   it("server is always enabled, even after an explicit attempt to disable it (self-lockout guard)", () => {
-    setFeatureEnabled("server", false);
-    expect(isFeatureEnabled("server")).toBe(true);
+    setFeatureEnabled("settings", false);
+    expect(isFeatureEnabled("settings")).toBe(true);
     // The no-op write must not corrupt storage for the OTHER keys either.
     expect(isFeatureEnabled("profile")).toBe(true);
   });
