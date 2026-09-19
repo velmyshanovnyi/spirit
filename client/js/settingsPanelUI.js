@@ -39,6 +39,50 @@ import { TOGGLEABLE_FEATURE_KEYS, ADVANCED_FEATURES, isFeatureEnabled, setFeatur
  * applyTranslations() since they're built imperatively, no data-i18n).
  */
 export function initSettingsPanelUI({ doc, el, t, onDesignSettingChange }) {
+  // Section U1 (specs/ui/settings-render-unification.md, backlog D5): the
+  // row scaffold repeated across the panels below -- label(+span+control),
+  // optional hint-text description, optional reset button. Node order,
+  // classes and data attributes are byte-identical to the previous four
+  // hand-rolled copies; the footer panel keeps its own renderer (its rows
+  // are a dynamic order-list with textareas -- a different shape, see FC3).
+  function appendCategoryHeading(list, text) {
+    const heading = doc.createElement("h3");
+    heading.textContent = text;
+    list.appendChild(heading);
+  }
+  function appendSettingRow(list, { labelText, control, controlFirst = false, descriptionText, resetAttr, resetKey, rowDataset }) {
+    const row = doc.createElement("div");
+    row.className = "settings-row";
+    if (rowDataset) for (const [k, v] of Object.entries(rowDataset)) row.dataset[k] = v;
+    const label = doc.createElement("label");
+    label.className = "field";
+    const span = doc.createElement("span");
+    span.textContent = labelText;
+    if (controlFirst) {
+      label.appendChild(control);
+      label.appendChild(span);
+    } else {
+      label.appendChild(span);
+      label.appendChild(control);
+    }
+    row.appendChild(label);
+    if (descriptionText !== undefined) {
+      const description = doc.createElement("p");
+      description.className = "hint-text";
+      description.textContent = descriptionText;
+      row.appendChild(description);
+    }
+    if (resetAttr) {
+      const resetBtn = doc.createElement("button");
+      resetBtn.type = "button";
+      resetBtn.className = "btn-link";
+      resetBtn.textContent = t("settings.resetOne");
+      resetBtn.dataset[resetAttr] = resetKey;
+      row.appendChild(resetBtn);
+    }
+    list.appendChild(row);
+  }
+
   // Section RF13 (specs/ui/settings-panel.md), Stage 1: renders SETTINGS
   // structurally -- one heading per category (deduped, in registry order),
   // one row per setting with its label/description/input/reset, so adding a
@@ -59,36 +103,21 @@ export function initSettingsPanelUI({ doc, el, t, onDesignSettingChange }) {
     for (const entry of SETTINGS) {
       if (entry.category !== lastCategory) {
         lastCategory = entry.category;
-        const heading = doc.createElement("h3");
-        heading.textContent = categoryLabels[entry.category] || entry.category;
-        list.appendChild(heading);
+        appendCategoryHeading(list, categoryLabels[entry.category] || entry.category);
       }
-      const row = doc.createElement("div");
-      row.className = "settings-row";
-      const label = doc.createElement("label");
-      label.className = "field";
-      const labelText = doc.createElement("span");
-      labelText.textContent = t(entry.labelKey);
-      label.appendChild(labelText);
       const input = doc.createElement("input");
       input.type = "number";
       input.min = String(entry.min);
       input.max = String(entry.max);
       input.value = String(getSetting(entry.key));
       input.dataset.settingKey = entry.key;
-      label.appendChild(input);
-      row.appendChild(label);
-      const description = doc.createElement("p");
-      description.className = "hint-text";
-      description.textContent = t(entry.descriptionKey);
-      row.appendChild(description);
-      const resetBtn = doc.createElement("button");
-      resetBtn.type = "button";
-      resetBtn.className = "btn-link";
-      resetBtn.textContent = t("settings.resetOne");
-      resetBtn.dataset.resetSettingKey = entry.key;
-      row.appendChild(resetBtn);
-      list.appendChild(row);
+      appendSettingRow(list, {
+        labelText: t(entry.labelKey),
+        control: input,
+        descriptionText: t(entry.descriptionKey),
+        resetAttr: "resetSettingKey",
+        resetKey: entry.key
+      });
     }
   }
   renderSettingsRegistry();
@@ -135,18 +164,8 @@ export function initSettingsPanelUI({ doc, el, t, onDesignSettingChange }) {
     for (const entry of DESIGN_SETTINGS) {
       if (entry.category !== lastCategory) {
         lastCategory = entry.category;
-        const heading = doc.createElement("h3");
-        heading.textContent = categoryLabels[entry.category] || entry.category;
-        list.appendChild(heading);
+        appendCategoryHeading(list, categoryLabels[entry.category] || entry.category);
       }
-      const row = doc.createElement("div");
-      row.className = "settings-row";
-      const label = doc.createElement("label");
-      label.className = "field";
-      const labelText = doc.createElement("span");
-      labelText.textContent = t(entry.labelKey);
-      label.appendChild(labelText);
-
       const stored = getDesignSetting(entry.key);
       // Section RF17: "choice" settings have no cssVar to read a live
       // computed value from -- there's nothing to fall back to when unset,
@@ -165,21 +184,13 @@ export function initSettingsPanelUI({ doc, el, t, onDesignSettingChange }) {
           optionBtn.dataset.designChoiceValue = option;
           toggle.appendChild(optionBtn);
         }
-        label.appendChild(toggle);
-        row.appendChild(label);
-
-        const description = doc.createElement("p");
-        description.className = "hint-text";
-        description.textContent = t(entry.descriptionKey);
-        row.appendChild(description);
-
-        const resetBtn = doc.createElement("button");
-        resetBtn.type = "button";
-        resetBtn.className = "btn-link";
-        resetBtn.textContent = t("settings.resetOne");
-        resetBtn.dataset.resetDesignSettingKey = entry.key;
-        row.appendChild(resetBtn);
-        list.appendChild(row);
+        appendSettingRow(list, {
+          labelText: t(entry.labelKey),
+          control: toggle,
+          descriptionText: t(entry.descriptionKey),
+          resetAttr: "resetDesignSettingKey",
+          resetKey: entry.key
+        });
         continue;
       }
       if (entry.type === "order") {
@@ -214,21 +225,13 @@ export function initSettingsPanelUI({ doc, el, t, onDesignSettingChange }) {
           itemRow.appendChild(downBtn);
           orderList.appendChild(itemRow);
         });
-        label.appendChild(orderList);
-        row.appendChild(label);
-
-        const description = doc.createElement("p");
-        description.className = "hint-text";
-        description.textContent = t(entry.descriptionKey);
-        row.appendChild(description);
-
-        const resetBtn = doc.createElement("button");
-        resetBtn.type = "button";
-        resetBtn.className = "btn-link";
-        resetBtn.textContent = t("settings.resetOne");
-        resetBtn.dataset.resetDesignSettingKey = entry.key;
-        row.appendChild(resetBtn);
-        list.appendChild(row);
+        appendSettingRow(list, {
+          labelText: t(entry.labelKey),
+          control: orderList,
+          descriptionText: t(entry.descriptionKey),
+          resetAttr: "resetDesignSettingKey",
+          resetKey: entry.key
+        });
         continue;
       }
       const input = doc.createElement("input");
@@ -251,21 +254,13 @@ export function initSettingsPanelUI({ doc, el, t, onDesignSettingChange }) {
         input.type = "text";
         input.value = stored ?? currentRaw;
       }
-      label.appendChild(input);
-      row.appendChild(label);
-
-      const description = doc.createElement("p");
-      description.className = "hint-text";
-      description.textContent = t(entry.descriptionKey);
-      row.appendChild(description);
-
-      const resetBtn = doc.createElement("button");
-      resetBtn.type = "button";
-      resetBtn.className = "btn-link";
-      resetBtn.textContent = t("settings.resetOne");
-      resetBtn.dataset.resetDesignSettingKey = entry.key;
-      row.appendChild(resetBtn);
-      list.appendChild(row);
+      appendSettingRow(list, {
+        labelText: t(entry.labelKey),
+        control: input,
+        descriptionText: t(entry.descriptionKey),
+        resetAttr: "resetDesignSettingKey",
+        resetKey: entry.key
+      });
     }
   }
   renderDesignSettings();
@@ -484,21 +479,16 @@ export function initSettingsPanelUI({ doc, el, t, onDesignSettingChange }) {
     list.innerHTML = "";
     for (const key of TOGGLEABLE_FEATURE_KEYS) {
       const entry = ADVANCED_FEATURES.find((f) => f.key === key);
-      const row = doc.createElement("div");
-      row.className = "settings-row";
-      row.dataset.featureKey = key;
-      const label = doc.createElement("label");
-      label.className = "field";
       const checkbox = doc.createElement("input");
       checkbox.type = "checkbox";
       checkbox.checked = isFeatureEnabled(key);
       checkbox.dataset.featureToggleKey = key;
-      label.appendChild(checkbox);
-      const labelText = doc.createElement("span");
-      labelText.textContent = entry?.labelKey ? t(entry.labelKey) : key;
-      label.appendChild(labelText);
-      row.appendChild(label);
-      list.appendChild(row);
+      appendSettingRow(list, {
+        labelText: entry?.labelKey ? t(entry.labelKey) : key,
+        control: checkbox,
+        controlFirst: true,
+        rowDataset: { featureKey: key }
+      });
     }
   }
   renderFeatureFlagsSettings();
@@ -513,5 +503,16 @@ export function initSettingsPanelUI({ doc, el, t, onDesignSettingChange }) {
     renderFeatureFlagsSettings();
   });
 
-  return { renderSettingsRegistry, renderDesignSettings, renderFooterSettings, renderFeatureFlagsSettings };
+  // Section U1: the ONE re-render entry point the language-switch handler
+  // uses -- a future fifth panel added in this file joins automatically,
+  // instead of relying on someone remembering to extend app.js's handler
+  // (forgotten twice before, each time shipping stale-locale labels).
+  function renderAllSettingsPanels() {
+    renderSettingsRegistry();
+    renderDesignSettings();
+    renderFooterSettings();
+    renderFeatureFlagsSettings();
+  }
+
+  return { renderSettingsRegistry, renderDesignSettings, renderFooterSettings, renderFeatureFlagsSettings, renderAllSettingsPanels };
 }

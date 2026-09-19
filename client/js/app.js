@@ -227,23 +227,14 @@ export function initApp(doc, options) {
     // so any caller (event or promise .then) runs after they exist.
     function refreshAfterLocaleChange() {
       applyTranslations(doc);
-      // Section C6 (specs/reviews/spirit-evaluation-triage.md):
-      // renderSettingsRegistry()/renderDesignSettings() read entry.labelKey/
-      // descriptionKey through t() at render time, but applyTranslations()
-      // above only touches elements with a data-i18n attribute -- these two
-      // panels are built imperatively and carry none, so without this call
-      // they'd keep showing the PREVIOUS locale's text until the user
-      // happened to edit or reset a field.
-      renderSettingsRegistry();
-      renderDesignSettings();
-      // Section FC3 (specs/ui/footer-customization.md): same imperative-
-      // render class of bug as the two calls just above -- footer item
-      // labels are read through t() at render time too.
-      renderFooterSettings();
-      // Section GE3 (specs/ui/granular-feature-flags.md): same imperative-
-      // render class of bug as the two calls just above -- feature-flag row
-      // labels are read through t() at render time too.
-      renderFeatureFlagsSettings();
+      // Sections C6/FC3/GE3: the settings panels are built imperatively
+      // (labels read through t() at render time, no data-i18n), so
+      // applyTranslations() above does not touch them. Section U1
+      // (specs/ui/settings-render-unification.md): ONE combined entry point
+      // instead of enumerating each panel -- a new panel added inside
+      // settingsPanelUI.js joins this re-render automatically (forgetting
+      // to extend this list shipped stale-locale labels twice before).
+      renderAllSettingsPanels();
       // Exec review finding 5 (specs/reviews/simplified-ephemeral-mode-SM2-SM3-iter1.md):
       // same class of bug as the C6 fix just above -- the footer toggle's
       // label is set imperatively (footer.advancedModeUnlock/Lock, chosen
@@ -1591,10 +1582,10 @@ export function initApp(doc, options) {
   initServerConfigUI({ doc, el, t, withBusyButton });
 
   // Section G1 (specs/reviews/spirit-evaluation-triage.md): first module
-  // extracted out of this closure -- see settingsPanelUI.js. renderSettingsRegistry/
-  // renderDesignSettings are re-called from the lang-select handler above
-  // (Section C6) after a locale switch, via these returned bindings.
-  const { renderSettingsRegistry, renderDesignSettings, renderFooterSettings, renderFeatureFlagsSettings } = initSettingsPanelUI({
+  // extracted out of this closure -- see settingsPanelUI.js. The panels are
+  // re-rendered after a locale switch via the single renderAllSettingsPanels
+  // binding (Sections C6 + U1) from refreshAfterLocaleChange above.
+  const { renderAllSettingsPanels } = initSettingsPanelUI({
     doc,
     el,
     t,

@@ -559,7 +559,18 @@ Tab-ом на обох хостах. **Решта — поступово, як �
 
 ---
 
-### [ ] D5. Чотири паралельні системи налаштувань
+### [x] D5. Чотири паралельні системи налаштувань ✅ ЗАКРИТО 2026-09-19
+
+**Виправлено рівно в межах пропозиції** («звести лише рендер, сховища як є»,
+Секція U1 у `specs/ui/settings-render-unification.md`): спільний row-скелет
+(`appendSettingRow`/`appendCategoryHeading`) замінив 6 рукописних копій у
+settings/design(3 гілки)/feature-flags; footer лишився рукописним свідомо
+(динамічний order-list — інакший клас, FC3). Головне — клас багу «забули
+додати панель у мовний ре-рендер» (ловився двічі) закритий структурно:
+`renderAllSettingsPanels()` — єдина точка, яку кличе refreshAfterLocaleChange;
+нова панель, додана в settingsPanelUI.js, потрапляє туди автоматично, а
+boundary-тест пінить усі чотири списки. DOM-еквівалентність підтверджена
+рев'ю по всіх місцях. Рев'ю: `specs/reviews/settings-render-unification-U1-iter1.md`.
 
 **Докази.** Співіснують: `settingsRegistry.js` (194 р.),
 `designSettingsRegistry.js` (395 р.), `footerRegistry.js` (254 р.),
