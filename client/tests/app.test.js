@@ -9695,3 +9695,13 @@ describe("fixture fidelity (Section X1, specs/phase5/test-fixture-fidelity.md)",
     expect([...fixtureIds].sort()).toEqual([...realIds].sort());
   });
 });
+
+describe("accessibility (backlog D4)", () => {
+  it("both chat logs are live log regions, so screen readers announce incoming messages", () => {
+    for (const id of ["chat-log", "group-chat-log"]) {
+      const log = document.getElementById(id);
+      expect(log.getAttribute("role")).toBe("log");
+      expect(log.getAttribute("aria-live")).toBe("polite");
+    }
+  });
+});

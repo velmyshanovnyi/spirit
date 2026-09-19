@@ -515,6 +515,16 @@ button:focus-visible {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
+/* Backlog D4: a visible focus indicator on EVERYTHING keyboard-focusable,
+   not just form controls -- links (nav items, footer), summary, and any
+   tabindex-bearing element previously showed nothing on many browsers.
+   The form controls above keep their border+shadow treatment (their
+   own rule wins by setting outline: none). */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 button {
   font: inherit;
   font-weight: 600;

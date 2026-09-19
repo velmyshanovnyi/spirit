@@ -640,8 +640,8 @@
              are shown instead of the plain 1:1 #chat-log while a group is open,
              toggled by openGroupConversation()/enterConversationLobby(). -->
         <h3 id="group-conversation-heading" hidden></h3>
-        <div id="group-chat-log" class="chat-log" hidden aria-live="polite"></div>
-        <div id="chat-log" class="chat-log" aria-live="polite"></div>
+        <div id="group-chat-log" class="chat-log" hidden role="log" aria-live="polite"></div>
+        <div id="chat-log" class="chat-log" role="log" aria-live="polite"></div>
         <!-- Section RF8 (bug report): connection-status moved into the
              fixed top toolbar (Section RF6), far from the input a failed
              send actually happens in -- a send blocked by "no active
