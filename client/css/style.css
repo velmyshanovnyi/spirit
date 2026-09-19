@@ -29,6 +29,10 @@
      client/js/designSettingsRegistry.js. */
   --content-max-width: 1400px;
   --sidebar-width: 300px;
+  /* Backlog D1: minimum touch-target size (WCAG 2.5.5 / Apple HIG 44pt).
+     Applied as min-height/min-width on interactive controls -- the audit
+     found every header control at 33-43px, below any platform guideline. */
+  --control-min: 44px;
 }
 
 :root[data-theme="dark"] {
@@ -153,6 +157,12 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* D1: the header language <select> measured 26px wide -- give every header
+   control a real tappable footprint in both axes. */
+.header-controls select {
+  min-width: var(--control-min);
 }
 
 /* ---------- App body (SD1: persistent sidebar shell) ---------- */
@@ -462,6 +472,7 @@ input[type="text"],
 input[type="password"],
 select {
   width: 100%;
+  min-height: var(--control-min); /* D1 */
   padding: 9px 12px;
   font: inherit;
   color: var(--text);
@@ -483,6 +494,7 @@ button {
   font: inherit;
   font-weight: 600;
   padding: 9px 16px;
+  min-height: var(--control-min);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--card-bg);
@@ -520,6 +532,7 @@ button:disabled {
 .btn-icon {
   padding: 8px 10px;
   line-height: 1;
+  min-width: var(--control-min); /* D1: icon-only buttons must be tappable in both axes */
 }
 
 .btn-row {
