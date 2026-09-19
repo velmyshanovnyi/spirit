@@ -238,280 +238,39 @@ import { initApp } from "../js/app.js";
 
 const ROUTES = ["account", "profile", "server", "room", "conversation", "manage", "history"];
 
-const HTML = `
-  <button id="theme-toggle" type="button"></button>
-  <select id="lang-select"></select>
-  <div id="guest-quick-actions" hidden>
-    <button id="btn-quick-create" type="button"></button>
-    <button id="btn-quick-login" type="button"></button>
-  </div>
-  <div class="settings-wrap">
-  <button id="btn-settings-toggle" type="button" aria-expanded="false"></button>
-  <nav id="settings-menu" hidden>
-    ${ROUTES.filter((r) => r !== "account" && r !== "manage")
-      .map((r) => `<a class="nav-item" data-route="${r}" href="#/${r}">${r}</a>`)
-      .join("")}
-    <a class="nav-item" data-scroll-target="design-settings-list" href="#/server">design</a>
-    <button id="btn-logout" type="button" class="nav-item"></button>
-  </nav>
-  </div>
-  <div id="welcome-modal" hidden>
-    <h2 id="welcome-title" data-i18n="welcome.title"></h2>
-    <p id="welcome-body" data-i18n="welcome.body"></p>
-    <button id="btn-welcome-confirm" type="button"></button>
-  </div>
-  <div id="auto-start-loading"><span data-i18n="status.loading"></span></div>
-  <header id="app-header" hidden></header>
-  <div id="app-body" hidden></div>
+// Section X1 (specs/phase5/test-fixture-fidelity.md, backlog A7): the
+// fixture is GENERATED from the real client/index.html instead of a
+// handwritten copy that silently drifted (the A2/A3 regressions lived in
+// exactly that gap). <script> tags are stripped (jsdom would not execute
+// innerHTML-inserted scripts anyway, but the fixture should not even
+// reference them); everything else is the production markup verbatim.
+import INDEX_HTML from "../index.html?raw";
 
-  <!-- Section SD1 (specs/ui/persistent-sidebar.md): persistent sidebar shell,
-       a SIBLING to the [data-screen] sections below -- outside router.js's
-       mechanism entirely, always in the DOM regardless of route. -->
-  <aside id="app-sidebar">
-    <button id="btn-sidebar-add" type="button" class="nav-item" data-route="manage"></button>
-    <input id="sidebar-search-input" type="text">
-    <button id="chip-filter-all" type="button" class="chip chip-active" data-filter="all"></button>
-    <button id="chip-filter-verified" type="button" class="chip" data-filter="verified"></button>
-    <button id="chip-filter-groups" type="button" class="chip nav-item" data-route="manage"></button>
-    <button id="btn-check-proofs-now" type="button">Перевірити зараз</button>
-    <div id="proofs-check-status"></div>
-    <div id="folder-tree"></div>
-    <div id="contacts-list"></div>
-    <p id="contacts-empty"></p>
-  </aside>
-  <button id="btn-sidebar-back" type="button"></button>
-
-  <section data-screen="account">
-    <button id="btn-account-close" type="button"></button>
-    <h2 id="account-heading" data-i18n="section.account"></h2>
-    <div id="account-login-block" hidden>
-      <select id="profile-select"></select>
-      <input id="unlock-passphrase" type="password">
-      <button id="btn-profile-unlock" type="button">Увійти</button>
-      <button id="link-switch-to-create" type="button">Створити новий акаунт</button>
-    </div>
-    <button id="link-toggle-portable-login" type="button">Увійти за портативним логіном</button>
-    <div id="portable-login-form" hidden>
-      <input id="portable-login-input" type="text">
-      <input id="portable-password-input" type="password">
-      <button id="btn-login-portable" type="button">Увійти за логіном</button>
-      <div id="portable-login-status"></div>
-    </div>
-    <button id="link-toggle-recovery-restore" type="button">Відновити через довірених контактів</button>
-    <div id="recovery-restore-form" hidden>
-      <textarea id="recovery-restore-shares"></textarea>
-      <input id="recovery-restore-passphrase" type="password">
-      <button id="btn-recover-from-shares" type="button">Відновити</button>
-      <div id="recovery-restore-status"></div>
-    </div>
-    <div id="account-create-mode">
-      <button id="btn-create-profile" type="button">Створити профіль</button>
-      <div id="profile-setup" hidden>
-        <input id="nickname-input" type="text">
-        <input id="profile-passphrase" type="password">
-        <input id="portable-account-checkbox" type="checkbox">
-        <div id="portable-login-display"></div>
-        <button id="btn-profile-confirm" type="button">Створити</button>
-      </div>
-      <button id="link-switch-to-login" type="button">Увійти в наявний акаунт</button>
-    </div>
+// Deliberate, visible test-only debt: ~100 legacy tests drive identity
+// creation through #btn-generate, which was removed from the production
+// page long ago (app.js documents its handler as test-fixture-only).
+// Migrating them to the real triggers is future work; until then the
+// button lives HERE, explicitly, instead of hiding inside a handwritten
+// fixture pretending to be the real page.
+const TEST_ONLY_MARKUP = `
     <button id="btn-generate" type="button">Швидкий чат</button>
-    <button id="btn-quick-chat" type="button">Швидкий анонімний чат</button>
-    <div id="profile-status"></div>
-    <div id="backup-step" hidden>
-      <button id="btn-backup-mnemonic" type="button">Показати мнемоніку</button>
-      <input id="keyfile-passphrase" type="password">
-      <button id="btn-backup-keyfile" type="button">Створити keyfile</button>
-      <button id="btn-backup-skip" type="button">Пропустити</button>
-      <div id="mnemonic-display"></div>
-      <div id="keyfile-display"></div>
-    </div>
-    <div id="backup-reminder" hidden>Ви не зробили резервну копію ключа</div>
-  </section>
-
-  <section data-screen="profile">
-    <div>Ваш ID: <span id="pub-key-display" data-i18n="id.none">не згенеровано</span></div>
-    <input id="session-ttl-hours" type="number" value="24">
-    <input id="link-passphrase" type="password">
-    <input id="link-pin" type="text">
-    <button id="btn-link-device" type="button">Прив'язати новий пристрій</button>
-    <div id="link-verification-block" hidden>
-      <div id="link-verification-code"></div>
-      <button id="btn-confirm-device-link" type="button">Коди збігаються -- підтвердити</button>
-      <button id="btn-reject-device-link" type="button">Скасувати</button>
-    </div>
-    <input id="device-local-passphrase" type="password">
-    <input id="device-link-pin" type="text">
-    <button id="btn-join-as-device" type="button">Приєднати цей пристрій</button>
-    <div id="device-verification-block" hidden>
-      <div id="device-verification-code"></div>
-    </div>
-    <div id="device-link-status"></div>
-    <input id="google-client-id" type="text" value="test-client-id">
-    <button id="btn-google-verify" type="button">Підтвердити через Google</button>
-    <div id="google-verify-status"></div>
-    <button id="btn-generate-proof" type="button">Створити доказ</button>
-    <div id="proof-block-display"></div>
-    <input id="proof-url-input" type="text">
-    <button id="btn-add-proof" type="button">Додати</button>
-    <div id="proofs-status"></div>
-    <div id="own-proofs-list"></div>
-    <div id="recovery-card" hidden>
-      <div id="recovery-contacts-list"></div>
-      <select id="recovery-threshold"></select>
-      <input id="recovery-setup-passphrase" type="password">
-      <button id="btn-setup-recovery" type="button">Налаштувати відновлення</button>
-      <div id="recovery-status"></div>
-      <div id="recovery-text-export" hidden></div>
-      <div id="recovery-held-list"></div>
-      <div id="recovery-held-share-text" hidden></div>
-      <div id="recovery-held-share-qr" hidden></div>
-    </div>
-  </section>
-
-  <section data-screen="server">
-    <input id="server-url" type="text" value="http://node.example/index.php">
-    <select id="stun-preset">
-      <option value="google">Google</option>
-      <option value="cloudflare">Cloudflare</option>
-      <option value="mozilla">Mozilla</option>
-      <option value="custom">Custom</option>
-    </select>
-    <input id="stun-url" type="text" value="stun:stun.example:19302">
-    <select id="turn-preset">
-      <option value="custom">Custom</option>
-      <option value="metered-openrelay">Open Relay Project</option>
-    </select>
-    <input id="turn-url" type="text" value="">
-    <input id="turn-username" type="text" value="">
-    <input id="turn-credential" type="password" value="">
-    <input id="force-turn-relay" type="checkbox">
-    <input id="signaling-node-name" type="text">
-    <button id="btn-save-signaling-node" type="button">Зберегти</button>
-    <div id="signaling-nodes-list"></div>
-    <p id="signaling-nodes-empty"></p>
-    <div id="admin-login-form">
-      <input id="admin-password" type="password">
-      <button id="btn-admin-login" type="button">Увійти</button>
-    </div>
-    <div id="admin-status"></div>
-    <div id="admin-config-list" hidden></div>
-    <div id="settings-registry-list"></div>
-    <button id="btn-reset-all-settings" type="button"></button>
-    <div id="design-settings-list"></div>
-    <button id="btn-reset-all-design-settings" type="button"></button>
-    <button id="btn-reset-floating-video" type="button"></button>
-    <h2 data-i18n="footerSettings.heading"></h2>
-    <div id="footer-settings-list"></div>
-    <div id="footer-settings-status"></div>
-    <button id="btn-add-footer-custom-block" type="button"></button>
-    <button id="btn-reset-footer-settings" type="button"></button>
-    <h2 data-i18n="featureFlags.heading"></h2>
-    <div id="feature-flags-list"></div>
-    <button id="btn-reset-feature-flags" type="button"></button>
-  </section>
-
-  <section data-screen="room">
-    <input id="room-id" type="text">
-    <input id="invite-token" type="text">
-    <button id="btn-initiate" type="button">Ініціювати чат</button>
-    <button id="btn-join" type="button">Приєднатися до чату</button>
-    <div id="room-status"></div>
-    <button id="btn-copy-invite" type="button">Скопіювати запрошення</button>
-    <div id="invite-link-display"></div>
-    <div id="invite-status"></div>
-  </section>
-
-  <!-- Section RF4/RF6: fixed chrome OUTSIDE any [data-screen], mirroring
-       the real index.html -- app.js's setConversationChromeVisible toggles
-       these directly (route === "conversation"), not router.js. -->
-  <span id="header-call-controls" hidden>
-    <button id="btn-start-call" type="button"></button>
-    <button id="btn-toggle-camera" type="button"></button>
-    <button id="btn-toggle-mic" type="button"></button>
-  </span>
-  <div id="conversation-toolbar" hidden>
-    <h2 data-i18n="conversation.heading"></h2>
-    <div id="ephemeral-identity-banner" hidden>
-      <span id="ephemeral-nickname-display"></span>
-    </div>
-    <div id="connection-status" data-i18n="conn.none">не з'єднано</div>
-    <div id="invite-bar" hidden>
-      <button id="btn-invite-from-chat" type="button">Скопіювати запрошення</button>
-    </div>
-  </div>
-  <div id="floating-video" hidden>
-    <div id="floating-video-handle"></div>
-    <video id="video-remote" hidden></video>
-    <video id="video-local"></video>
-  </div>
-
-  <section data-screen="conversation">
-    <div id="safety-number-hint" hidden class="banner-warn">
-      <div id="safety-hint-text"></div>
-      <div id="safety-hint-emoji"></div>
-      <button id="btn-safety-toggle-mode" type="button"></button>
-    </div>
-    <div id="file-offer-banner" hidden class="banner-warn">
-      <span id="file-offer-text"></span>
-      <button id="btn-file-accept" type="button">Прийняти</button>
-      <button id="btn-file-reject" type="button">Відхилити</button>
-    </div>
-    <div id="file-transfers"></div>
-    <div id="video-status"></div>
-    <h3 id="group-conversation-heading" hidden></h3>
-    <div id="group-chat-log" hidden></div>
-    <div id="chat-log"></div>
-    <div id="chat-send-status" hidden></div>
-    <input id="message-input" type="text">
-    <button id="btn-send" type="button">Надіслати</button>
-    <input id="file-input" type="file">
-  </section>
-
-  <section data-screen="manage">
-    <div id="groups-card">
-      <input id="group-name" type="text">
-      <div id="group-contacts-list"></div>
-      <button id="btn-create-group" type="button">Створити групу</button>
-      <div id="group-status"></div>
-      <div id="group-invite-links" hidden></div>
-      <div id="groups-list"></div>
-      <p id="groups-empty"></p>
-    </div>
-    <div id="import-card">
-      <select id="import-format">
-        <option value="telegram-json">Telegram (JSON)</option>
-        <option value="vcard">vCard (.vcf)</option>
-        <option value="whatsapp">WhatsApp</option>
-        <option value="whatsapp-txt">WhatsApp (chat history)</option>
-      </select>
-      <input id="import-file-input" type="file">
-      <div id="import-status"></div>
-      <div id="import-pending-list"></div>
-      <p id="import-pending-empty"></p>
-    </div>
-  </section>
-
-  <section data-screen="history">
-    <div id="history-list"></div>
-    <p id="history-empty"></p>
-  </section>
-
-  <footer id="app-footer">
-    <a id="footer-license-link" href="https://github.com/velmyshanovnyi/spirit/blob/main/LICENSE" target="_blank" rel="noopener"></a>
-    <a id="footer-github-link" href="https://github.com/velmyshanovnyi/spirit" target="_blank" rel="noopener"></a>
-    <a id="footer-docs-link" href="https://github.com/velmyshanovnyi/spirit/blob/main/docs/e2ee.md" target="_blank" rel="noopener"></a>
-    <span class="footer-version"><span id="app-version"></span></span>
-    <button id="footer-advanced-toggle" type="button" data-i18n="footer.advancedModeUnlock"></button>
-  </footer>
-  <div id="advanced-mode-modal" hidden>
-    <input id="advanced-mode-password" type="password">
-    <div id="advanced-mode-error"></div>
-    <button id="btn-advanced-mode-unlock" type="button"></button>
-    <button id="btn-advanced-mode-cancel" type="button"></button>
-  </div>
-  <div id="advanced-mode-notice" hidden></div>
 `;
+
+const HTML = (() => {
+  const start = INDEX_HTML.indexOf("<body>");
+  const end = INDEX_HTML.lastIndexOf("</body>");
+  if (start < 0 || end < 0) {
+    // Loud failure (exec-review note): a future <body class="..."> would
+    // otherwise silently fold <head> into every test's fixture.
+    throw new Error("app.test.js fixture: could not find a plain <body> tag in index.html");
+  }
+  const body = INDEX_HTML.slice(start + "<body>".length, end).replace(/<script[\s\S]*?<\/script>/g, "");
+  return body + TEST_ONLY_MARKUP;
+})();
+
+// The body-only slice, for the drift guard below: ids added to <head> are
+// not part of the fixture and must not trip a false drift failure.
+const INDEX_BODY = HTML.slice(0, HTML.length - TEST_ONLY_MARKUP.length);
 
 function fakePublicKey(tag) {
   return { __tag: tag };
@@ -619,7 +378,7 @@ describe("btn-quick-chat: zero-click ephemeral 'spirit mode' (Section F3)", () =
     document.getElementById("btn-quick-chat").click();
 
     await vi.waitFor(() => expect(generateIdentityKeyPair).toHaveBeenCalled());
-    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledWith("http://node.example/index.php", "sender-fp", expect.anything()));
+    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledWith("spirit/public/index.php", "sender-fp", expect.anything()));
     await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
 
     // No manual click on btn-initiate anywhere in this test -- the whole
@@ -767,7 +526,7 @@ describe("force-turn-relay toggle (Section P1(a), specs/phase5/security-hardenin
     document.getElementById("btn-initiate").click();
 
     await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
-    expect(captured.rtcConfig).toEqual({ iceServers: [{ urls: "stun:stun.example:19302" }] });
+    expect(captured.rtcConfig).toEqual({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
     expect("iceTransportPolicy" in captured.rtcConfig).toBe(false);
   });
 
@@ -794,7 +553,7 @@ describe("force-turn-relay toggle (Section P1(a), specs/phase5/security-hardenin
 
     await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
     expect(captured.rtcConfig).toEqual({
-      iceServers: [{ urls: "stun:stun.example:19302" }],
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
       iceTransportPolicy: "relay"
     });
   });
@@ -818,7 +577,7 @@ describe("force-turn-relay toggle (Section P1(a), specs/phase5/security-hardenin
     await vi.waitFor(() => expect(startAsJoiner).toHaveBeenCalled());
     const [opts] = startAsJoiner.mock.calls[0];
     expect(opts.rtcConfig).toEqual({
-      iceServers: [{ urls: "stun:stun.example:19302" }],
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
       iceTransportPolicy: "relay"
     });
   });
@@ -963,8 +722,8 @@ describe("multi-node signaling UI (specs/phase4/multi-node-ui.md)", () => {
     expect(localStorage.getItem("spirit.signalingNodes")).toBeNull();
     expect(document.getElementById("signaling-nodes-list").children.length).toBe(0);
     expect(document.getElementById("signaling-nodes-empty").hidden).toBe(false);
-    expect(document.getElementById("server-url").value).toBe("http://node.example/index.php");
-    expect(document.getElementById("stun-url").value).toBe("stun:stun.example:19302");
+    expect(document.getElementById("server-url").value).toBe("spirit/public/index.php");
+    expect(document.getElementById("stun-url").value).toBe("stun:stun.l.google.com:19302");
     expect(document.getElementById("force-turn-relay").checked).toBe(false);
   });
 
@@ -1174,8 +933,8 @@ describe("server admin panel (read-only, Section S)", () => {
 
     await vi.waitFor(() => expect(document.getElementById("admin-config-list").hidden).toBe(false));
 
-    expect(adminLogin).toHaveBeenCalledWith("http://node.example/index.php", "correct horse");
-    expect(getAdminConfig).toHaveBeenCalledWith("http://node.example/index.php", "signed.token");
+    expect(adminLogin).toHaveBeenCalledWith("spirit/public/index.php", "correct horse");
+    expect(getAdminConfig).toHaveBeenCalledWith("spirit/public/index.php", "signed.token");
     expect(document.getElementById("admin-login-form").hidden).toBe(true);
     const listText = document.getElementById("admin-config-list").textContent;
     expect(listText).toContain("300");
@@ -2101,7 +1860,7 @@ describe("advanced mode (Section SM2+SM3)", () => {
     await vi.waitFor(() => expect(document.getElementById("advanced-mode-modal").hidden).toBe(true));
     expect(document.getElementById("app-sidebar").hidden).toBe(false);
     expect(document.getElementById("guest-quick-actions").hidden).toBe(false);
-    expect(adminLogin).toHaveBeenCalledWith("http://node.example/index.php", "correct horse");
+    expect(adminLogin).toHaveBeenCalledWith("spirit/public/index.php", "correct horse");
     expect(localStorage.getItem("spirit.advancedModeUnlocked")).toBe("1");
     // Exec review finding 4 (simplified-ephemeral-mode-SM2-SM3-iter1.md):
     // the password must not linger in the DOM after a successful unlock,
@@ -3307,6 +3066,7 @@ describe("btn-google-verify", () => {
 
   it("refuses to start Google verification before an account exists", async () => {
     initApp(document, { locale: "uk" });
+    document.getElementById("google-client-id").value = "test-client-id";
     document.getElementById("btn-google-verify").click();
     await vi.waitFor(() =>
       expect(document.getElementById("google-verify-status").textContent).toMatch(/спочатку створіть акаунт/)
@@ -3324,6 +3084,7 @@ describe("btn-google-verify", () => {
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
 
+    document.getElementById("google-client-id").value = "test-client-id";
     document.getElementById("btn-google-verify").click();
     await resolveGoogleGsiLoad();
     await vi.waitFor(() =>
@@ -3347,6 +3108,7 @@ describe("btn-google-verify", () => {
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
 
+    document.getElementById("google-client-id").value = "test-client-id";
     document.getElementById("btn-google-verify").click();
     await resolveGoogleGsiLoad();
     await vi.waitFor(() =>
@@ -3362,7 +3124,6 @@ describe("btn-google-verify", () => {
     document.getElementById("btn-generate").click();
     await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
     document.getElementById("google-client-id").value = "";
-
     document.getElementById("btn-google-verify").click();
     await vi.waitFor(() =>
       expect(document.getElementById("google-verify-status").textContent).toMatch(/Client ID/)
@@ -3458,7 +3219,7 @@ describe("btn-initiate", () => {
 
     document.getElementById("btn-initiate").click();
     await vi.waitFor(() => expect(createInvite).toHaveBeenCalled());
-    expect(createInvite).toHaveBeenCalledWith("http://node.example/index.php", "sender-fp", expect.anything());
+    expect(createInvite).toHaveBeenCalledWith("spirit/public/index.php", "sender-fp", expect.anything());
 
     await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
     expect(document.getElementById("room-id").value).toBe("room1");
@@ -3466,7 +3227,7 @@ describe("btn-initiate", () => {
     const offerSdp = { type: "offer", sdp: "OFFER_SDP" };
     await capturedOnLocalOfferReady(offerSdp);
 
-    expect(createOffer).toHaveBeenCalledWith("http://node.example/index.php", {
+    expect(createOffer).toHaveBeenCalledWith("spirit/public/index.php", {
       senderKey: "sender-fp",
       roomId: "room1",
       inviteToken: "tok1",
@@ -3596,7 +3357,7 @@ describe("btn-join", () => {
 
     document.getElementById("btn-join").click();
     await vi.waitFor(() => expect(getOffer).toHaveBeenCalled());
-    expect(getOffer).toHaveBeenCalledWith("http://node.example/index.php", {
+    expect(getOffer).toHaveBeenCalledWith("spirit/public/index.php", {
       senderKey: "sender-fp",
       roomId: "room1",
       inviteToken: "tok1"
@@ -3608,7 +3369,7 @@ describe("btn-join", () => {
     const answerSdp = { type: "answer", sdp: "ANSWER_SDP" };
     await capturedOnLocalAnswerReady(answerSdp);
 
-    expect(submitAnswer).toHaveBeenCalledWith("http://node.example/index.php", {
+    expect(submitAnswer).toHaveBeenCalledWith("spirit/public/index.php", {
       senderKey: "sender-fp",
       roomId: "room1",
       inviteToken: "tok1",
@@ -5944,7 +5705,7 @@ describe("device linking UI", () => {
       document.getElementById("btn-join-as-device").click();
       await vi.waitFor(() => expect(startAsJoiner).toHaveBeenCalled());
 
-      expect(getOffer).toHaveBeenCalledWith("http://node.example/index.php", {
+      expect(getOffer).toHaveBeenCalledWith("spirit/public/index.php", {
         senderKey: expect.any(String),
         roomId: "room1",
         inviteToken: "tok1"
@@ -6101,7 +5862,7 @@ describe("zero-click invite-link auto-join (Section F4)", () => {
     // No button click anywhere in this test.
     await vi.waitFor(() => expect(generateIdentityKeyPair).toHaveBeenCalled());
     await vi.waitFor(() =>
-      expect(getOffer).toHaveBeenCalledWith("http://node.example/index.php", {
+      expect(getOffer).toHaveBeenCalledWith("spirit/public/index.php", {
         senderKey: "sender-fp",
         roomId: "room-from-link",
         inviteToken: "token-from-link"
@@ -6192,7 +5953,7 @@ describe("zero-click default landing on chat, no registration (Section H5)", () 
 
     // No button click anywhere in this test.
     await vi.waitFor(() => expect(generateIdentityKeyPair).toHaveBeenCalled());
-    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledWith("http://node.example/index.php", "sender-fp", expect.anything()));
+    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledWith("spirit/public/index.php", "sender-fp", expect.anything()));
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
     expect(document.getElementById("invite-bar").hidden).toBe(false); // owns the invite, like btn-quick-chat
   });
@@ -7588,7 +7349,7 @@ describe("contacts and history screens (Sections N3/N4)", () => {
     const row = document.querySelector("#contacts-list .list-row");
     row.querySelector("[data-i18n='contacts.message']").click();
 
-    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledWith("http://node.example/index.php", "sender-fp", expect.anything()));
+    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledWith("spirit/public/index.php", "sender-fp", expect.anything()));
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
     expect(sendPushNotification).not.toHaveBeenCalled();
   });
@@ -7621,7 +7382,7 @@ describe("contacts and history screens (Sections N3/N4)", () => {
     const row = document.querySelector("#contacts-list .list-row");
     row.querySelector("[data-i18n='contacts.message']").click();
 
-    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledWith("http://node.example/index.php", "sender-fp", expect.anything()));
+    await vi.waitFor(() => expect(createInvite).toHaveBeenCalledWith("spirit/public/index.php", "sender-fp", expect.anything()));
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
     await vi.waitFor(() =>
       expect(sendPushNotification).toHaveBeenCalledWith(pushSubscription, { room: "room1", token: "tok1" })
@@ -8018,7 +7779,7 @@ describe("identity verification proofs (Section E)", () => {
     document.getElementById("btn-add-proof").click();
 
     await vi.waitFor(() => expect(addProofToSet).toHaveBeenCalled());
-    expect(fetchProofPageText).toHaveBeenCalledWith("http://node.example/index.php", "profile-fp", "https://example.com/me");
+    expect(fetchProofPageText).toHaveBeenCalledWith("spirit/public/index.php", "profile-fp", "https://example.com/me");
     expect(addProofToSet).toHaveBeenCalledWith(
       { __tag: "profile-priv" },
       null,
@@ -9887,5 +9648,50 @@ describe("GC4: full-mesh auto-connect via relay (specs/phase4/group-chats.md)", 
     await vi.waitFor(() => expect(newChannel.send).toHaveBeenCalled());
     const announced = decodeSent(newChannel.send.mock.calls[0][0]);
     expect(announced.body).toEqual({ type: "identity-announce" });
+  });
+});
+
+describe("real-trigger unlock (Section X2, specs/phase5/test-fixture-fidelity.md)", () => {
+  // Backlog A7's core complaint: the unlock feature's REAL trigger is a
+  // click on a production .nav-item, which the handwritten fixture never
+  // carried faithfully. Now the fixture IS the production markup, so this
+  // pins the actual A2 contract: a user click opens the password modal,
+  // programmatic navigation does not.
+  it("clicking the real locked .nav-item opens the password modal; programmatic navigation does not", async () => {
+    localStorage.removeItem("spirit.advancedModeUnlocked"); // locked (production default)
+    initApp(document, { locale: "uk" });
+    const modal = document.getElementById("advanced-mode-modal");
+    expect(modal.hidden).toBe(true);
+
+    // Programmatic navigation to a restricted route: toast path, NO modal (A2).
+    location.hash = "#/server";
+    window.dispatchEvent(new Event("hashchange"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(modal.hidden).toBe(true);
+
+    // The real production trigger: a trusted-like click on the nav item.
+    const navItem = document.querySelector('.nav-item[data-route="server"]');
+    expect(navItem).not.toBeNull();
+    navItem.click();
+    await vi.waitFor(() => expect(modal.hidden).toBe(false));
+  });
+});
+
+describe("fixture fidelity (Section X1, specs/phase5/test-fixture-fidelity.md)", () => {
+  it("the fixture contains the REAL notifications card (absent from the old handwritten markup)", () => {
+    expect(document.getElementById("notifications-card")).not.toBeNull();
+    expect(document.getElementById("notifications-enabled")).not.toBeNull();
+  });
+
+  it("drift guard: fixture ids == real index.html ids + the explicit test-only list", () => {
+    const realIds = new Set([...INDEX_BODY.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
+    const fixtureIds = new Set([...HTML.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
+    const TEST_ONLY_IDS = ["btn-generate"];
+    for (const id of TEST_ONLY_IDS) {
+      expect(fixtureIds.has(id)).toBe(true);
+      expect(realIds.has(id)).toBe(false);
+      fixtureIds.delete(id);
+    }
+    expect([...fixtureIds].sort()).toEqual([...realIds].sort());
   });
 });
