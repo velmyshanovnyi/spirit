@@ -147,3 +147,30 @@ renderImportedContactsScreen — const-и попередніх init-ів). Ви�
 - [x] **Tests**: наявні contacts/proofs-сценарії `app.test.js` без змін і зелені; новий `client/tests/contactsUI.test.js` — модуль існує, `initContactsUI` повертає обидві функції, рендер порожнього списку ховає/показує empty-стан і рендерить контакт із кнопкою «Написати» (RED до створення).
 - [x] **Impl**: новий `client/js/contactsUI.js`; `client/js/app.js` — три блоки замінено одним викликом init після initImportedContactsUI.
 - [x] **Exec review**: iter1 — [reviews/app-decomposition-R5-iter1.md](../reviews/app-decomposition-R5-iter1.md). PASS, 0 знахідок; жива перевірка (включно з ghost-row + navigate-thunk) — в артефакті.
+
+## Секція R6: верифікація ідентичності (власні proof-и + Google) → `client/js/identityVerificationUI.js`
+
+Обсяг (~180 рядків, три блоки app.js): (1) `setGoogleStatus`; (2) кластер
+власних proof-ів — `setProofsStatus`, `lastGeneratedProofBlockText`/
+`ownProofSetCache`, `resetOwnProofsState`, `loadOwnProofSet`,
+`renderOwnProofsList`, обробники `btn-generate-proof`/`btn-add-proof`/
+`btn-check-proofs-now`, періодичний recheck-інтервал; (3) Google-верифікація —
+`ensureGoogleGsiLoaded` + обробник `btn-google-verify`. Module-scope
+`ownProofSetKey` переїжджає в модуль і експортується (app.js імпортує —
+один уживаний колсайт у handleChatMessage, без дубля).
+
+Межа: назовні `resetOwnProofsState` (7 прямих викликів у identity-establishing
+точках + передача за значенням у recoveryUI) і `renderOwnProofsList` (onScreenChange) —
+їх повертає `initIdentityVerificationUI(...)`.
+
+TDZ-аналіз: `resetOwnProofsState` передається за значенням у
+`initRecoveryUI` синхронно (~990), тому init цього модуля ставиться
+ПЕРЕД initRecoveryUI; його власна залежність `checkContactProofs` — const із
+`initContactsUI` (~1018, пізніше) — ін'єктується лінивим thunk-ом
+`() => checkContactProofs()` (прийом R1/R5; викликається лише з кліку або
+інтервалу — після завершення синхронного initApp). Решта залежностей
+(doc/el/t/state/withBusyButton) на той момент існують.
+
+- [x] **Tests**: наявні proofs/google-сценарії `app.test.js` (Секції E, 2c/2d, C1) без змін і зелені; новий `client/tests/identityVerificationUI.test.js` — модуль існує, init повертає обидві функції, `renderOwnProofsList` рендерить proof-и зі сховища з кнопкою revoke (RED до створення).
+- [x] **Impl**: новий `client/js/identityVerificationUI.js`; `client/js/app.js` — три блоки замінено одним викликом init перед initRecoveryUI; `ownProofSetKey` імпортується.
+- [x] **Exec review**: iter1 — [reviews/app-decomposition-R6-iter1.md](../reviews/app-decomposition-R6-iter1.md). PASS, 0 знахідок; покриття й спека↔код добрані автором; жива перевірка — в артефакті.
