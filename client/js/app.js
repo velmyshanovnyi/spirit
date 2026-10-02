@@ -926,6 +926,64 @@ export function initApp(doc, options) {
   el("btn-room-copy-invite").addEventListener("click", (event) => {
     if (copyInviteLink()) showCopiedTooltip(event.currentTarget);
   });
+
+  // Room-first RF4 (specs/ui/room-first.md): the chat drawer. Phones start
+  // collapsed; an incoming message/file auto-expands it UNLESS the user
+  // collapsed it themselves this session (then it only counts on the badge).
+  // From 900px up CSS keeps it open regardless of data-state, so the
+  // "effectively collapsed" check consults the media query.
+  let drawerUserCollapsed = false;
+  let drawerUnread = 0;
+  function isDrawerEffectivelyCollapsed() {
+    const drawer = el("room-chat-drawer");
+    if (!drawer) return false;
+    const wide = doc.defaultView.matchMedia?.("(min-width: 900px)")?.matches ?? false;
+    return !wide && drawer.dataset.state !== "expanded";
+  }
+  function renderDrawerUnread() {
+    const badge = el("room-chat-unread");
+    if (!badge) return;
+    badge.hidden = drawerUnread === 0;
+    badge.textContent = drawerUnread === 0 ? "" : String(drawerUnread);
+  }
+  function setChatDrawer(expanded, { byUser = false } = {}) {
+    const drawer = el("room-chat-drawer");
+    if (!drawer) return;
+    drawer.dataset.state = expanded ? "expanded" : "collapsed";
+    for (const id of ["btn-room-chat", "room-chat-handle"]) {
+      el(id)?.setAttribute("aria-expanded", String(expanded));
+    }
+    if (expanded) {
+      drawerUnread = 0;
+      renderDrawerUnread();
+      // Focus only on a USER-initiated expand (button/handle): an auto-expand
+      // on an incoming message must not steal focus from another field or
+      // pop the on-screen keyboard over the stage (exec review).
+      if (byUser) el("message-input")?.focus();
+    } else if (byUser) {
+      drawerUserCollapsed = true;
+    }
+  }
+  function noteIncomingForDrawer() {
+    if (!isDrawerEffectivelyCollapsed()) return;
+    if (drawerUserCollapsed) {
+      drawerUnread += 1;
+      renderDrawerUnread();
+      return;
+    }
+    setChatDrawer(true);
+  }
+  for (const id of ["btn-room-chat", "room-chat-handle"]) {
+    el(id)?.addEventListener("click", () => {
+      const expanded = el("room-chat-drawer").dataset.state === "expanded";
+      setChatDrawer(!expanded, { byUser: true });
+    });
+  }
+  el("room-chat-drawer")?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && el("room-chat-drawer").dataset.state === "expanded") {
+      setChatDrawer(false, { byUser: true });
+    }
+  });
   // Room-first RF1 (specs/ui/room-first.md): short room id + E2EE lock in
   // the toolbar. #room-id is filled by both the initiator (createInvite)
   // and the joiner (invite-link prefill) before the lobby renders.
@@ -1730,6 +1788,7 @@ export function initApp(doc, options) {
     setDynamicText(el("file-offer-text"), t("fileTransfer.offer", { name: offer.name, size: formatFileSize(offer.size) }));
     banner.hidden = false;
     banner.dataset.fileId = offer.fileId;
+    noteIncomingForDrawer();
   }
 
   // Called once the last chunk of an accepted transfer has been verified
@@ -1938,6 +1997,7 @@ export function initApp(doc, options) {
       }
       const receivedAt = Date.now();
       appendChat(text, "in", receivedAt);
+      noteIncomingForDrawer();
       if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
         await appendMessage(state.identityKeyPair.vaultKey, state.senderKey, state.peerFingerprint, {
           direction: "in",
@@ -2179,6 +2239,7 @@ export function initApp(doc, options) {
       // group conversation shows who said what (unlike 1:1 chat where the
       // peer is implicit).
       appendGroupChat(control.text, "in", senderLabel, receivedAt);
+      noteIncomingForDrawer();
       // Profile mode only (ephemeral has no vault). Sender attribution is
       // embedded in the stored `text` itself (JSON-encoded) since
       // historyStore.js's schema is deliberately unchanged (GC1) -- it only

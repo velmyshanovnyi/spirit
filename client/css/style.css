@@ -1274,6 +1274,99 @@ body.account-modal-suppressed [data-screen="account"].modal-screen {
   color: var(--accent-contrast);
 }
 
+/* Room-first RF4: the chat drawer. Phones: collapsed shows only the handle;
+   >= 900px: the conversation card becomes a two-column grid and the drawer
+   is the always-open right panel (data-state ignored). */
+.room-chat-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-2);
+}
+.room-chat-handle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: var(--control-min);
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.room-chat-grip {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+}
+/* Scoped to phones so no desktop rule has to undo it (display: revert would
+   reset .chat-log's flex to the UA block). */
+@media (max-width: 899.98px) {
+  .room-chat-drawer[data-state="collapsed"] > :not(.room-chat-handle) {
+    display: none;
+  }
+}
+.room-chat-unread {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: #d84c4c;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+}
+#btn-room-chat {
+  position: relative;
+}
+@media (min-width: 900px) {
+  [data-screen="conversation"] > .card {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr);
+    column-gap: var(--space-4);
+    row-gap: 0; /* .card's gap would leave a 12px gutter under the empty hint row (review) */
+    align-items: start;
+  }
+  [data-screen="conversation"] > .card > #safety-number-hint:not([hidden]) {
+    margin-bottom: var(--space-3);
+  }
+  /* Explicit placement -- auto-placement would drop #room-controls into
+     the right column (live check). Row 1 is the (often hidden) safety hint. */
+  [data-screen="conversation"] > .card > #safety-number-hint {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+  [data-screen="conversation"] > .card > #room-stage {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  [data-screen="conversation"] > .card > #room-controls {
+    grid-column: 1;
+    grid-row: 3;
+  }
+  .room-chat-drawer {
+    grid-column: 2;
+    grid-row: 2 / span 2;
+    border-top: 0;
+    padding-top: 0;
+  }
+  .room-chat-handle,
+  #btn-room-chat {
+    display: none;
+  }
+}
+
 .room-stage-placeholder {
   position: absolute;
   inset: 0;

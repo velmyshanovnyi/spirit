@@ -8746,6 +8746,76 @@ describe("file transfer (Section FT2, specs/phase4/file-transfer.md)", () => {
     expect(document.getElementById("file-offer-banner").hidden).toBe(true);
   });
 
+  // Room-first RF4 (specs/ui/room-first.md): the chat drawer. An incoming
+  // file offer is the "incoming event" driven here (same hook as an incoming
+  // chat message: noteIncomingForDrawer).
+  it("Room-first RF4: the drawer wraps the chat, starts collapsed, and the «Чат» button toggles it (focusing the input on expand)", async () => {
+    await fileTransferChat();
+    const drawer = document.getElementById("room-chat-drawer");
+    expect(drawer.dataset.state).toBe("collapsed");
+    for (const id of ["chat-log", "message-input", "file-offer-banner", "file-transfers", "btn-send"]) {
+      expect(drawer.contains(document.getElementById(id))).toBe(true);
+    }
+    const toggle = document.getElementById("btn-room-chat");
+    expect(document.getElementById("room-controls").contains(toggle)).toBe(true);
+    toggle.click();
+    expect(drawer.dataset.state).toBe("expanded");
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(document.activeElement).toBe(document.getElementById("message-input"));
+    toggle.click();
+    expect(drawer.dataset.state).toBe("collapsed");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("Room-first RF4: an incoming event auto-expands a drawer the user never touched, with no unread badge", async () => {
+    const { captured } = await fileTransferChat();
+    expect(document.getElementById("room-chat-drawer").dataset.state).toBe("collapsed");
+    // Exec review (RF4 iter1): an auto-expand must NOT steal focus from
+    // whatever the user is typing into.
+    document.getElementById("nickname-input").focus();
+    decryptMessage.mockResolvedValueOnce(
+      JSON.stringify({ type: "file-offer", fileId: "drawer-1", name: "a.bin", size: 10, mimeType: "application/octet-stream", sha256: "x", totalChunks: 1 })
+    );
+    await captured.onMessage("ENCRYPTED_OFFER");
+    await vi.waitFor(() => expect(document.getElementById("file-offer-banner").hidden).toBe(false));
+    expect(document.getElementById("room-chat-drawer").dataset.state).toBe("expanded");
+    expect(document.getElementById("room-chat-unread").hidden).toBe(true);
+    expect(document.activeElement).toBe(document.getElementById("nickname-input"));
+  });
+
+  it("Room-first RF4: once the user collapsed the drawer themselves, incoming events only count on the badge; expanding clears it", async () => {
+    const { captured } = await fileTransferChat();
+    const toggle = document.getElementById("btn-room-chat");
+    toggle.click(); // expand
+    toggle.click(); // user collapses -- their choice stands
+    decryptMessage.mockResolvedValueOnce(
+      JSON.stringify({ type: "file-offer", fileId: "drawer-1", name: "a.bin", size: 10, mimeType: "application/octet-stream", sha256: "x", totalChunks: 1 })
+    );
+    await captured.onMessage("ENCRYPTED_OFFER");
+    await vi.waitFor(() => expect(document.getElementById("file-offer-banner").hidden).toBe(false));
+    expect(document.getElementById("room-chat-drawer").dataset.state).toBe("collapsed");
+    const badge = document.getElementById("room-chat-unread");
+    expect(badge.hidden).toBe(false);
+    expect(badge.textContent).toBe("1");
+    decryptMessage.mockResolvedValueOnce(
+      JSON.stringify({ type: "file-offer", fileId: "drawer-2", name: "b.bin", size: 10, mimeType: "application/octet-stream", sha256: "x", totalChunks: 1 })
+    );
+    await captured.onMessage("ENCRYPTED_OFFER_2");
+    await vi.waitFor(() => expect(badge.textContent).toBe("2"));
+    toggle.click();
+    expect(document.getElementById("room-chat-drawer").dataset.state).toBe("expanded");
+    expect(badge.hidden).toBe(true);
+    expect(badge.textContent).toBe("");
+  });
+
+  it("Room-first RF4: Escape inside the drawer collapses it", async () => {
+    await fileTransferChat();
+    document.getElementById("btn-room-chat").click();
+    expect(document.getElementById("room-chat-drawer").dataset.state).toBe("expanded");
+    document.getElementById("message-input").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(document.getElementById("room-chat-drawer").dataset.state).toBe("collapsed");
+  });
+
   it("clicking Accept sends file-accept, and only then does the sender begin streaming file-chunk", async () => {
     const { captured, channel } = await fileTransferChat();
 

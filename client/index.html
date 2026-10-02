@@ -624,12 +624,10 @@
           <div id="safety-hint-emoji" class="safety-hint-emoji" aria-hidden="true"></div>
           <button id="btn-safety-toggle-mode" type="button" class="btn-link"></button>
         </div>
-        <div id="file-offer-banner" hidden class="banner-warn">
-          <span id="file-offer-text"></span>
-          <button id="btn-file-accept" type="button" data-i18n="fileTransfer.accept">Прийняти</button>
-          <button id="btn-file-reject" type="button" data-i18n="fileTransfer.reject">Відхилити</button>
-        </div>
-        <div id="file-transfers" class="list-area"></div>
+        <!-- Room-first RF4 (specs/ui/room-first.md): everything text/file lives
+             in the chat drawer -- collapsed by default on phones (handle +
+             #btn-room-chat toggle it), always open as the right-hand panel
+             from 900px up (CSS ignores data-state there). -->
         <!-- Room-first RF1 (specs/ui/room-first.md): the "stage" -- the
              video tiles (#floating-video) dock in here by default (the
              docked videoMode is now the default; app.js's applyVideoDockMode
@@ -662,8 +660,17 @@
         <div id="room-controls" class="room-controls">
           <button id="btn-toggle-mic" type="button" class="btn-room" aria-pressed="false" aria-label="Мікрофон" data-i18n-title="video.toggleMic" title="Мікрофон"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0"></path><path d="M12 18v3"></path></svg></button>
           <button id="btn-toggle-camera" type="button" class="btn-room" aria-pressed="false" aria-label="Камера" data-i18n-title="video.toggleCamera" title="Камера"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="13" height="10" rx="2"></rect><path d="M16 10l5-3v10l-5-3"></path></svg></button>
+          <button id="btn-room-chat" type="button" class="btn-room" aria-controls="room-chat-drawer" aria-expanded="false" aria-label="Чат" data-i18n-title="nav.conversation" title="Чат"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z"></path></svg><span id="room-chat-unread" class="room-chat-unread" hidden></span></button>
           <button id="btn-room-leave" type="button" class="btn-room btn-room-leave" aria-label="Вийти з кімнати" data-i18n-title="room.leave" title="Вийти з кімнати"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12"></path><path d="M18 6 6 18"></path></svg></button>
         </div>
+        <div id="room-chat-drawer" class="room-chat-drawer" data-state="collapsed">
+        <button id="room-chat-handle" type="button" class="room-chat-handle" aria-controls="room-chat-drawer" aria-expanded="false"><span class="room-chat-grip" aria-hidden="true"></span><span data-i18n="nav.conversation">Чат</span></button>
+        <div id="file-offer-banner" hidden class="banner-warn">
+          <span id="file-offer-text"></span>
+          <button id="btn-file-accept" type="button" data-i18n="fileTransfer.accept">Прийняти</button>
+          <button id="btn-file-reject" type="button" data-i18n="fileTransfer.reject">Відхилити</button>
+        </div>
+        <div id="file-transfers" class="list-area"></div>
 
         <!-- Section GC3 (specs/phase4/group-chats.md), design point 5: a
              group conversation is routed into this SAME screen (state.activeGroupId)
@@ -685,6 +692,7 @@
           <input id="file-input" type="file" hidden>
           <input id="message-input" type="text" data-i18n-placeholder="chat.placeholder">
           <button id="btn-send" type="button" class="btn-primary" data-i18n="btn.send">Надіслати</button>
+        </div>
         </div>
       </section>
     </section>

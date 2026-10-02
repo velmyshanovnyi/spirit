@@ -124,12 +124,19 @@
 - `#room-chat-drawer` обгортає chat-log/input/file-елементи; стани
   `data-state="collapsed|expanded"`; ручка + кнопка «Чат»; на desktop
   ≥ 900px завжди expanded як права панель.
-- Авто-expand при вхідному `chat`/`file-offer`, якщо collapsed; інакше
-  лічильник `#room-chat-unread` (скидається при expand).
-- Фокус у `#message-input` при expand; Escape → collapse (на mobile).
-- [ ] **Tests**: `app.test.js` — вхідне повідомлення у collapsed-стані робить expand; при expanded — лічильник не росте; «Чат» toggle; `settingsPanelUnified`/drift-guard — id-сети.
-- [ ] **Impl**: markup, CSS, `app.js` (handleChatMessage: один виклик `noteIncomingForDrawer()`), i18n.
-- [ ] **Exec review**: iter1.
+- Вхідне (`chat` 1:1, групове, `file-offer`) → `noteIncomingForDrawer()`:
+  якщо шухляда «ефективно згорнута» (data-state ≠ expanded І viewport
+  < 900px за `matchMedia`) — авто-expand, ЯКЩО користувач сам її не
+  згортав у цій сесії; якщо згортав (його вибір — напр. під час відео) —
+  лише лічильник `#room-chat-unread` (скидається при expand).
+- Фокус у `#message-input` при expand; Escape всередині шухляди → collapse
+  (рахується як «згорнув сам»). Кнопка «Чат» і ручка мають `aria-expanded`.
+- Desktop ≥ 900px: картка розмови — grid 3fr/2fr, шухляда — права
+  колонка, завжди відкрита; кнопка «Чат» і ручка приховані.
+- Жодних нових i18n-ключів: підпис — наявний `nav.conversation` («Чат»).
+- [x] **Tests**: `app.test.js` — шухляда обгортає chat-log/input/file-елементи й стартує collapsed; «Чат» toggle з `aria-expanded` і фокусом; вхідний file-offer авто-розгортає нечіпану шухляду без бейджа; після згортання користувачем — бейдж 1→2, expand скидає; Escape згортає. Drift-guard — нові id.
+- [x] **Impl**: markup (обгортка + кнопка «Чат» з бейджем), CSS (collapsed/grid), `app.js` (`setChatDrawer`/`noteIncomingForDrawer`, три колсайти: 1:1 chat, group chat, file-offer).
+- [x] **Exec review**: iter1 — [reviews/room-first-RF4-iter1.md](../reviews/room-first-RF4-iter1.md) FAIL (focus-steal, revert, grid-placement — виправлено); iter2 — [reviews/room-first-RF4-iter2.md](../reviews/room-first-RF4-iter2.md) PASS; жива перевірка (телефон/десктоп) — в iter2.
 
 ## Секція RF5: header на маршруті `conversation`
 
