@@ -237,3 +237,36 @@ TDZ-аналіз: залежності модуля — лише doc/el/t/state;
 - [x] **Tests**: наявні сценарії `app.test.js` (PN4 visibility) без змін і зелені; новий `client/tests/notificationsUI.test.js` — модуль існує, `ownPushSubscriptionKey` експортується, init повертає `renderNotificationsCard`, картка ховається без vaultKey і показується з ним; change-обробник без Notification API знімає чекбокс і пише notSupported (RED до створення).
 - [x] **Impl**: новий `client/js/notificationsUI.js`; `client/js/app.js` — два блоки й хелпер замінено одним викликом init; імпорти прунено.
 - [x] **Exec review**: iter1 — [reviews/app-decomposition-R8-iter1.md](../reviews/app-decomposition-R8-iter1.md). PASS, 0 знахідок; жива перевірка — в артефакті.
+
+## Секція R9: надсилання повідомлень (chat-send) → `client/js/chatSend.js`
+
+Обсяг (~95 рядків, один суцільний блок app.js): `sendSingleChatMessage`,
+`flushPendingOutgoingMessages`, `sendChatMessage`, `sendGroupMessage`.
+Залежності: stateless напряму (`encryptMessage`/e2ee, `encodeRatchetPayload`/
+ratchetChain, `appendMessage`/historyStore); ін'єктуються el, t, state
+(той самий об'єкт: `pendingOutgoingMessages`, `channel`, `sessionKey`,
+`peers`, `identityKeyPair`, `senderKey`, `peerFingerprint`, `activeGroupId`),
+і замикання `setStatus`, `setVideoStatus`, `setDynamicText`, `appendChat`,
+`appendGroupChat`, `clearPendingBadge`, `nextSendMessageKey` (ratchet-крок
+лишається в app.js — він тримає chain-стан).
+
+Межа: назовні `flushPendingOutgoingMessages` (onChannelOpen у
+wireChannelCallbacks + два колсайти після деривації session key),
+`sendChatMessage` і `sendGroupMessage` (btn-send / Enter) — їх повертає
+`initChatSend(...)`.
+
+TDZ-аналіз: init ставиться на місце теперішнього блоку (~3290): усі
+ін'єктовані const-и (`setStatus` 595, `appendChat` 718, `appendGroupChat`
+788, `setVideoStatus` 1886) визначені раніше; `clearPendingBadge` і
+`nextSendMessageKey` — hoisted. Три зовнішні колсайти flush виконуються лише
+з callback-ів під час сесії; btn-send/Enter-обробники стоять нижче init.
+Імпорт app.js, що пруниться: `encodeRatchetPayload` (ratchetChain.js);
+`appendMessage`/`encryptMessage` лишаються (інші вживання).
+
+Вербатим-нотатка (не змінювати в цій секції): Enter у полі вводу викликає
+`sendChatMessage` і в груповому режимі (на відміну від btn-send, який гілкує
+на `sendGroupMessage`) — pre-existing, записано в backlog.
+
+- [x] **Tests**: наявні send/queue/group-сценарії `app.test.js` без змін і зелені; новий `client/tests/chatSend.test.js` — модуль існує, init повертає три функції; без каналу повідомлення стає в чергу з бейджем/статусом; flush із каналом і ключем надсилає ratchet-payload через ін'єктований `nextSendMessageKey` і спорожнює чергу; `sendGroupMessage` розсилає всім peer-ам групи з живим каналом і рендерить один раз (RED до створення).
+- [x] **Impl**: новий `client/js/chatSend.js`; `client/js/app.js` — блок замінено одним викликом init; імпорт прунено.
+- [x] **Exec review**: iter1 — [reviews/app-decomposition-R9-iter1.md](../reviews/app-decomposition-R9-iter1.md). PASS, 0 знахідок (1 порада щодо тесту — застосовано); жива перевірка — в артефакті.

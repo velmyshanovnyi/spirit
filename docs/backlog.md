@@ -229,9 +229,14 @@ profile/account-обробники — селектор профілів (MRU), 
 portable-login, unlock, create, backup mnemonic/keyfile/skip (~215 рядків) →
 `client/js/profileUI.js`; app.js 3707→3493. **Секція R8 (2026-10-02):**
 push-нотифікації — картка + enable-флоу (~70 рядків) →
-`client/js/notificationsUI.js`; app.js 3493→3418. Разом R1–R8: 5095→3418
-(−33%). Залишок — переплетене ядро (WebRTC/handleChatMessage/дзвінки/роутінг) +
-один дрібний кластер (chat-send). Кандидата
+`client/js/notificationsUI.js`; app.js 3493→3418. **Секція R9 (2026-10-02):**
+chat-send (sendSingleChatMessage/flush/sendChatMessage/sendGroupMessage, ~95 рядків)
+→ `client/js/chatSend.js`; app.js 3582→3478 (між R8 і R9 room-first RF1–RF5
+додали ~160 рядків UI-логіки). Разом R1–R9: 5095→3478 (−32%). Залишок — лише
+переплетене ядро (WebRTC/handleChatMessage/дзвінки/роутінг): подальший винос —
+cut-and-stitch, не verbatim; окремий підхід/спека. Вербатим-нотатка з R9:
+Enter у полі вводу викликає `sendChatMessage` і в груповому режимі (btn-send
+гілкує на `sendGroupMessage`) — дрібний pre-existing баг, кандидат на one-line фікс. Кандидата
 «дзвінки/медіа» розвідано й відкладено: НЕ суцільний домен (renegotiation всередині
 handleChatMessage, video-dock у рендер-замиканні) — його винос буде cut-and-stitch,
 не verbatim-move; потребує окремого підходу.
