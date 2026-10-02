@@ -392,6 +392,27 @@ API-key флоу (вимагає реєстрації — суперечить �
 лише чесне пояснення в UI, що готового безкоштовного варіанту без
 реєстрації наразі немає.
 
+### [ ] A13. 🟠 Portable-акаунт: кнопки backup (мнемоніка / keyfile) падають з «key is not extractable»
+
+**Докази.** Знайдено при живій перевірці R7 (2026-10-02, kolomedi). Створення
+portable-акаунта (`portable-account-checkbox` → `btn-profile-confirm`) іде через
+`adoptScalarIdentity` → `adoptIdentity` (`client/js/profile.js`), який повертає
+**non-extractable** CryptoKey (так само, як `loadPermanentProfile`, свідомо). Але
+backup-крок після створення показує ті самі `btn-backup-mnemonic` /
+`btn-backup-keyfile`, що й для random-акаунта — обидва викликають
+`exportPrivateKeyScalar` / `exportPrivateKeyRaw` і падають з
+`Failed to execute 'exportKey' on 'SubtleCrypto': key is not extractable`.
+Помилка виводиться лише в глобальний статус-бар (`withBusyButton` → `setStatus`),
+не поруч із кнопкою — користувач на екрані акаунта її не бачить.
+
+**Варіанти.** (а) для portable-акаунта ховати mnemonic/keyfile-кнопки — його
+backup і є login-рядок `spirit<name><tail>` + пароль (вже показаний у
+`portable-login-display`); (б) тримати extractable-копію до завершення
+backup-кроку (як `createPermanentProfile`). Рекомендовано (а) — мінімальна
+зміна, узгоджена з моделлю H3/H4 (акаунт відновлюваний на будь-якому вузлі).
+Окремо: помилки `withBusyButton` на екрані акаунта варто дублювати в
+`profile-status`.
+
 ---
 
 ## 🟡 P2 — технічний борг
