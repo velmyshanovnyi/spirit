@@ -15,6 +15,7 @@ export default {
   "nav.history": "Cronologia",
   "menu.settings": "Impostazioni",
   "menu.logout": "Esci",
+  "menu.saveAccount": "Salva account",
   "quick.create": "Crea",
   "quick.login": "Accedi",
   "btn.close": "Chiudi",

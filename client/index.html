@@ -39,7 +39,7 @@
        symptom (account modal, then the loading gap, then the
        enterConversationLobby gap) one at a time. -->
   <header id="app-header" class="app-header" hidden>
-    <div class="brand"><span class="logo">S</span> Spirit</div>
+    <div class="brand"><span class="logo">S</span> <span class="brand-text">Spirit</span></div>
     <div id="guest-quick-actions" class="header-controls">
       <button id="btn-quick-create" type="button" class="btn-link" data-i18n="quick.create">Створити</button>
       <button id="btn-quick-login" type="button" class="btn-link" data-i18n="quick.login">Увійти</button>
@@ -52,8 +52,16 @@
              circle with radiating spoke lines -- the previous icon read as
              a sun/asterisk at 20px rather than the universally recognized
              "settings" shape. -->
-        <button id="btn-settings-toggle" type="button" class="btn-icon" data-i18n-title="menu.settings" aria-haspopup="true" aria-expanded="false" aria-label="Settings"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+        <button id="btn-settings-toggle" type="button" class="btn-icon" data-i18n-title="menu.settings" aria-haspopup="true" aria-expanded="false" aria-label="Settings" data-icon="gear"><span class="icon-more" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="1.5"></circle><circle cx="12" cy="12" r="1.5"></circle><circle cx="19" cy="12" r="1.5"></circle></svg></span><svg class="icon-gear" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
         <nav id="settings-menu" class="app-nav" aria-label="Screens" hidden>
+          <!-- Room-first RF5: on the conversation route app.js moves
+               #lang-select and #theme-toggle in here (so the header is just
+               the logo and this menu), and offers the one upgrade an
+               ephemeral visitor has. -->
+          <div id="menu-quick-settings" class="menu-quick-settings" hidden></div>
+          <a id="menu-save-account" class="nav-item" href="#/account" hidden>
+            <span class="nav-icon" aria-hidden="true">☆</span><span data-i18n="menu.saveAccount">Зберегти акаунт</span>
+          </a>
           <a class="nav-item" data-route="profile" href="#/profile">
             <span class="nav-icon" aria-hidden="true">☺</span><span data-i18n="nav.profile">Профіль</span>
           </a>

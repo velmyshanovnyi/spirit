@@ -15,6 +15,7 @@ export default {
   "nav.history": "Historikk",
   "menu.settings": "Innstillinger",
   "menu.logout": "Logg ut",
+  "menu.saveAccount": "Lagre konto",
   "quick.create": "Opprett",
   "quick.login": "Logg inn",
   "btn.close": "Lukk",

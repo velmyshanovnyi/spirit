@@ -15,6 +15,7 @@ export default {
   "nav.history": "Vesture",
   "menu.settings": "Iestatijumi",
   "menu.logout": "Izrakstities",
+  "menu.saveAccount": "Saglabāt kontu",
   "quick.create": "Izveidot",
   "quick.login": "Pieteikties",
   "btn.close": "Aizvert",

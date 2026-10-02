@@ -167,6 +167,28 @@ body {
   letter-spacing: 0.02em;
 }
 
+/* Room-first RF5: conversation route = logo + "more" menu only. */
+body.room-chrome .brand .brand-text {
+  display: none;
+}
+#btn-settings-toggle .icon-more {
+  display: none;
+}
+#btn-settings-toggle[data-icon="more"] .icon-more {
+  display: inline-flex;
+}
+#btn-settings-toggle[data-icon="more"] .icon-gear {
+  display: none;
+}
+/* Not a .nav-item on purpose: the menu's item click handler closes the menu
+   on any .nav-item, which would tear down the language <select> (review). */
+.settings-wrap .menu-quick-settings {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
 .brand .logo {
   display: inline-grid;
   place-items: center;

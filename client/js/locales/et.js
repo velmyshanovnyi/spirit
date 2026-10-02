@@ -15,6 +15,7 @@ export default {
   "nav.history": "Ajalugu",
   "menu.settings": "Seaded",
   "menu.logout": "Logi valja",
+  "menu.saveAccount": "Salvesta konto",
   "quick.create": "Loo",
   "quick.login": "Logi sisse",
   "btn.close": "Sulge",

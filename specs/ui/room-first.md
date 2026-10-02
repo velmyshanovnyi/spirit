@@ -140,13 +140,19 @@
 
 ## Секція RF5: header на маршруті `conversation`
 
-- На `conversation`: brand → лише логотип «S»; `#guest-quick-actions`
-  (Створити/Увійти) → один пункт «Зберегти акаунт» у меню; `#lang-select`
-  і `#theme-toggle` → у меню `#settings-menu` (як пункти); шестерня → «⋯».
-  На інших маршрутах — як зараз (нічого не ламати в advanced).
-- [ ] **Tests**: `app.test.js` — на `conversation` у header видимі лише логотип і «⋯»; у меню є пункти мови/теми/«Зберегти акаунт»; на `profile` header як раніше.
-- [ ] **Impl**: markup (пункти меню), CSS (route-класи на `body`), `app.js` `setConversationChromeVisible` розширюється.
-- [ ] **Exec review**: iter1.
+- На `conversation`: brand → лише логотип «S» (текст «Spirit» схований
+  CSS-ом під `body.room-chrome`); `#lang-select` і `#theme-toggle`
+  переносяться (ті самі вузли, слухачі живуть) у слот `#menu-quick-settings` (НЕ `.nav-item`: клік по будь-якому `.nav-item` закриває меню — review iter1)
+  в `#settings-menu` і повертаються на будь-якому іншому маршруті; шестерня
+  → «⋯» (`data-icon="more"`, два inline-svg, CSS перемикає). `#guest-quick-actions`
+  і так приховані поза advanced-режимом (H3); для ефемерної ідентичності
+  меню показує один пункт `#menu-save-account` («Зберегти акаунт» →
+  `#/account`; без `data-route`, бо router.js керує `hidden` таких пунктів), прихований без ідентичності або з vaultKey (оновлюється в
+  `renderGuestQuickActions` — усі identity-точки). i18n `menu.saveAccount`
+  в 11 локалях. На інших маршрутах — як зараз.
+- [x] **Tests**: `app.test.js` — на `conversation` lang/theme усередині меню, `data-icon="more"`, `body.room-chrome`; на `history` — назад у header, `gear`; зміна мови з меню працює; «Зберегти акаунт» видимий лише для ефемерної ідентичності (RED до impl).
+- [x] **Impl**: markup (слот + пункт меню, brand-text, друга іконка), CSS, `app.js` (`applyRoomChrome` з `setConversationChromeVisible`, `renderGuestQuickActions`), i18n ×11.
+- [x] **Exec review**: iter1 — [reviews/room-first-RF5-iter1.md](../reviews/room-first-RF5-iter1.md) FAIL (слот як .nav-item закривав меню — виправлено); iter2 — [reviews/room-first-RF5-iter2.md](../reviews/room-first-RF5-iter2.md) PASS; жива перевірка — в iter2.
 
 ## Поза скоупом (свідомо)
 

@@ -15,6 +15,7 @@ export default {
   "nav.history": "Istorija",
   "menu.settings": "Nustatymai",
   "menu.logout": "Atsijungti",
+  "menu.saveAccount": "Išsaugoti paskyrą",
   "quick.create": "Sukurti",
   "quick.login": "Prisijungti",
   "btn.close": "Uzdaryti",

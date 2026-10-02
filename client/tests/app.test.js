@@ -9901,6 +9901,69 @@ describe("real-trigger unlock (Section X2, specs/phase5/test-fixture-fidelity.md
   });
 });
 
+describe("Room-first RF5 (specs/ui/room-first.md): minimal header on the conversation route", () => {
+  async function toConversation() {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+    location.hash = "#/conversation";
+    window.dispatchEvent(new Event("hashchange"));
+  }
+
+  it("moves the language select and theme toggle into the settings menu on the conversation route and back out elsewhere; the gear becomes a more-menu icon", async () => {
+    await toConversation();
+    const menu = document.getElementById("settings-menu");
+    expect(menu.contains(document.getElementById("lang-select"))).toBe(true);
+    expect(menu.contains(document.getElementById("theme-toggle"))).toBe(true);
+    expect(document.getElementById("btn-settings-toggle").dataset.icon).toBe("more");
+    expect(document.body.classList.contains("room-chrome")).toBe(true);
+
+    location.hash = "#/history";
+    window.dispatchEvent(new Event("hashchange"));
+    expect(menu.contains(document.getElementById("lang-select"))).toBe(false);
+    expect(menu.contains(document.getElementById("theme-toggle"))).toBe(false);
+    expect(document.querySelector(".app-header > .header-controls:not(#guest-quick-actions)").contains(document.getElementById("lang-select"))).toBe(true);
+    expect(document.getElementById("btn-settings-toggle").dataset.icon).toBe("gear");
+    expect(document.body.classList.contains("room-chrome")).toBe(false);
+  });
+
+  it("the language select keeps working from inside the menu (listener survives the move), and clicking it does NOT close the menu (exec review)", async () => {
+    await toConversation();
+    const select = document.getElementById("lang-select");
+    document.getElementById("btn-settings-toggle").click();
+    expect(document.getElementById("settings-menu").hidden).toBe(false);
+    select.click();
+    expect(document.getElementById("settings-menu").hidden).toBe(false);
+    document.getElementById("theme-toggle").click();
+    expect(document.getElementById("settings-menu").hidden).toBe(false);
+    select.value = "en";
+    select.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(document.querySelector('[data-i18n="conversation.heading"]').textContent).toBe("Conversation"));
+  });
+
+  it("offers «Зберегти акаунт» in the menu only for an ephemeral identity (no vault key)", async () => {
+    initApp(document, { locale: "uk" });
+    const item = document.getElementById("menu-save-account");
+    expect(item.hidden).toBe(true); // no identity yet
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(item.hidden).toBe(false)); // ephemeral: offer the upgrade
+    expect(item.getAttribute("href")).toBe("#/account");
+    expect(item.textContent).toContain(t("menu.saveAccount"));
+    expect(t("menu.saveAccount")).not.toBe("menu.saveAccount");
+
+    createPermanentProfile.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("profile-pub"), vaultKey: { __tag: "vault" } });
+    fingerprint.mockResolvedValue("profile-fp");
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "pw";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(item.hidden).toBe(true)); // saved: nothing to upgrade
+  });
+});
+
 describe("Room-first RF1 (specs/ui/room-first.md): room stage + toolbar room id", () => {
   async function enterConversationRoute() {
     generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });

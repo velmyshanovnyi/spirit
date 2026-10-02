@@ -1014,6 +1014,9 @@ export function initApp(doc, options) {
     // because this function re-runs at every identity-establishing/
     // clearing point, which would otherwise re-show it.
     bar.hidden = !!state.senderKey || !isAdvancedModeUnlocked();
+    // Room-first RF5: the menu's one upgrade for an EPHEMERAL identity.
+    const saveItem = el("menu-save-account");
+    if (saveItem) saveItem.hidden = !state.senderKey || !!(state.identityKeyPair && state.identityKeyPair.vaultKey);
   }
   renderGuestQuickActions(); // set the correct initial visibility on load
 
@@ -1232,7 +1235,32 @@ export function initApp(doc, options) {
   // further down, so that first call uses this no-op; the block re-invokes
   // it once more after setup finishes, correcting the initial state.
   let applyVideoDockMode = () => {};
+  // Room-first RF5 (specs/ui/room-first.md): on the conversation route the
+  // header is just the logo and the "more" menu -- language/theme controls
+  // are reparented INTO the menu (same nodes, listeners survive) and back
+  // out on any other route; CSS hides the brand text under body.room-chrome.
+  const headerControlsHome = el("lang-select")?.parentElement ?? null;
+  const headerControlsAnchor = el("theme-toggle")?.nextSibling ?? null;
+  function applyRoomChrome(active) {
+    doc.body.classList.toggle("room-chrome", active);
+    const toggle = el("btn-settings-toggle");
+    if (toggle) toggle.dataset.icon = active ? "more" : "gear";
+    const slot = el("menu-quick-settings");
+    const lang = el("lang-select");
+    const theme = el("theme-toggle");
+    if (!slot || !lang || !theme || !headerControlsHome) return;
+    if (active && !slot.contains(lang)) {
+      slot.append(lang, theme);
+      slot.hidden = false;
+    } else if (!active && slot.contains(lang)) {
+      headerControlsHome.insertBefore(lang, headerControlsAnchor);
+      headerControlsHome.insertBefore(theme, headerControlsAnchor);
+      slot.hidden = true;
+    }
+  }
+
   function setConversationChromeVisible(visible) {
+    applyRoomChrome(visible);
     const toolbar = el("conversation-toolbar");
     if (toolbar) toolbar.hidden = !visible;
     const floatingVideo = el("floating-video");

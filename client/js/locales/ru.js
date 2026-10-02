@@ -15,6 +15,7 @@ export default {
   "nav.history": "История",
   "menu.settings": "Настройки",
   "menu.logout": "Выйти",
+  "menu.saveAccount": "Сохранить аккаунт",
   "quick.create": "Создать",
   "quick.login": "Войти",
   "btn.close": "Закрыть",

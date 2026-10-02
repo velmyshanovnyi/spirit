@@ -15,6 +15,7 @@ export default {
   "nav.history": "Historique",
   "menu.settings": "Parametres",
   "menu.logout": "Deconnexion",
+  "menu.saveAccount": "Enregistrer le compte",
   "quick.create": "Creer",
   "quick.login": "Connexion",
   "btn.close": "Fermer",

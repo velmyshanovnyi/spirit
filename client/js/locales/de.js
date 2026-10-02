@@ -15,6 +15,7 @@ export default {
   "nav.history": "Verlauf",
   "menu.settings": "Einstellungen",
   "menu.logout": "Abmelden",
+  "menu.saveAccount": "Konto speichern",
   "quick.create": "Erstellen",
   "quick.login": "Anmelden",
   "btn.close": "Schliessen",
