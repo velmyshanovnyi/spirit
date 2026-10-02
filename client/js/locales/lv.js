@@ -158,6 +158,7 @@ export default {
   "btn.createKeyfile": "Izveidot keyfile",
   "btn.skip": "Izlaist",
   "backup.reminder": "⚠ Jums nav atslēgas rezerves kopijas — bez tās profilu atjaunot nav iespējams.",
+  "backup.portableHint": "Pārnesamam kontam atslēgas fails nav vajadzīgs: jūsu pieteikšanās vārds (augstāk) kopā ar paroli IR rezerves kopija — saglabājiet abus drošā vietā. Ar tiem var pieteikties jebkurā Spirit mezglā.",
   "devices.heading": "Ierīces",
   "devices.primary": "Galvenajā ierīcē",
   "devices.new": "Jaunajā ierīcē",

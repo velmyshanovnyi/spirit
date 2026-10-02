@@ -158,6 +158,7 @@ export default {
   "btn.createKeyfile": "Loo keyfile",
   "btn.skip": "Jäta vahele",
   "backup.reminder": "⚠ Teil pole võtme varukoopiat — ilma selleta pole profiili võimalik taastada.",
+  "backup.portableHint": "Kaasaskantav konto ei vaja võtmefaili: teie sisselogimisnimi (ülal) koos parooliga ONGI varukoopia — hoidke mõlemat turvalises kohas. Nendega saab sisse logida igas Spirit sõlmes.",
   "devices.heading": "Seadmed",
   "devices.primary": "Põhiseadmes",
   "devices.new": "Uues seadmes",

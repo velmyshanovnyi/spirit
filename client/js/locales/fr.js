@@ -158,6 +158,7 @@ export default {
   "btn.createKeyfile": "Créer un keyfile",
   "btn.skip": "Ignorer",
   "backup.reminder": "⚠ Vous n'avez pas de sauvegarde de clé — sans elle, le profil ne peut pas être restauré.",
+  "backup.portableHint": "Un compte portable n'a pas besoin de fichier de clé : votre identifiant (ci-dessus) et votre mot de passe SONT la sauvegarde — conservez-les en lieu sûr. Ils permettent de vous connecter sur n'importe quel nœud Spirit.",
   "devices.heading": "Appareils",
   "devices.primary": "Sur l'appareil principal",
   "devices.new": "Sur le nouvel appareil",

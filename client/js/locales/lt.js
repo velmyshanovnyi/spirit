@@ -158,6 +158,7 @@ export default {
   "btn.createKeyfile": "Sukurti keyfile",
   "btn.skip": "Praleisti",
   "backup.reminder": "⚠ Neturite rakto atsarginės kopijos — be jos profilio atkurti neįmanoma.",
+  "backup.portableHint": "Perkeliamai paskyrai rakto failo nereikia: jūsų prisijungimo vardas (aukščiau) kartu su slaptažodžiu IR YRA atsarginė kopija — saugiai išsaugokite abu. Su jais galite prisijungti bet kuriame Spirit mazge.",
   "devices.heading": "Įrenginiai",
   "devices.primary": "Pagrindiniame įrenginyje",
   "devices.new": "Naujame įrenginyje",

@@ -168,6 +168,7 @@ import {
   exportPrivateKeyRaw,
   importPrivateKeyRaw
 } from "../js/identity.js";
+import { t } from "../js/i18n.js";
 import { createPermanentProfile, exportRawIdentity, listProfiles, loadPermanentProfile, setNickname, getNickname, adoptScalarIdentity } from "../js/profile.js";
 import { deriveAccountMaterial, generateAccountName } from "../js/deterministicIdentity.js";
 import { generateStrongPassword } from "../js/passwordGenerator.js";
@@ -2749,6 +2750,11 @@ describe("portable account creation (Section H3, exec-reviewed Argon2id core)", 
     await vi.waitFor(() => expect(createPermanentProfile).toHaveBeenCalledWith("my local passphrase"));
     expect(deriveAccountMaterial).not.toHaveBeenCalled();
     expect(adoptScalarIdentity).not.toHaveBeenCalled();
+    // A13 (specs/ui/portable-backup-step.md): a random account keeps the
+    // mnemonic/keyfile exports and gets no portable hint.
+    await vi.waitFor(() => expect(document.getElementById("backup-step").hidden).toBe(false));
+    expect(document.getElementById("backup-key-exports").hidden).toBe(false);
+    expect(document.getElementById("backup-portable-hint").hidden).toBe(true);
   });
 
   it("derives a portable login (spirit+name+tail) and adopts it locally when the checkbox is checked", async () => {
@@ -2779,6 +2785,14 @@ describe("portable account creation (Section H3, exec-reviewed Argon2id core)", 
     await vi.waitFor(() =>
       expect(document.getElementById("portable-login-display").textContent).toContain("abcdefghijTAIL0000TAIL0000")
     );
+    // A13 (specs/ui/portable-backup-step.md): the adopted key is
+    // non-extractable, so mnemonic/keyfile exports would throw -- they are
+    // hidden and the login string + password is presented as THE backup.
+    await vi.waitFor(() => expect(document.getElementById("backup-step").hidden).toBe(false));
+    expect(document.getElementById("backup-key-exports").hidden).toBe(true);
+    expect(document.getElementById("backup-portable-hint").hidden).toBe(false);
+    expect(document.getElementById("backup-portable-hint").textContent).toBe(t("backup.portableHint"));
+    expect(t("backup.portableHint")).not.toBe("backup.portableHint");
   });
 });
 

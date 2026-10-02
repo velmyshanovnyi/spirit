@@ -286,16 +286,22 @@
 
         <div id="backup-step" hidden class="subgroup">
           <h3 data-i18n="backup.heading">Резервна копія ключа</h3>
-          <div class="btn-row">
-            <button id="btn-backup-mnemonic" type="button" data-i18n="btn.showMnemonic">Показати мнемоніку</button>
-            <button id="btn-backup-skip" type="button" data-i18n="btn.skip">Пропустити</button>
+          <!-- A13 (specs/ui/portable-backup-step.md): a portable account's key is
+               non-extractable, so the mnemonic/keyfile exports are hidden for it
+               and the login+password is presented as the backup instead. -->
+          <div id="backup-portable-hint" hidden class="hint-text" data-i18n="backup.portableHint">Портативному акаунту не потрібен файл ключа: ваш логін (вище) разом із паролем і є резервною копією — збережіть обидва в надійному місці. З ними можна увійти на будь-якому вузлі Spirit.</div>
+          <div id="backup-key-exports">
+            <div class="btn-row">
+              <button id="btn-backup-mnemonic" type="button" data-i18n="btn.showMnemonic">Показати мнемоніку</button>
+            </div>
+            <label class="field"><span data-i18n="label.keyfilePassphrase">Passphrase keyfile:</span>
+              <input id="keyfile-passphrase" type="password" autocomplete="new-password">
+            </label>
+            <div class="btn-row"><button id="btn-backup-keyfile" type="button" data-i18n="btn.createKeyfile">Створити keyfile</button></div>
+            <div id="mnemonic-display" class="secret-output"></div>
+            <div id="keyfile-display" class="secret-output"></div>
           </div>
-          <label class="field"><span data-i18n="label.keyfilePassphrase">Passphrase keyfile:</span>
-            <input id="keyfile-passphrase" type="password" autocomplete="new-password">
-          </label>
-          <div class="btn-row"><button id="btn-backup-keyfile" type="button" data-i18n="btn.createKeyfile">Створити keyfile</button></div>
-          <div id="mnemonic-display" class="secret-output"></div>
-          <div id="keyfile-display" class="secret-output"></div>
+          <div class="btn-row"><button id="btn-backup-skip" type="button" data-i18n="btn.skip">Пропустити</button></div>
         </div>
 
         <div id="backup-reminder" hidden class="banner-warn" data-i18n="backup.reminder">⚠ Ви не зробили резервну копію ключа — без неї профіль неможливо відновити.</div>

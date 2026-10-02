@@ -185,7 +185,8 @@ export function initProfileUI({
     // on any independent node (Section H4). Default (unchecked) path below
     // is completely unchanged -- existing local-only accounts still work
     // exactly as before.
-    if (el("portable-account-checkbox").checked) {
+    const portable = el("portable-account-checkbox").checked;
+    if (portable) {
       const name = generateAccountName();
       const { privateKeyScalar, verifierTail } = await deriveAccountMaterial(name, passphrase);
       state.identityKeyPair = await adoptScalarIdentity(privateKeyScalar, passphrase);
@@ -208,6 +209,11 @@ export function initProfileUI({
     }
     setDynamicText(el("pub-key-display"), formatSpiritId(state.senderKey));
     setProfileStatus("");
+    // A13 (specs/ui/portable-backup-step.md): adoptIdentity returns a
+    // non-extractable key, so mnemonic/keyfile exports would throw for a
+    // portable account -- its login string + password IS the backup.
+    el("backup-key-exports").hidden = portable;
+    el("backup-portable-hint").hidden = !portable;
     el("backup-step").hidden = false;
     await refreshProfileSelector();
   });

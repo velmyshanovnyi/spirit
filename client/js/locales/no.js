@@ -158,6 +158,7 @@ export default {
   "btn.createKeyfile": "Opprett keyfile",
   "btn.skip": "Hopp over",
   "backup.reminder": "⚠ Du har ingen sikkerhetskopi av nøkkelen — uten den kan profilen ikke gjenopprettes.",
+  "backup.portableHint": "En portabel konto trenger ingen nøkkelfil: brukernavnet ditt (over) sammen med passordet ER sikkerhetskopien — oppbevar begge trygt. Med dem kan du logge inn på enhver Spirit-node.",
   "devices.heading": "Enheter",
   "devices.primary": "På hovedenheten",
   "devices.new": "På den nye enheten",

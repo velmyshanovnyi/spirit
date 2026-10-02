@@ -158,6 +158,7 @@ export default {
   "btn.createKeyfile": "Crear keyfile",
   "btn.skip": "Omitir",
   "backup.reminder": "⚠ No tiene copia de seguridad de la clave: sin ella el perfil no puede recuperarse.",
+  "backup.portableHint": "Una cuenta portátil no necesita archivo de clave: su inicio de sesión (arriba) junto con su contraseña ES la copia de seguridad — guarde ambos en un lugar seguro. Con ellos puede iniciar sesión en cualquier nodo Spirit.",
   "devices.heading": "Dispositivos",
   "devices.primary": "En el dispositivo principal",
   "devices.new": "En el dispositivo nuevo",

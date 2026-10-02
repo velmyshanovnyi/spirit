@@ -158,6 +158,7 @@ export default {
   "btn.createKeyfile": "Crea keyfile",
   "btn.skip": "Salta",
   "backup.reminder": "⚠ Non hai un backup della chiave: senza di esso il profilo non può essere recuperato.",
+  "backup.portableHint": "Un account portatile non ha bisogno di un file chiave: il tuo login (sopra) insieme alla password È il backup — conservali in un posto sicuro. Con essi puoi accedere su qualsiasi nodo Spirit.",
   "devices.heading": "Dispositivi",
   "devices.primary": "Sul dispositivo principale",
   "devices.new": "Sul nuovo dispositivo",

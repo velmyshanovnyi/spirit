@@ -158,6 +158,7 @@ export default {
   "btn.createKeyfile": "Keyfile erstellen",
   "btn.skip": "Überspringen",
   "backup.reminder": "⚠ Sie haben kein Schlüssel-Backup — ohne Backup kann das Profil nicht wiederhergestellt werden.",
+  "backup.portableHint": "Ein portables Konto braucht keine Schlüsseldatei: Ihr Login (oben) zusammen mit Ihrem Passwort IST das Backup — bewahren Sie beides sicher auf. Damit können Sie sich auf jedem Spirit-Knoten anmelden.",
   "devices.heading": "Geräte",
   "devices.primary": "Auf dem Hauptgerät",
   "devices.new": "Auf dem neuen Gerät",

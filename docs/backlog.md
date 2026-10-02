@@ -394,7 +394,9 @@ API-key флоу (вимагає реєстрації — суперечить �
 лише чесне пояснення в UI, що готового безкоштовного варіанту без
 реєстрації наразі немає.
 
-### [ ] A13. 🟠 Portable-акаунт: кнопки backup (мнемоніка / keyfile) падають з «key is not extractable»
+### [x] A13. 🟠 Portable-акаунт: кнопки backup (мнемоніка / keyfile) падають з «key is not extractable» ✅ ЗАКРИТО 2026-10-02
+
+**Закрито:** варіант (а) — `specs/ui/portable-backup-step.md`: для portable-акаунта експорт-контроли (`#backup-key-exports`) ховаються, показується підказка `backup.portableHint` (логін + пароль = backup) у всіх 11 локалях. Дублювання помилок `withBusyButton` у `profile-status` — не робилося (окрема дрібна задача, якщо знадобиться).
 
 **Докази.** Знайдено при живій перевірці R7 (2026-10-02, kolomedi). Створення
 portable-акаунта (`portable-account-checkbox` → `btn-profile-confirm`) іде через
