@@ -6,26 +6,16 @@ import {
   importEcdhPublicKeyFromWire
 } from "./identity.js";
 import { APP_VERSION } from "./version.js";
-import { acceptNewerDeviceList } from "./deviceLinking.js";
 import { get, put } from "./db.js";
 import { createIdentityAnnounce, verifyIdentityAnnounce } from "./identityAnnounce.js";
-import {
-  rememberContact,
-  getContact,
-  updateContactDeviceList,
-  updateContactProofSet,
-  updateContactPushSubscription
-} from "./contacts.js";
-import { parsePushSubscriptionAnnounce } from "./pushSubscription.js";
+import { rememberContact, getContact } from "./contacts.js";
 import { sendPushNotification } from "./pushSend.js";
 import { appendMessage, listMessages, listConversations } from "./historyStore.js";
-import { parseRecoveryShareAnnounce } from "./recoveryShare.js";import { computeSharedSafetyNumber, hexToEmoji } from "./safetyNumber.js";import { getSetting } from "./settingsRegistry.js";
+import { computeSharedSafetyNumber, hexToEmoji } from "./safetyNumber.js";import { getSetting } from "./settingsRegistry.js";
 import { applyDesignSettings, getDesignSetting } from "./designSettingsRegistry.js";
 import { applyFooterSettings } from "./footerRegistry.js";
 import { initSettingsPanelUI } from "./settingsPanelUI.js";
 import { initSidebarFoldersUI } from "./sidebarFoldersUI.js";
-import { saveTrustedShare } from "./trustedShares.js";
-import { acceptNewerProofSet } from "./proofSet.js";
 import { generateAnonymousNickname } from "./anonymousNickname.js";
 import { updateGroupMembers } from "./groups.js";
 import { initGroupsUI } from "./groupsUI.js";
@@ -40,6 +30,7 @@ import { initProfileUI } from "./profileUI.js";
 import { initNotificationsUI, ownPushSubscriptionKey } from "./notificationsUI.js";
 import { initChatSend } from "./chatSend.js";
 import { initGroupChatHandlers } from "./groupChatHandlers.js";
+import { initPeerAnnouncements } from "./peerAnnouncements.js";
 import { initFileTransferUI } from "./fileTransferUI.js";
 import { isAdvancedModeUnlocked, isFeatureEnabled } from "./advancedMode.js";
 import { initAdvancedModeUI } from "./advancedModeUI.js";
@@ -1980,64 +1971,10 @@ export function initApp(doc, options) {
     return;
   }
 
-  async function onDeviceListAnnounce(control) {
-    // Meaningless before the peer proved its identity (nothing to verify
-    // the list against), and pointless in ephemeral mode (nothing persists).
-    if (!state.peerFingerprint || !state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
-    const contact = await getContact(state.peerFingerprint);
-    const heldList = contact ? contact.deviceList : null;
-    const accepted = await acceptNewerDeviceList(state.peerIdentityPublicKey, heldList, control.list);
-    if (accepted !== heldList) {
-      await updateContactDeviceList(state.peerFingerprint, accepted);
-    }
-    return;
-  }
-
-  async function onSafetyDisplayMode(control) {
-    // Section RF10: applies the PEER's chosen display mode to this side
-    // too, so both ends look at the same kind of value at the same
-    // time -- no identity gate needed, this is a display preference,
-    // not a trust decision.
-    state.safetyDisplayMode = control.mode === "shared" ? "shared" : "peer";
-    renderSafetyHint();
-    return;
-  }
-
-  async function onProofSetAnnounce(control) {
-    // Same gate as device-list-announce: meaningless before identity is
-    // verified, pointless in ephemeral mode (nothing persists).
-    if (!state.peerFingerprint || !state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
-    const contact = await getContact(state.peerFingerprint);
-    const heldSet = contact ? contact.proofSet : null;
-    const accepted = await acceptNewerProofSet(state.peerIdentityPublicKey, heldSet, control.set);
-    if (accepted !== heldSet) {
-      await updateContactProofSet(state.peerFingerprint, accepted);
-    }
-    return;
-  }
-
-  async function onPushSubscriptionAnnounce(control) {
-    // Same gate as device-list-announce/proof-set-announce: meaningless
-    // before identity is verified, pointless in ephemeral mode (nothing
-    // persists, and ephemeral "spirits" have nowhere to store a subscription).
-    if (!state.peerFingerprint || !state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
-    const parsed = parsePushSubscriptionAnnounce(control);
-    if (!parsed) return;
-    await updateContactPushSubscription(state.peerFingerprint, parsed);
-    return;
-  }
-
-  async function onRecoveryShareAnnounce(control) {
-    // Section S2 (specs/phase5/social-recovery.md): same trust gate as
-    // device-list-announce/push-subscription-announce -- meaningless
-    // before the peer's identity is verified (nothing to attribute the
-    // share to), and pointless in ephemeral mode (nothing persists).
-    if (!state.peerFingerprint || !state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
-    const parsed = parseRecoveryShareAnnounce(control);
-    if (!parsed) return;
-    await saveTrustedShare({ ownerFingerprint: state.peerFingerprint, ...parsed, receivedAt: Date.now() });
-    return;
-  }
+  // Section C4 (specs/phase5/core-dispatch.md): the five per-contact
+  // announcement handlers live in peerAnnouncements.js (spread into
+  // CONTROL_HANDLERS below).
+  const { announcementHandlers } = initPeerAnnouncements({ state, renderSafetyHint });
 
   async function onWebrtcCallOffer(control) {
     // Same trust gate as plain chat text (line ~309 above): don't turn on
@@ -2063,14 +2000,10 @@ export function initApp(doc, options) {
 
   const CONTROL_HANDLERS = {
     "identity-announce": onIdentityAnnounce,
-    "device-list-announce": onDeviceListAnnounce,
-    "proof-set-announce": onProofSetAnnounce,
-    "push-subscription-announce": onPushSubscriptionAnnounce,
-    "recovery-share-announce": onRecoveryShareAnnounce,
+    ...announcementHandlers,
     "webrtc-call-offer": onWebrtcCallOffer,
     "webrtc-call-answer": onWebrtcCallAnswer,
     ...fileControlHandlers,
-    "safety-display-mode": onSafetyDisplayMode,
     ...groupControlHandlers,
   };
   CONTROL_MESSAGE_TYPES = new Set(Object.keys(CONTROL_HANDLERS));

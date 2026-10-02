@@ -98,9 +98,17 @@ ensureLocalGroupRecord, broadcastGroupMemberJoined }`; таблиця робит
 Залежності: `state`, contacts.js (`getContact`, `updateContact*`),
 `acceptNewerDeviceList`, `acceptNewerProofSet`, `parsePushSubscriptionAnnounce`,
 `parseRecoveryShareAnnounce`, `saveTrustedShare`, `renderSafetyHint` (ін'єкція).
-- [ ] **Tests**: наявні сценарії без змін; boundary-тест: 5 ключів, гейт `vaultKey` → no-op (RED).
-- [ ] **Impl**: перенос + DI; прунінг імпортів app.js.
-- [ ] **Exec review**: iter1.
+Уточнення: п'ять обробників — суцільний блок app.js (~1983–2040), усі їхні
+імпорти (`acceptNewerDeviceList`, `acceptNewerProofSet`,
+`parsePushSubscriptionAnnounce`, `parseRecoveryShareAnnounce`, `saveTrustedShare`,
+`updateContactDeviceList/ProofSet/PushSubscription`) після переносу в app.js не
+вживаються — прунінг; `getContact` і `renderSafetyHint` лишаються (інші
+вживання). Init `initPeerAnnouncements({ state, getContact?, renderSafetyHint })`
+ставиться на місце блоку (перед таблицею); `getContact` модуль імпортує сам.
+Повертає `{ announcementHandlers }`; таблиця робить spread.
+- [x] **Tests**: наявні сценарії `app.test.js` без змін і зелені; новий `client/tests/peerAnnouncements.test.js` — таблиця з 5 ключами-функціями; `device-list-announce` без vaultKey — no-op (contacts не чіпаються); `safety-display-mode` без гейту: ставить `state.safetyDisplayMode` і кличе `renderSafetyHint` (RED до створення).
+- [x] **Impl**: новий модуль; `app.js` — блок замінено init-викликом; 8 імпортів прунено.
+- [x] **Exec review**: iter1 — [reviews/core-dispatch-C4-iter1.md](../reviews/core-dispatch-C4-iter1.md). PASS, 0 знахідок; жива перевірка — в артефакті.
 
 ## Секція C5: домен «дзвінок/медіа» → новий `client/js/callUI.js`
 

@@ -232,9 +232,12 @@ push-нотифікації — картка + enable-флоу (~70 рядків
 `client/js/notificationsUI.js`; app.js 3493→3418. **Секція R9 (2026-10-02):**
 chat-send (sendSingleChatMessage/flush/sendChatMessage/sendGroupMessage, ~95 рядків)
 → `client/js/chatSend.js`; app.js 3582→3478 (між R8 і R9 room-first RF1–RF5
-додали ~160 рядків UI-логіки). Разом R1–R9: 5095→3478 (−32%). Залишок — лише
-переплетене ядро (WebRTC/handleChatMessage/дзвінки/роутінг): подальший винос —
-cut-and-stitch, не verbatim; окремий підхід/спека. Вербатим-нотатка з R9:
+додали ~160 рядків UI-логіки). Разом R1–R9: 5095→3478 (−32%). **Етап 2 — `specs/phase5/core-dispatch.md`
+(2026-10-03):** C1 таблиця диспетчера замість if-ланцюга handleChatMessage;
+C2 файли → `fileTransferUI.js`; C3 групи/mesh → `groupChatHandlers.js`;
+C4 анонси контакту → `peerAnnouncements.js`. app.js 3478→3087 (разом від
+старту: −39%). Лишається C5 (дзвінок/медіа — межа уточнюється) і справжнє
+ядро (identity-announce, сесії, ratchet, wireChannelCallbacks, роутінг). Вербатим-нотатка з R9:
 Enter у полі вводу викликав `sendChatMessage` і в груповому режимі — виправлено 2026-10-02 (`d84b99b`): спільний `submitMessageInput()` для btn-send і Enter. Кандидата
 «дзвінки/медіа» розвідано й відкладено: НЕ суцільний домен (renegotiation всередині
 handleChatMessage, video-dock у рендер-замиканні) — його винос буде cut-and-stitch,
