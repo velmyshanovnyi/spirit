@@ -224,9 +224,12 @@ app.js 4757→4564. **Секція R3 (2026-09-19):** конфіг сервер�
 app.js 4306→4093. **Секція R5 (той самий день):** екран контактів + proof-перевірка
 (~300 рядків) → `client/js/contactsUI.js`; app.js 4093→3845. **Секція R6 (2026-10-02):**
 верифікація ідентичності — власні proof-и + Google OIDC (~180 рядків) →
-`client/js/identityVerificationUI.js`; app.js 3869→3707. Разом R1–R6: 5095→3707
-(−27%). Залишок — переплетене ядро (WebRTC/handleChatMessage/дзвінки/роутінг) +
-кілька дрібних кластерів (profile-обробники, notifications, chat-send). Кандидата
+`client/js/identityVerificationUI.js`; app.js 3869→3707. **Секція R7 (2026-10-02):**
+profile/account-обробники — селектор профілів (MRU), create/login-перемикач,
+portable-login, unlock, create, backup mnemonic/keyfile/skip (~215 рядків) →
+`client/js/profileUI.js`; app.js 3707→3493. Разом R1–R7: 5095→3493
+(−31%). Залишок — переплетене ядро (WebRTC/handleChatMessage/дзвінки/роутінг) +
+два дрібні кластери (notifications, chat-send). Кандидата
 «дзвінки/медіа» розвідано й відкладено: НЕ суцільний домен (renegotiation всередині
 handleChatMessage, video-dock у рендер-замиканні) — його винос буде cut-and-stitch,
 не verbatim-move; потребує окремого підходу.

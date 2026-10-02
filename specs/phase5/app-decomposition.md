@@ -174,3 +174,39 @@ TDZ-аналіз: `resetOwnProofsState` передається за значен
 - [x] **Tests**: наявні proofs/google-сценарії `app.test.js` (Секції E, 2c/2d, C1) без змін і зелені; новий `client/tests/identityVerificationUI.test.js` — модуль існує, init повертає обидві функції, `renderOwnProofsList` рендерить proof-и зі сховища з кнопкою revoke (RED до створення).
 - [x] **Impl**: новий `client/js/identityVerificationUI.js`; `client/js/app.js` — три блоки замінено одним викликом init перед initRecoveryUI; `ownProofSetKey` імпортується.
 - [x] **Exec review**: iter1 — [reviews/app-decomposition-R6-iter1.md](../reviews/app-decomposition-R6-iter1.md). PASS, 0 знахідок; покриття й спека↔код добрані автором; жива перевірка — в артефакті.
+
+## Секція R7: profile/account-обробники → `client/js/profileUI.js`
+
+Обсяг (~215 рядків, два блоки app.js): (1) `setProfileStatus`, обробники
+`btn-create-profile` і `portable-account-checkbox` (автогенерація пароля);
+(2) `refreshProfileSelector` (+ fire-and-forget при старті), перемикачі
+`link-switch-to-login`/`link-switch-to-create`, portable-login
+(`setPortableLoginStatus`, `link-toggle-portable-login`, `PORTABLE_LOGIN_PATTERN`,
+`btn-login-portable`), `btn-profile-unlock`, `btn-profile-confirm`,
+`btn-backup-mnemonic`, `btn-backup-keyfile`, `btn-backup-skip`.
+`readSessionTtlHours` + TTL-persist-блок лишаються в app.js (їх споживає й
+recoveryUI) — ін'єктуються.
+
+Межа: назовні лише `refreshProfileSelector` (передача за значенням у
+`initRecoveryUI`) — її повертає `initProfileUI(...)`. `setProfileStatus`
+назовні не використовується (grep: єдине місце — цей кластер) — стає внутрішньою.
+
+TDZ-аналіз: `refreshProfileSelector` наразі hoisted-функція, яку
+`initRecoveryUI` (~996) бере за значенням — тому init цього модуля ставиться
+ПІСЛЯ `initIdentityVerificationUI` (дає `resetOwnProofsState`) і ПЕРЕД
+`initRecoveryUI`. Зворотна залежність `renderRecoveryCard` (const із
+initRecoveryUI) і `router` ін'єктуються лінивими thunk-ами — обидві
+викликаються лише з click-обробників. Решта (doc/el/t/state/withBusyButton/
+setDynamicText/renderGuestQuickActions/renderNotificationsCard/
+readSessionTtlHours/postIdentityRoute) — hoisted або const-и, визначені раніше.
+Startup-виклик `refreshProfileSelector()` async (await listProfiles) —
+DOM-ефект і так відбувався після синхронного initApp.
+
+Імпорти app.js, що пруняться: profile.js (цілком), deterministicIdentity.js,
+passwordGenerator.js, mnemonic.js, keyfile.js, `exportPrivateKeyScalar`/
+`exportPrivateKeyRaw` з identity.js, `getRecentAccounts`/`recordRecentAccount`
+з session.js.
+
+- [x] **Tests**: наявні профільні сценарії `app.test.js` (Секції 17/18, F2, G1, H3/H4, backup) без змін і зелені; новий `client/tests/profileUI.test.js` — модуль існує, init повертає `refreshProfileSelector`, селектор рендерить збережені профілі MRU-першими та перемикає login/create-блоки (RED до створення).
+- [x] **Impl**: новий `client/js/profileUI.js`; `client/js/app.js` — два блоки замінено одним викликом init між initIdentityVerificationUI і initRecoveryUI; імпорти прунено.
+- [x] **Exec review**: iter1 — [reviews/app-decomposition-R7-iter1.md](../reviews/app-decomposition-R7-iter1.md). PASS, 0 знахідок (1 info-нотатка: orphan-коментар R6 видалено навмисне); жива перевірка — в артефакті.
