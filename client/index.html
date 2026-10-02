@@ -127,6 +127,12 @@
   <div id="conversation-toolbar" class="conversation-toolbar" hidden>
     <div class="conversation-toolbar-left">
       <h2 data-i18n="conversation.heading">Розмова</h2>
+      <!-- Room-first RF1: short room id + E2EE lock (brand term, untranslated). -->
+      <span id="room-chip" class="room-chip" hidden>
+        <svg id="room-lock" class="room-lock" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+        <span id="room-id-display" class="room-id-display"></span>
+        <span class="room-chip-e2ee">E2EE</span>
+      </span>
       <div id="ephemeral-identity-banner" hidden class="identity">
         <span data-i18n="ephemeral.youAre">Ви зараз:</span> <strong id="ephemeral-nickname-display"></strong>
       </div>
@@ -643,7 +649,18 @@
           <button id="btn-file-reject" type="button" data-i18n="fileTransfer.reject">Відхилити</button>
         </div>
         <div id="file-transfers" class="list-area"></div>
-        <div id="video-status" class="status" aria-live="polite"></div>
+        <!-- Room-first RF1 (specs/ui/room-first.md): the "stage" -- the
+             video tiles (#floating-video) dock in here by default (the
+             docked videoMode is now the default; app.js's applyVideoDockMode
+             inserts the panel before #video-status, so this wrapper is the
+             dock target). The placeholder shows through until a local
+             stream exists (the docked panel's background is transparent). -->
+        <div id="room-stage" class="room-stage">
+          <div id="room-stage-placeholder" class="room-stage-placeholder" aria-hidden="true">
+            <svg width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path></svg>
+          </div>
+          <div id="video-status" class="status" aria-live="polite"></div>
+        </div>
 
         <!-- Section GC3 (specs/phase4/group-chats.md), design point 5: a
              group conversation is routed into this SAME screen (state.activeGroupId)

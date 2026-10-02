@@ -1146,7 +1146,11 @@ body.account-modal-suppressed [data-screen="account"].modal-screen {
    over the rest of the page. `position: relative` keeps the exact same
    "this element clips/positions its children" contract as float mode,
    just without the fixed-to-viewport behavior. */
-:root[data-video-mode="docked"] .floating-video {
+/* Room-first RF1 (specs/ui/room-first.md): docked is the DEFAULT now --
+   these rules apply unless the user explicitly picked "float". The
+   background is transparent so #room-stage's placeholder shows through
+   until a local stream paints. */
+:root:not([data-video-mode="float"]) .floating-video {
   position: relative;
   top: auto;
   left: auto;
@@ -1158,9 +1162,73 @@ body.account-modal-suppressed [data-screen="account"].modal-screen {
   resize: none;
   margin-bottom: 12px;
 }
-:root[data-video-mode="docked"] .floating-video-handle {
+:root:not([data-video-mode="float"]) .floating-video-handle {
   display: none;
 }
+:root:not([data-video-mode="float"]) .floating-video,
+:root:not([data-video-mode="float"]) .floating-video .video-tile-local {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  margin-bottom: 0;
+}
+
+/* Room-first RF1: the stage -- a dark 4:3 (mobile) / 16:9 (desktop) area
+   the video tiles dock into; placeholder silhouette centred underneath. */
+.room-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background: #1d2030;
+  color: #3b3f58;
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+/* Specificity must beat the :root:not([float]) docked rule above. */
+:root:not([data-video-mode="float"]) .room-stage > .floating-video {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  aspect-ratio: auto;
+}
+.room-stage-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.room-stage > #video-status {
+  position: relative;
+  z-index: 3;
+  margin: var(--space-2) var(--space-3);
+  color: #c4c7da;
+}
+.room-stage > #video-status:empty {
+  display: none;
+}
+@media (min-width: 900px) {
+  .room-stage { aspect-ratio: 16 / 9; }
+}
+
+.room-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: var(--space-3);
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--muted);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  vertical-align: middle;
+}
+.room-chip .room-lock { color: #1f9d55; }
 
 /* Self-view fills the ENTIRE floating window (per follow-up mockup
    feedback) -- there's usually no remote peer stream yet the moment the

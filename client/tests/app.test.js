@@ -6713,6 +6713,11 @@ describe("video call (Section V2)", () => {
 });
 
 describe("Section RF4: fixed conversation toolbar + floating, draggable video window", () => {
+  // Room-first RF1 (specs/ui/room-first.md): "docked" is the default now, so
+  // these float-mode behaviours opt into float explicitly.
+  beforeEach(() => {
+    localStorage.setItem("spirit.designSettings.videoMode", "float");
+  });
   it("shows the toolbar and floating video only on the conversation route, for both 1:1 and group chat", async () => {
     generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
     fingerprint.mockResolvedValue("sender-fp");
@@ -6909,6 +6914,9 @@ describe("Section RF4: fixed conversation toolbar + floating, draggable video wi
 // the node, not just a CSS position change.
 describe("Section RF21: layout edit mode -- video float/docked mode", () => {
   async function navigateToConversation() {
+    // Room-first RF1: docked is the default; this block tests the
+    // float -> docked -> float round-trip, so it starts from float.
+    localStorage.setItem("spirit.designSettings.videoMode", "float");
     generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
     fingerprint.mockResolvedValue("sender-fp");
     initApp(document, { locale: "uk" });
@@ -8228,10 +8236,14 @@ describe("identity verification proofs (Section E)", () => {
     expect(groupRow.querySelector(".avatar").classList.contains("shape-group")).toBe(true);
     expect(groupRow.textContent).toContain("Друзі");
 
+    // Room-first RF1 (exec review): a stale 1:1 room id from an earlier
+    // session must not leak into the group conversation's room chip.
+    document.getElementById("room-id").value = "deadbeef";
     groupRow.click();
     await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
     expect(document.getElementById("group-chat-log").hidden).toBe(false);
     expect(document.getElementById("group-conversation-heading").hidden).toBe(false);
+    expect(document.getElementById("room-chip").hidden).toBe(true);
   });
 
   it("a group can be assigned to a folder via drag&drop, same as a contact, and is included when that folder is selected", async () => {
@@ -9688,6 +9700,40 @@ describe("real-trigger unlock (Section X2, specs/phase5/test-fixture-fidelity.md
     expect(navItem).not.toBeNull();
     navItem.click();
     await vi.waitFor(() => expect(modal.hidden).toBe(false));
+  });
+});
+
+describe("Room-first RF1 (specs/ui/room-first.md): room stage + toolbar room id", () => {
+  async function enterConversationRoute() {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["room"]));
+    location.hash = "#/conversation";
+    window.dispatchEvent(new Event("hashchange"));
+  }
+
+  it("docks the video tiles into #room-stage by default on the conversation route, and floats them again elsewhere", async () => {
+    await enterConversationRoute();
+    const stage = document.getElementById("room-stage");
+    expect(stage).not.toBeNull();
+    expect(stage.contains(document.getElementById("video-local"))).toBe(true);
+    expect(stage.contains(document.getElementById("video-remote"))).toBe(true);
+    expect(document.getElementById("room-stage-placeholder")).not.toBeNull();
+    location.hash = "#/profile";
+    window.dispatchEvent(new Event("hashchange"));
+    expect(stage.contains(document.getElementById("video-local"))).toBe(false);
+  });
+
+  it("shows the first 4 characters of the room id in the toolbar once the lobby has an invite", async () => {
+    createInvite.mockResolvedValue({ roomId: "7f3a9c0011223344", inviteToken: "tok-1" });
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-quick-chat").click();
+    await vi.waitFor(() => expect(document.getElementById("room-id-display").textContent).toBe("7f3a"));
+    expect(document.getElementById("room-lock")).not.toBeNull();
   });
 });
 

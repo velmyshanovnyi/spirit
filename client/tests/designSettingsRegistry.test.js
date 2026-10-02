@@ -291,12 +291,16 @@ describe("Section RF19: layout edit mode -- header controls order", () => {
 
 // Section RF21 (specs/ui/design-edit-mode.md, Stage 2): float vs docked
 // mode for the floating video panel. Same "type: choice" pattern as
-// sidebarSide/toolbarSide/noticePosition -- "float" MUST be options[0]
-// (same options[0]-is-the-CSS-default invariant RF23's exec review caught
-// a violation of).
+// sidebarSide/toolbarSide/noticePosition -- options[0] MUST be the CSS
+// default (same invariant RF23's exec review caught a violation of). Since
+// room-first RF1 (specs/ui/room-first.md) that default is "docked".
 describe("Section RF21: layout edit mode -- video float/docked mode", () => {
-  it("getDesignSetting returns null (== default float) when nothing is stored", () => {
+  it("getDesignSetting returns null (== default docked since room-first RF1) when nothing is stored", () => {
     expect(getDesignSetting("videoMode")).toBeNull();
+  });
+
+  it("lists docked first: options[0] is what settingsPanelUI highlights when nothing is stored (room-first RF1)", () => {
+    expect(DESIGN_SETTINGS.find((entry) => entry.key === "videoMode").options[0]).toBe("docked");
   });
 
   it("setDesignSetting persists a valid mode and rejects an invalid one", () => {

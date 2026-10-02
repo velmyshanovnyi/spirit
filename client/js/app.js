@@ -938,6 +938,19 @@ export function initApp(doc, options) {
     const bar = el("invite-bar");
     if (!bar) return;
     bar.hidden = !state.isInviteOwner;
+    renderRoomChip();
+  }
+  // Room-first RF1 (specs/ui/room-first.md): short room id + E2EE lock in
+  // the toolbar. #room-id is filled by both the initiator (createInvite)
+  // and the joiner (invite-link prefill) before the lobby renders.
+  function renderRoomChip() {
+    const chip = el("room-chip");
+    if (!chip) return;
+    const roomId = el("room-id").value;
+    el("room-id-display").textContent = roomId.slice(0, 4);
+    // A group conversation reuses this screen (GC3) but has no signaling
+    // room of its own -- never show the last 1:1 room id there (exec review).
+    chip.hidden = !roomId || !!state.activeGroupId;
   }
   el("btn-invite-from-chat").addEventListener("click", (event) => {
     if (copyInviteLink()) showCopiedTooltip(event.currentTarget);
@@ -1351,7 +1364,8 @@ export function initApp(doc, options) {
         // it while hidden would be invisible anyway, and the NEXT time
         // setConversationChromeVisible(true) runs (entering the route),
         // this function runs again and docks it correctly then.
-        const wantDocked = getDesignSetting("videoMode") === "docked" && !panel.hidden;
+        // Room-first RF1: docked is the default (no stored setting == docked).
+        const wantDocked = (getDesignSetting("videoMode") ?? "docked") === "docked" && !panel.hidden;
         if (wantDocked === isDocked) return; // no-op: avoids needless DOM churn (losing focus/restarting <video> playback) on every unrelated call.
         isDocked = wantDocked;
         if (wantDocked && dockTarget && dockAnchor) {
@@ -3247,6 +3261,7 @@ export function initApp(doc, options) {
    */
   async function openGroupConversation(groupId, groupName) {
     state.activeGroupId = groupId;
+    renderRoomChip();
     const heading = el("group-conversation-heading");
     if (heading) {
       setDynamicText(heading, t("groups.chatHeading", { name: groupName }));
