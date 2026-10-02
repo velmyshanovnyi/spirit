@@ -33,5 +33,10 @@ files-reviewed:
 Tests: notificationsUI + app — 404/404. Author full suite: 63 files, 1060/1060.
 Author-side RED confirmed before the module existed (import resolution failure).
 
-## Author's live verification
-(filled in after deploy)
+## Author's live verification (2026-10-02; app.js 166701 B, notificationsUI.js 4278 B byte-identical on both hosts)
+- **kibr**: module in Resource Timing; card hidden before unlock (ephemeral),
+  shown after `btn-profile-unlock`; toggling `notifications-enabled` runs the
+  enable flow to the permission branch (pane denies → checkbox unchecked,
+  localized "Дозвіл на сповіщення відхилено"). No console errors.
+- **kolomedi**: module loaded; card hidden under the H5 auto-ephemeral
+  identity (no vaultKey). No console errors.
