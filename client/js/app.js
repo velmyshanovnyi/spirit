@@ -3344,11 +3344,12 @@ export function initApp(doc, options) {
     router.navigate("conversation");
   }
 
-  el("btn-send").addEventListener("click", () => {
-    // Section GC3: routes to the group fan-out send when a group
-    // conversation is currently open, otherwise the existing 1:1 path --
-    // unchanged behavior for every pre-GC3 caller (state.activeGroupId is
-    // null until openGroupConversation sets it).
+  // Section GC3: routes to the group fan-out send when a group
+  // conversation is currently open, otherwise the existing 1:1 path --
+  // unchanged behavior for every pre-GC3 caller (state.activeGroupId is
+  // null until openGroupConversation sets it). Shared by btn-send and the
+  // Enter key (R9 follow-up: Enter used to skip the group branch).
+  function submitMessageInput() {
     const text = el("message-input").value;
     if (!text) return;
     if (state.activeGroupId) {
@@ -3357,7 +3358,8 @@ export function initApp(doc, options) {
     } else {
       void sendChatMessage();
     }
-  });
+  }
+  el("btn-send").addEventListener("click", submitMessageInput);
 
   // Section G1 (specs/reviews/spirit-evaluation-triage.md): fifth and last
   // module extracted out of this closure -- see fileTransferUI.js.
@@ -3374,7 +3376,7 @@ export function initApp(doc, options) {
     // composed-input candidate must not also send the still-in-progress text.
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
       event.preventDefault();
-      void sendChatMessage();
+      submitMessageInput();
     }
   });
 

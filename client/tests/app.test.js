@@ -9496,6 +9496,21 @@ describe("GC3: fan-out send + group UI (specs/phase4/group-chats.md)", () => {
       // Not leaked into the 1:1 chat log.
       expect(document.getElementById("chat-log").textContent).not.toContain("Привіт усім");
     });
+
+    it("Enter in the input takes the SAME group path as btn-send (pre-existing divergence found in R9)", async () => {
+      const { channel: firstChannel, differentGroupChannel } = await openedGroupConversationWithPeers();
+
+      const input = document.getElementById("message-input");
+      input.value = "Через Enter";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+      const expected = `ENC(${JSON.stringify({ type: "group-message", groupId: "group-1", text: "Через Enter" })})`;
+      await vi.waitFor(() => expect(firstChannel.send).toHaveBeenCalledWith(expected));
+      expect(differentGroupChannel.send).not.toHaveBeenCalled();
+      expect(document.getElementById("group-chat-log").textContent).toContain("Через Enter");
+      expect(document.getElementById("chat-log").textContent).not.toContain("Через Enter");
+      expect(input.value).toBe("");
+    });
   });
 
   describe("receiving an incoming group-message control message", () => {
