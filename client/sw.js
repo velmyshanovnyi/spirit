@@ -90,6 +90,28 @@ export function shouldForceRevalidate(request, origin) {
   return request.method === "GET" && new URL(request.url).origin === origin;
 }
 
+/**
+ * Section F2: arguments for the forced-revalidation fetch. Per spec,
+ * `new Request(navigateRequest, init)` just resets mode to "same-origin",
+ * but Chrome throws a TypeError instead -- which silently routed every
+ * navigation into the offline fallback below and served index.html from
+ * the heuristic HTTP cache (observed live: deliveryType "cache", stale body).
+ * Navigations are therefore fetched by URL; everything else keeps the
+ * original Request (headers, Range, etc.) with only the cache mode forced.
+ * @param {{ mode: string, url: string }} request
+ * @returns {[RequestInfo, RequestInit]}
+ */
+export function revalidateFetchArgs(request) {
+  if (request.mode === "navigate") {
+    // redirect "manual": a navigation's own redirect mode. With the default
+    // "follow", a followed redirect (e.g. /dir -> /dir/) produces a response
+    // respondWith() rejects for a navigation -- the browser's error page.
+    // "manual" yields an opaqueredirect the browser itself then follows.
+    return [request.url, { cache: "no-cache", credentials: "same-origin", redirect: "manual" }];
+  }
+  return [request, { cache: "no-cache" }];
+}
+
 /* c8 ignore start -- runtime glue, not exercised by jsdom-based unit tests
    (no PushEvent/NotificationEvent/Clients constructors there, and no
    FetchEvent/ServiceWorkerGlobalScope for the F1 install/activate/fetch
@@ -102,12 +124,11 @@ if (typeof self !== "undefined" && typeof self.addEventListener === "function") 
 
   self.addEventListener("fetch", (event) => {
     if (!shouldForceRevalidate(event.request, self.location.origin)) return;
-    // Constructing a Request from a navigate-mode request with an init dict
-    // resets its mode to "same-origin" per spec, so navigations need no
-    // special branch. On network failure fall back to a plain pass-through
-    // fetch -- offline behaves exactly as it did without this handler.
+    // Navigations are fetched by URL (Section F2 -- see revalidateFetchArgs).
+    // On network failure fall back to a plain pass-through fetch -- offline
+    // behaves exactly as it did without this handler.
     event.respondWith(
-      fetch(event.request, { cache: "no-cache" }).catch(() => fetch(event.request))
+      fetch(...revalidateFetchArgs(event.request)).catch(() => fetch(event.request))
     );
   });
 

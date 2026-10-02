@@ -474,6 +474,8 @@ batching-regression-guard у `pow.test.js`.
 
 ### [x] A11. 🔴 Жива перевірка після деплою може мовчки тестувати СТАРИЙ код ✅ ЗАКРИТО 2026-09-18
 
+**Доповнення 2026-10-02 (F2):** F1 не покривав навігації — Chrome кидає TypeError на `new Request(navigateRequest, init)`, фолбек віддавав `index.html` з евристичного HTTP-кешу (`deliveryType "cache"`). Виправлено в `specs/phase5/deploy-freshness.md` §F2 (запит за URL + `redirect: "manual"`), доведено живо до/після на обох хостах.
+
 **Виправлено системно (Секція F1 у `specs/phase5/deploy-freshness.md`).** Корінь
 підтверджено живо: хости віддають статику без `Cache-Control` (лише
 Last-Modified/ETag) → евристична свіжість, дні без ревалідації. Фікс: у наявний

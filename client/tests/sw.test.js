@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
-import { parsePushData, buildNotificationOptions, buildJoinUrl, focusOrOpenClient, shouldForceRevalidate, NOTIFICATION_TAG } from "../sw.js";
+import { parsePushData, buildNotificationOptions, buildJoinUrl, focusOrOpenClient, shouldForceRevalidate, revalidateFetchArgs, NOTIFICATION_TAG } from "../sw.js";
 
 describe("parsePushData", () => {
   it("returns { room, token } for a well-formed invite payload", () => {
@@ -127,5 +127,26 @@ describe("shouldForceRevalidate (Section F1, specs/phase5/deploy-freshness.md)",
   it("treats a different scheme or port on the same host as cross-origin", () => {
     expect(shouldForceRevalidate({ method: "GET", url: "http://spirit.kolo.media/js/app.js" }, ORIGIN)).toBe(false);
     expect(shouldForceRevalidate({ method: "GET", url: "https://spirit.kolo.media:8443/js/app.js" }, ORIGIN)).toBe(false);
+  });
+});
+
+describe("revalidateFetchArgs (Section F2, specs/phase5/deploy-freshness.md)", () => {
+  it("fetches a navigation by URL (Chrome rejects new Request(navigateRequest, init)), forcing revalidation with same-origin credentials", () => {
+    const request = { mode: "navigate", method: "GET", url: "https://spirit.kolo.media/" };
+    expect(revalidateFetchArgs(request)).toEqual([
+      "https://spirit.kolo.media/",
+      // redirect "manual" (exec review iter1): a URL fetch defaults to
+      // "follow", but respondWith() rejects a followed-redirect response for
+      // a navigation (redirect mode "manual") -- Chrome's error page instead
+      // of the site. "manual" yields an opaqueredirect the browser follows.
+      { cache: "no-cache", credentials: "same-origin", redirect: "manual" }
+    ]);
+  });
+
+  it("passes a non-navigation request through as the same object, only adding cache: no-cache", () => {
+    const request = { mode: "cors", method: "GET", url: "https://spirit.kolo.media/js/app.js" };
+    const [input, init] = revalidateFetchArgs(request);
+    expect(input).toBe(request);
+    expect(init).toEqual({ cache: "no-cache" });
   });
 });
