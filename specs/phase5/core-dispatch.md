@@ -62,17 +62,34 @@ Init-виклик `initFileTransferUI` переїжджає з кінця initAp
 - [x] **Impl**: перенос + DI в `fileTransferUI.js`; `app.js` — блок помічників + 4 обробники замінено init-викликом, таблиця spread-ить обробники; імпорт `fileTransfer.js` прунено.
 - [x] **Exec review**: iter1 — [reviews/core-dispatch-C2-iter1.md](../reviews/core-dispatch-C2-iter1.md). PASS; 3 коментар-посилання оновлено; жива перевірка — в артефакті.
 
-## Секція C3: домен «групи/mesh» → `client/js/groupMesh.js` (розширення) або новий `groupChatHandlers.js`
+## Секція C3: домен «групи/mesh» → новий `client/js/groupChatHandlers.js`
 
-Обробники `group-member-joined`, `group-message`, `mesh-relay-*` +
-`ensureLocalGroupRecord`, `broadcastGroupMemberJoined`. Mesh-примітиви
-вже в `groupMesh.js` (`initiateMeshRelayConnect`, `relayGroupMeshMessage`,
-`handleIncomingMeshRelayOffer/Answer`). Залежності: `getActivePeer`,
-`appendGroupChat`, `noteIncomingForDrawer`, `getContact`, `appendMessage`,
-`updateGroupMembers`, `formatSpiritId`.
-- [ ] **Tests**: наявні GC/GM-сценарії без змін; boundary-тест на 4 ключі (RED).
-- [ ] **Impl**: перенос + DI.
-- [ ] **Exec review**: iter1.
+Рішення: новий модуль, не розширення `groupMesh.js` — mesh-примітиви
+(`initGroupMesh`) ПОТРЕБУЮТЬ `ensureLocalGroupRecord` як ін'єкцію, а
+обробники потребують mesh-примітивів; один модуль мав би циклічну
+ініціалізацію. Тому порядок у app.js: `initGroupChatHandlers` (дає
+`ensureLocalGroupRecord`, `broadcastGroupMemberJoined`) → `initGroupMesh`
+(бере `ensureLocalGroupRecord`) → mesh-примітиви ін'єктуються в обробники
+лінивими thunk-ами (прийом R1/R5/R6: викликаються лише з повідомлень).
+
+Переноситься дослівно: `broadcastGroupMemberJoined` (+ коментар GC2),
+`ensureLocalGroupRecord` (+ коментар), обробники `onGroupMemberJoined`,
+`onGroupMessage`, `onMeshRelay` (+ їхні коментарі). Init ставиться на місце
+`broadcastGroupMemberJoined` (~1775) — ПЕРЕД `initGroupMesh` (~2329) і
+таблицею. `ensureLocalGroupRecord`/`broadcastGroupMemberJoined` далі
+вживаються в `onIdentityAnnounce` (ядро) — тому повертаються назовні.
+DI: `t`, `state`, `getActivePeer`, `appendGroupChat`, `noteIncomingForDrawer`,
+`formatSpiritId` (імпорт у модулі), contacts `getContact`, groups
+`getGroup`/`ensureGroupBootstrap`/`updateGroupMembers`, `appendMessage`,
+`encryptMessage` (імпорти в модулі), thunks `initiateMeshRelayConnect`,
+`relayGroupMeshMessage`, `handleIncomingMeshRelayOffer`,
+`handleIncomingMeshRelayAnswer`. Повертає `{ groupControlHandlers,
+ensureLocalGroupRecord, broadcastGroupMemberJoined }`; таблиця робить
+`...groupControlHandlers`. app.js прунить `getGroup`/`ensureGroupBootstrap`/
+`updateGroupMembers`, якщо не лишається інших вживань (перевірка grep).
+- [x] **Tests**: наявні GC/GM-сценарії `app.test.js` без змін і зелені; новий `client/tests/groupChatHandlers.test.js` — init повертає таблицю з 4 ключами + дві функції; `group-message` для не-тегованого peer-а — no-op (нічого не рендериться); `group-message` для тегованого рендерить через `appendGroupChat` і кличе `noteIncomingForDrawer` (RED до створення).
+- [x] **Impl**: новий модуль; `app.js` — блоки замінено init-викликом перед `initGroupMesh`, таблиця spread-ить; прунінг імпортів.
+- [x] **Exec review**: iter1 — [reviews/core-dispatch-C3-iter1.md](../reviews/core-dispatch-C3-iter1.md). PASS, 0 знахідок; жива перевірка — в артефакті.
 
 ## Секція C4: домен «анонси контакту» → новий `client/js/peerAnnouncements.js`
 
