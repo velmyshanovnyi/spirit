@@ -1757,24 +1757,10 @@ export function initApp(doc, options) {
     };
   }
 
-  const CONTROL_MESSAGE_TYPES = new Set([
-    "identity-announce",
-    "device-list-announce",
-    "proof-set-announce",
-    "push-subscription-announce",
-    "recovery-share-announce",
-    "webrtc-call-offer",
-    "webrtc-call-answer",
-    "file-offer",
-    "file-accept",
-    "file-reject",
-    "file-chunk",
-    "group-member-joined",
-    "group-message",
-    "safety-display-mode",
-    "mesh-relay-offer",
-    "mesh-relay-answer"
-  ]);
+  // Section C1 (specs/phase5/core-dispatch.md): the set of control types is
+  // derived from the dispatcher table below (one source of truth) -- it is
+  // only ever read inside handleChatMessage, long after initApp finished.
+  let CONTROL_MESSAGE_TYPES = new Set();
 
   // Section FT2 (specs/phase4/file-transfer.md), architectural decisions:
   // raw-byte chunks (base64'd into JSON control messages, consistent with
@@ -2036,367 +2022,393 @@ export function initApp(doc, options) {
       return;
     }
 
-    if (control.type === "identity-announce") {
-      const verified = await verifyIdentityAnnounce(
-        control,
-        state.sessionEcdhWires.localEcdhWire,
-        state.sessionEcdhWires.peerEcdhWire
-      );
-      if (!verified) {
-        setStatus(t("status.announceFailed"));
-        return;
+    await CONTROL_HANDLERS[control.type](control);
+  }
+
+  // Section C1: one handler per control type -- bodies moved verbatim out of
+  // the former if-chain in handleChatMessage (gates stay inside each).
+  async function onIdentityAnnounce(control) {
+    const verified = await verifyIdentityAnnounce(
+      control,
+      state.sessionEcdhWires.localEcdhWire,
+      state.sessionEcdhWires.peerEcdhWire
+    );
+    if (!verified) {
+      setStatus(t("status.announceFailed"));
+      return;
+    }
+    // Section B5 (specs/reviews/spirit-evaluation-triage.md): when the
+    // user dialed a SPECIFIC known contact, whoever answers must actually
+    // BE that contact -- previously the expected fingerprint was read
+    // from the DOM at dial time, used only for push targeting, and then
+    // discarded; whatever fingerprint the announce carried was accepted
+    // unconditionally and just relabeled "новий контакт" if it differed.
+    // A generic "Ініціювати чат"/quick-chat session has no expected
+    // fingerprint (null) and is unaffected -- anyone who answers there is
+    // legitimately a first meeting.
+    const expected = getActivePeer()?.expectedFingerprint;
+    if (expected && expected !== verified.fingerprint) {
+      setStatus(t("status.peerIdentityMismatch"));
+      return;
+    }
+    state.peerFingerprint = verified.fingerprint;
+    state.peerIdentityPublicKey = verified.identityPublicKey;
+    // Room-first RF2: the invite owner offers the call now that the peer
+    // is verified (only this side offers -- no glare; the joiner adds its
+    // own tracks while answering). Without a preview stream nothing
+    // happens until the first mic/camera tap.
+    if (state.isInviteOwner && state.localStream) void autoStartOwnerCall();
+    let continuity = "";
+    // Section P4 (security-hardening.md): a peer verified for the first
+    // time -- either a brand-new profile-mode contact, or ANY peer in
+    // ephemeral mode (nothing persists there, so every meeting is
+    // effectively first) -- gets a persistent on-screen hint to verify
+    // the fingerprint out-of-band (safety number). A KNOWN contact
+    // doesn't: TOFU continuity is already the trust signal there.
+    let isFirstMeeting = true;
+    // Persist the contact only in permanent-profile mode (the vault key's
+    // presence is what distinguishes it) -- ephemeral sessions store nothing.
+    if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
+      const { status } = await rememberContact({
+        fingerprint: verified.fingerprint,
+        identityPubkeyWire: verified.identityPubkeyWire,
+        nickname: verified.nickname || null
+      });
+      continuity = status === "known" ? t("status.knownContact") : t("status.newContact");
+      isFirstMeeting = status !== "known";
+    }
+    state.safetyHintVisible = isFirstMeeting;
+    state.sharedSafetyNumber = isFirstMeeting
+      ? await computeSharedSafetyNumber(state.senderKey, verified.fingerprint)
+      : null;
+    renderSafetyHint({ blink: isFirstMeeting });
+    // A nickname is peer-CHOSEN, not proof of identity -- a different
+    // fingerprint could announce the same nickname (impersonation-by-name,
+    // flagged in exec review). The fingerprint must stay visible so TOFU
+    // continuity is still checkable, never replaced by the nickname alone.
+    const peerLabel = verified.nickname
+      ? `${verified.nickname} (${formatSpiritId(verified.fingerprint)})`
+      : formatSpiritId(verified.fingerprint);
+    setStatus(t("status.peerVerified", { fp: peerLabel }) + continuity);
+    // Known contact in profile mode: bring the prior conversation back
+    // into the chat log before any new messages arrive.
+    if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
+      const history = await listMessages(state.identityKeyPair.vaultKey, state.senderKey, verified.fingerprint);
+      for (const entry of history) {
+        appendChat(entry.text, entry.direction, entry.timestamp, entry.imported === true);
       }
-      // Section B5 (specs/reviews/spirit-evaluation-triage.md): when the
-      // user dialed a SPECIFIC known contact, whoever answers must actually
-      // BE that contact -- previously the expected fingerprint was read
-      // from the DOM at dial time, used only for push targeting, and then
-      // discarded; whatever fingerprint the announce carried was accepted
-      // unconditionally and just relabeled "новий контакт" if it differed.
-      // A generic "Ініціювати чат"/quick-chat session has no expected
-      // fingerprint (null) and is unaffected -- anyone who answers there is
-      // legitimately a first meeting.
-      const expected = getActivePeer()?.expectedFingerprint;
-      if (expected && expected !== verified.fingerprint) {
-        setStatus(t("status.peerIdentityMismatch"));
-        return;
+    }
+    // Section GC2 (specs/phase4/group-chats.md): if the connection that
+    // just verified this peer's identity was tagged with a groupId (a
+    // group-invite session, see startTaggedGroupInvite below), record the
+    // new member in that group's local roster and best-effort notify any
+    // OTHER currently-connected members of the same group. Gated on
+    // permanent-profile mode, same as rememberContact just above -- there
+    // is no group storage to update in ephemeral mode.
+    if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
+      const joinedGroupId = getActivePeer()?.groupId;
+      if (joinedGroupId) {
+        const group = await ensureLocalGroupRecord(joinedGroupId);
+        if (group && !group.memberFingerprints.includes(verified.fingerprint)) {
+          await updateGroupMembers(joinedGroupId, [...group.memberFingerprints, verified.fingerprint]);
+        }
+        await broadcastGroupMemberJoined(joinedGroupId, verified.fingerprint, verified.nickname || null);
       }
-      state.peerFingerprint = verified.fingerprint;
-      state.peerIdentityPublicKey = verified.identityPublicKey;
-      // Room-first RF2: the invite owner offers the call now that the peer
-      // is verified (only this side offers -- no glare; the joiner adds its
-      // own tracks while answering). Without a preview stream nothing
-      // happens until the first mic/camera tap.
-      if (state.isInviteOwner && state.localStream) void autoStartOwnerCall();
-      let continuity = "";
-      // Section P4 (security-hardening.md): a peer verified for the first
-      // time -- either a brand-new profile-mode contact, or ANY peer in
-      // ephemeral mode (nothing persists there, so every meeting is
-      // effectively first) -- gets a persistent on-screen hint to verify
-      // the fingerprint out-of-band (safety number). A KNOWN contact
-      // doesn't: TOFU continuity is already the trust signal there.
-      let isFirstMeeting = true;
-      // Persist the contact only in permanent-profile mode (the vault key's
-      // presence is what distinguishes it) -- ephemeral sessions store nothing.
-      if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
-        const { status } = await rememberContact({
-          fingerprint: verified.fingerprint,
-          identityPubkeyWire: verified.identityPubkeyWire,
-          nickname: verified.nickname || null
+    }
+    // Section S2: this peer may be owed a still-pending recovery-share
+    // announce from an earlier setup where they weren't connected yet.
+    await drainRecoveryShareOutboxForPeer(verified.fingerprint);
+    return;
+  }
+
+  async function onDeviceListAnnounce(control) {
+    // Meaningless before the peer proved its identity (nothing to verify
+    // the list against), and pointless in ephemeral mode (nothing persists).
+    if (!state.peerFingerprint || !state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
+    const contact = await getContact(state.peerFingerprint);
+    const heldList = contact ? contact.deviceList : null;
+    const accepted = await acceptNewerDeviceList(state.peerIdentityPublicKey, heldList, control.list);
+    if (accepted !== heldList) {
+      await updateContactDeviceList(state.peerFingerprint, accepted);
+    }
+    return;
+  }
+
+  async function onSafetyDisplayMode(control) {
+    // Section RF10: applies the PEER's chosen display mode to this side
+    // too, so both ends look at the same kind of value at the same
+    // time -- no identity gate needed, this is a display preference,
+    // not a trust decision.
+    state.safetyDisplayMode = control.mode === "shared" ? "shared" : "peer";
+    renderSafetyHint();
+    return;
+  }
+
+  async function onProofSetAnnounce(control) {
+    // Same gate as device-list-announce: meaningless before identity is
+    // verified, pointless in ephemeral mode (nothing persists).
+    if (!state.peerFingerprint || !state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
+    const contact = await getContact(state.peerFingerprint);
+    const heldSet = contact ? contact.proofSet : null;
+    const accepted = await acceptNewerProofSet(state.peerIdentityPublicKey, heldSet, control.set);
+    if (accepted !== heldSet) {
+      await updateContactProofSet(state.peerFingerprint, accepted);
+    }
+    return;
+  }
+
+  async function onPushSubscriptionAnnounce(control) {
+    // Same gate as device-list-announce/proof-set-announce: meaningless
+    // before identity is verified, pointless in ephemeral mode (nothing
+    // persists, and ephemeral "spirits" have nowhere to store a subscription).
+    if (!state.peerFingerprint || !state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
+    const parsed = parsePushSubscriptionAnnounce(control);
+    if (!parsed) return;
+    await updateContactPushSubscription(state.peerFingerprint, parsed);
+    return;
+  }
+
+  async function onRecoveryShareAnnounce(control) {
+    // Section S2 (specs/phase5/social-recovery.md): same trust gate as
+    // device-list-announce/push-subscription-announce -- meaningless
+    // before the peer's identity is verified (nothing to attribute the
+    // share to), and pointless in ephemeral mode (nothing persists).
+    if (!state.peerFingerprint || !state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
+    const parsed = parseRecoveryShareAnnounce(control);
+    if (!parsed) return;
+    await saveTrustedShare({ ownerFingerprint: state.peerFingerprint, ...parsed, receivedAt: Date.now() });
+    return;
+  }
+
+  async function onGroupMemberJoined(control) {
+    // Section GC2 trust gate -- same shape as every other *-announce:
+    // meaningless before THIS connection's own peer identity is verified,
+    // pointless in ephemeral mode (nothing persists). On top of that,
+    // this control message makes a claim about a THIRD party (not the
+    // sender itself), so two more checks are required before trusting it:
+    // (1) the connection it arrived on must actually be tagged with the
+    // groupId being claimed -- a peer cannot inject membership for a
+    // group it was never invited into via a mismatched/forged groupId;
+    // (2) a local record for this group must exist -- ensureLocalGroupRecord
+    // (Section GC4 fix) bootstraps a minimal one if this device only ever
+    // joined via invite and never had its own copy, rather than silently
+    // dropping every group-scoped message the way the old getGroup-only
+    // gate did.
+    if (!state.peerFingerprint || !state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
+    if (typeof control.groupId !== "string" || typeof control.memberFingerprint !== "string") return;
+    const activePeerEntry = getActivePeer();
+    if (!activePeerEntry || activePeerEntry.groupId !== control.groupId) return;
+    const group = await ensureLocalGroupRecord(control.groupId);
+    if (!group) return;
+    if (!group.memberFingerprints.includes(control.memberFingerprint)) {
+      await updateGroupMembers(control.groupId, [...group.memberFingerprints, control.memberFingerprint]);
+      // Section GC4: this is the FIRST time this device has heard of
+      // memberFingerprint in this group -- auto-start a relayed
+      // mesh-connect toward them through the very connection this
+      // notice arrived on (guaranteed already connected to both sides).
+      // Only "old" members ever reach this branch, since a brand-new
+      // joiner never retroactively receives group-member-joined about
+      // pre-existing members (broadcastGroupMemberJoined only notifies
+      // the OTHER already-connected peers, never the joiner itself) --
+      // so there is no symmetric race needing a tie-break here.
+      if (control.memberFingerprint !== state.senderKey) {
+        void initiateMeshRelayConnect({
+          groupId: control.groupId,
+          relayConnectionId: state.activeConnectionId,
+          targetFingerprint: control.memberFingerprint
         });
-        continuity = status === "known" ? t("status.knownContact") : t("status.newContact");
-        isFirstMeeting = status !== "known";
       }
-      state.safetyHintVisible = isFirstMeeting;
-      state.sharedSafetyNumber = isFirstMeeting
-        ? await computeSharedSafetyNumber(state.senderKey, verified.fingerprint)
-        : null;
-      renderSafetyHint({ blink: isFirstMeeting });
-      // A nickname is peer-CHOSEN, not proof of identity -- a different
-      // fingerprint could announce the same nickname (impersonation-by-name,
-      // flagged in exec review). The fingerprint must stay visible so TOFU
-      // continuity is still checkable, never replaced by the nickname alone.
-      const peerLabel = verified.nickname
-        ? `${verified.nickname} (${formatSpiritId(verified.fingerprint)})`
-        : formatSpiritId(verified.fingerprint);
-      setStatus(t("status.peerVerified", { fp: peerLabel }) + continuity);
-      // Known contact in profile mode: bring the prior conversation back
-      // into the chat log before any new messages arrive.
-      if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
-        const history = await listMessages(state.identityKeyPair.vaultKey, state.senderKey, verified.fingerprint);
-        for (const entry of history) {
-          appendChat(entry.text, entry.direction, entry.timestamp, entry.imported === true);
-        }
-      }
-      // Section GC2 (specs/phase4/group-chats.md): if the connection that
-      // just verified this peer's identity was tagged with a groupId (a
-      // group-invite session, see startTaggedGroupInvite below), record the
-      // new member in that group's local roster and best-effort notify any
-      // OTHER currently-connected members of the same group. Gated on
-      // permanent-profile mode, same as rememberContact just above -- there
-      // is no group storage to update in ephemeral mode.
-      if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
-        const joinedGroupId = getActivePeer()?.groupId;
-        if (joinedGroupId) {
-          const group = await ensureLocalGroupRecord(joinedGroupId);
-          if (group && !group.memberFingerprints.includes(verified.fingerprint)) {
-            await updateGroupMembers(joinedGroupId, [...group.memberFingerprints, verified.fingerprint]);
-          }
-          await broadcastGroupMemberJoined(joinedGroupId, verified.fingerprint, verified.nickname || null);
-        }
-      }
-      // Section S2: this peer may be owed a still-pending recovery-share
-      // announce from an earlier setup where they weren't connected yet.
-      await drainRecoveryShareOutboxForPeer(verified.fingerprint);
-      return;
     }
+    return;
+  }
 
-    if (control.type === "device-list-announce") {
-      // Meaningless before the peer proved its identity (nothing to verify
-      // the list against), and pointless in ephemeral mode (nothing persists).
-      if (!state.peerFingerprint || !state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
-      const contact = await getContact(state.peerFingerprint);
-      const heldList = contact ? contact.deviceList : null;
-      const accepted = await acceptNewerDeviceList(state.peerIdentityPublicKey, heldList, control.list);
-      if (accepted !== heldList) {
-        await updateContactDeviceList(state.peerFingerprint, accepted);
-      }
-      return;
-    }
-
-    if (control.type === "safety-display-mode") {
-      // Section RF10: applies the PEER's chosen display mode to this side
-      // too, so both ends look at the same kind of value at the same
-      // time -- no identity gate needed, this is a display preference,
-      // not a trust decision.
-      state.safetyDisplayMode = control.mode === "shared" ? "shared" : "peer";
-      renderSafetyHint();
-      return;
-    }
-
-    if (control.type === "proof-set-announce") {
-      // Same gate as device-list-announce: meaningless before identity is
-      // verified, pointless in ephemeral mode (nothing persists).
-      if (!state.peerFingerprint || !state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
-      const contact = await getContact(state.peerFingerprint);
-      const heldSet = contact ? contact.proofSet : null;
-      const accepted = await acceptNewerProofSet(state.peerIdentityPublicKey, heldSet, control.set);
-      if (accepted !== heldSet) {
-        await updateContactProofSet(state.peerFingerprint, accepted);
-      }
-      return;
-    }
-
-    if (control.type === "push-subscription-announce") {
-      // Same gate as device-list-announce/proof-set-announce: meaningless
-      // before identity is verified, pointless in ephemeral mode (nothing
-      // persists, and ephemeral "spirits" have nowhere to store a subscription).
-      if (!state.peerFingerprint || !state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
-      const parsed = parsePushSubscriptionAnnounce(control);
-      if (!parsed) return;
-      await updateContactPushSubscription(state.peerFingerprint, parsed);
-      return;
-    }
-
-    if (control.type === "recovery-share-announce") {
-      // Section S2 (specs/phase5/social-recovery.md): same trust gate as
-      // device-list-announce/push-subscription-announce -- meaningless
-      // before the peer's identity is verified (nothing to attribute the
-      // share to), and pointless in ephemeral mode (nothing persists).
-      if (!state.peerFingerprint || !state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
-      const parsed = parseRecoveryShareAnnounce(control);
-      if (!parsed) return;
-      await saveTrustedShare({ ownerFingerprint: state.peerFingerprint, ...parsed, receivedAt: Date.now() });
-      return;
-    }
-
-    if (control.type === "group-member-joined") {
-      // Section GC2 trust gate -- same shape as every other *-announce:
-      // meaningless before THIS connection's own peer identity is verified,
-      // pointless in ephemeral mode (nothing persists). On top of that,
-      // this control message makes a claim about a THIRD party (not the
-      // sender itself), so two more checks are required before trusting it:
-      // (1) the connection it arrived on must actually be tagged with the
-      // groupId being claimed -- a peer cannot inject membership for a
-      // group it was never invited into via a mismatched/forged groupId;
-      // (2) a local record for this group must exist -- ensureLocalGroupRecord
-      // (Section GC4 fix) bootstraps a minimal one if this device only ever
-      // joined via invite and never had its own copy, rather than silently
-      // dropping every group-scoped message the way the old getGroup-only
-      // gate did.
-      if (!state.peerFingerprint || !state.identityKeyPair || !state.identityKeyPair.vaultKey) return;
-      if (typeof control.groupId !== "string" || typeof control.memberFingerprint !== "string") return;
-      const activePeerEntry = getActivePeer();
-      if (!activePeerEntry || activePeerEntry.groupId !== control.groupId) return;
+  async function onGroupMessage(control) {
+    // Section GC3 design point 4: unlike plain 1:1 chat text (which isn't
+    // wrapped in JSON at all), group messages are explicitly typed so
+    // they can be told apart from 1:1 text arriving on the SAME
+    // connection (a groupId-tagged connection can still technically
+    // receive any control type). Same trust gate as every other
+    // control-type: this connection's own peer identity must already be
+    // verified. On top of that -- same anti-spoofing principle as
+    // group-member-joined above -- the claimed groupId must match what
+    // THIS connection was actually tagged with, never trusted from the
+    // message body alone; a peer on a DIFFERENT (or untagged) connection
+    // cannot inject messages into a group it wasn't invited into via that
+    // connection.
+    if (!state.peerFingerprint) return;
+    if (typeof control.groupId !== "string" || typeof control.text !== "string") return;
+    const activeGroupPeerEntry = getActivePeer();
+    if (!activeGroupPeerEntry || activeGroupPeerEntry.groupId !== control.groupId) return;
+    let senderLabel = formatSpiritId(state.peerFingerprint);
+    // GC3 exec-review iter1 finding: profile mode only (ephemeral mode has
+    // no group storage at all -- GC1's groups.js is only ever populated
+    // via the profile-mode UI paths). ensureLocalGroupRecord (Section GC4
+    // fix) bootstraps a local record if this device only ever joined via
+    // invite -- previously this used getGroup directly and silently
+    // dropped every group message for anyone but the original creator.
+    if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
       const group = await ensureLocalGroupRecord(control.groupId);
       if (!group) return;
-      if (!group.memberFingerprints.includes(control.memberFingerprint)) {
-        await updateGroupMembers(control.groupId, [...group.memberFingerprints, control.memberFingerprint]);
-        // Section GC4: this is the FIRST time this device has heard of
-        // memberFingerprint in this group -- auto-start a relayed
-        // mesh-connect toward them through the very connection this
-        // notice arrived on (guaranteed already connected to both sides).
-        // Only "old" members ever reach this branch, since a brand-new
-        // joiner never retroactively receives group-member-joined about
-        // pre-existing members (broadcastGroupMemberJoined only notifies
-        // the OTHER already-connected peers, never the joiner itself) --
-        // so there is no symmetric race needing a tie-break here.
-        if (control.memberFingerprint !== state.senderKey) {
-          void initiateMeshRelayConnect({
-            groupId: control.groupId,
-            relayConnectionId: state.activeConnectionId,
-            targetFingerprint: control.memberFingerprint
-          });
-        }
-      }
-      return;
+      const senderContact = await getContact(state.peerFingerprint);
+      if (senderContact?.nickname) senderLabel = senderContact.nickname;
     }
-
-    if (control.type === "group-message") {
-      // Section GC3 design point 4: unlike plain 1:1 chat text (which isn't
-      // wrapped in JSON at all), group messages are explicitly typed so
-      // they can be told apart from 1:1 text arriving on the SAME
-      // connection (a groupId-tagged connection can still technically
-      // receive any control type). Same trust gate as every other
-      // control-type: this connection's own peer identity must already be
-      // verified. On top of that -- same anti-spoofing principle as
-      // group-member-joined above -- the claimed groupId must match what
-      // THIS connection was actually tagged with, never trusted from the
-      // message body alone; a peer on a DIFFERENT (or untagged) connection
-      // cannot inject messages into a group it wasn't invited into via that
-      // connection.
-      if (!state.peerFingerprint) return;
-      if (typeof control.groupId !== "string" || typeof control.text !== "string") return;
-      const activeGroupPeerEntry = getActivePeer();
-      if (!activeGroupPeerEntry || activeGroupPeerEntry.groupId !== control.groupId) return;
-      let senderLabel = formatSpiritId(state.peerFingerprint);
-      // GC3 exec-review iter1 finding: profile mode only (ephemeral mode has
-      // no group storage at all -- GC1's groups.js is only ever populated
-      // via the profile-mode UI paths). ensureLocalGroupRecord (Section GC4
-      // fix) bootstraps a local record if this device only ever joined via
-      // invite -- previously this used getGroup directly and silently
-      // dropped every group message for anyone but the original creator.
-      if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
-        const group = await ensureLocalGroupRecord(control.groupId);
-        if (!group) return;
-        const senderContact = await getContact(state.peerFingerprint);
-        if (senderContact?.nickname) senderLabel = senderContact.nickname;
-      }
-      const receivedAt = Date.now();
-      // Rendered into the GROUP-specific container (#group-chat-log), never
-      // the 1:1 #chat-log -- tagged with the sender's identity, since a
-      // group conversation shows who said what (unlike 1:1 chat where the
-      // peer is implicit).
-      appendGroupChat(control.text, "in", senderLabel, receivedAt);
-      noteIncomingForDrawer();
-      // Profile mode only (ephemeral has no vault). Sender attribution is
-      // embedded in the stored `text` itself (JSON-encoded) since
-      // historyStore.js's schema is deliberately unchanged (GC1) -- it only
-      // ever stored direction/text/timestamp.
-      if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
-        await appendMessage(state.identityKeyPair.vaultKey, state.senderKey, control.groupId, {
-          direction: "in",
-          text: JSON.stringify({ senderFingerprint: state.peerFingerprint, senderNickname: senderLabel, body: control.text }),
-          timestamp: receivedAt
-        });
-      }
-      return;
+    const receivedAt = Date.now();
+    // Rendered into the GROUP-specific container (#group-chat-log), never
+    // the 1:1 #chat-log -- tagged with the sender's identity, since a
+    // group conversation shows who said what (unlike 1:1 chat where the
+    // peer is implicit).
+    appendGroupChat(control.text, "in", senderLabel, receivedAt);
+    noteIncomingForDrawer();
+    // Profile mode only (ephemeral has no vault). Sender attribution is
+    // embedded in the stored `text` itself (JSON-encoded) since
+    // historyStore.js's schema is deliberately unchanged (GC1) -- it only
+    // ever stored direction/text/timestamp.
+    if (state.identityKeyPair && state.identityKeyPair.vaultKey) {
+      await appendMessage(state.identityKeyPair.vaultKey, state.senderKey, control.groupId, {
+        direction: "in",
+        text: JSON.stringify({ senderFingerprint: state.peerFingerprint, senderNickname: senderLabel, body: control.text }),
+        timestamp: receivedAt
+      });
     }
-
-    if (control.type === "mesh-relay-offer" || control.type === "mesh-relay-answer") {
-      // Section GC4: same anti-spoofing gate as group-member-joined/
-      // group-message -- the claimed groupId must match what THIS
-      // connection was actually tagged with, and identity on this
-      // connection must already be verified (a relay path is only ever
-      // an already-authenticated same-groupId edge).
-      if (!state.peerFingerprint) return;
-      if (
-        typeof control.groupId !== "string" ||
-        typeof control.toFingerprint !== "string" ||
-        typeof control.fromFingerprint !== "string"
-      ) {
-        return;
-      }
-      const activeMeshPeerEntry = getActivePeer();
-      if (!activeMeshPeerEntry || activeMeshPeerEntry.groupId !== control.groupId) return;
-      if (control.toFingerprint !== state.senderKey) {
-        await relayGroupMeshMessage(control);
-        return;
-      }
-      if (control.type === "mesh-relay-offer") {
-        await handleIncomingMeshRelayOffer(control, state.activeConnectionId);
-      } else {
-        await handleIncomingMeshRelayAnswer(control);
-      }
-      return;
-    }
-
-    if (control.type === "webrtc-call-offer") {
-      // Same trust gate as plain chat text (line ~309 above): don't turn on
-      // the camera/mic for a peer whose identity hasn't been verified yet.
-      if (!state.peerFingerprint) {
-        setVideoStatus(t("status.incomingRejected"));
-        return;
-      }
-      try {
-        await acquireLocalStream();
-        const answer = await createRenegotiationAnswer(state.pc, control.sdp);
-        state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify({ type: "webrtc-call-answer", sdp: answer })));
-      } catch (err) {
-        setVideoStatus(t("status.error", { msg: err.message }));
-      }
-      return;
-    }
-
-    if (control.type === "webrtc-call-answer") {
-      await applyRenegotiationAnswer(state.pc, control.sdp);
-      return;
-    }
-
-    // Section FT2 (specs/phase4/file-transfer.md): same trust gate as plain
-    // chat text -- an unverified peer must not be able to push file offers
-    // or consume this side's attention/bandwidth before proving identity.
-    if (control.type === "file-offer") {
-      if (!state.peerFingerprint) return;
-      state.pendingFileOffers[control.fileId] = control;
-      renderFileOfferBanner(control);
-      return;
-    }
-
-    if (control.type === "file-accept") {
-      if (!state.peerFingerprint) return;
-      // Ignore accepts for a fileId this side never offered (or already
-      // finished/rejected) -- defensive against stale/duplicate/spoofed
-      // control messages, mirrors how the other branches above silently
-      // drop unexpected input rather than throwing.
-      if (!state.outgoingFileTransfers[control.fileId]) return;
-      void sendFileChunks(control.fileId);
-      return;
-    }
-
-    if (control.type === "file-reject") {
-      if (!state.peerFingerprint) return;
-      const transfer = state.outgoingFileTransfers[control.fileId];
-      if (!transfer) return;
-      delete state.outgoingFileTransfers[control.fileId];
-      renderFileTransferStatus(control.fileId, t("fileTransfer.rejected", { name: transfer.name }));
-      return;
-    }
-
-    if (control.type === "file-chunk") {
-      if (!state.peerFingerprint) return;
-      // Only accepted for a fileId THIS side genuinely has an active
-      // assembler for -- a peer sending a file-chunk for a fileId that was
-      // never offered/accepted (or reusing another transfer's fileId to
-      // inject chunks into an in-progress assembly) is silently dropped.
-      const transfer = state.incomingFileTransfers[control.fileId];
-      if (!transfer) return;
-      let bytes;
-      try {
-        bytes = base64ToChunk(control.data);
-        transfer.assembler.addChunk(control.index, bytes);
-      } catch {
-        return; // malformed base64 or out-of-range index -- drop, not throw
-      }
-      const received = transfer.totalChunks - transfer.assembler.missingIndices().length;
-      renderFileTransferStatus(
-        control.fileId,
-        t("fileTransfer.progressReceiving", { name: transfer.name, received, total: transfer.totalChunks })
-      );
-      if (transfer.assembler.isComplete()) {
-        const buffer = transfer.assembler.assemble();
-        const hash = await computeFileHash(buffer);
-        if (hash === transfer.sha256) {
-          renderFileTransferDownload(control.fileId, transfer.name, transfer.mimeType, buffer);
-        } else {
-          // Explicit failure per spec: a hash mismatch must NEVER offer a
-          // download link for the corrupted/incomplete result.
-          renderFileTransferStatus(control.fileId, t("fileTransfer.hashMismatch", { name: transfer.name }));
-        }
-        delete state.incomingFileTransfers[control.fileId];
-      }
-      return;
-    }
+    return;
   }
+
+  async function onMeshRelay(control) {
+    // Section GC4: same anti-spoofing gate as group-member-joined/
+    // group-message -- the claimed groupId must match what THIS
+    // connection was actually tagged with, and identity on this
+    // connection must already be verified (a relay path is only ever
+    // an already-authenticated same-groupId edge).
+    if (!state.peerFingerprint) return;
+    if (
+      typeof control.groupId !== "string" ||
+      typeof control.toFingerprint !== "string" ||
+      typeof control.fromFingerprint !== "string"
+    ) {
+      return;
+    }
+    const activeMeshPeerEntry = getActivePeer();
+    if (!activeMeshPeerEntry || activeMeshPeerEntry.groupId !== control.groupId) return;
+    if (control.toFingerprint !== state.senderKey) {
+      await relayGroupMeshMessage(control);
+      return;
+    }
+    if (control.type === "mesh-relay-offer") {
+      await handleIncomingMeshRelayOffer(control, state.activeConnectionId);
+    } else {
+      await handleIncomingMeshRelayAnswer(control);
+    }
+    return;
+  }
+
+  async function onWebrtcCallOffer(control) {
+    // Same trust gate as plain chat text (line ~309 above): don't turn on
+    // the camera/mic for a peer whose identity hasn't been verified yet.
+    if (!state.peerFingerprint) {
+      setVideoStatus(t("status.incomingRejected"));
+      return;
+    }
+    try {
+      await acquireLocalStream();
+      const answer = await createRenegotiationAnswer(state.pc, control.sdp);
+      state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify({ type: "webrtc-call-answer", sdp: answer })));
+    } catch (err) {
+      setVideoStatus(t("status.error", { msg: err.message }));
+    }
+    return;
+  }
+
+  async function onWebrtcCallAnswer(control) {
+    await applyRenegotiationAnswer(state.pc, control.sdp);
+    return;
+  }
+
+  // Section FT2 (specs/phase4/file-transfer.md): same trust gate as plain
+  // chat text -- an unverified peer must not be able to push file offers
+  // or consume this side's attention/bandwidth before proving identity.
+  async function onFileOffer(control) {
+    if (!state.peerFingerprint) return;
+    state.pendingFileOffers[control.fileId] = control;
+    renderFileOfferBanner(control);
+    return;
+  }
+
+  async function onFileAccept(control) {
+    if (!state.peerFingerprint) return;
+    // Ignore accepts for a fileId this side never offered (or already
+    // finished/rejected) -- defensive against stale/duplicate/spoofed
+    // control messages, mirrors how the other branches above silently
+    // drop unexpected input rather than throwing.
+    if (!state.outgoingFileTransfers[control.fileId]) return;
+    void sendFileChunks(control.fileId);
+    return;
+  }
+
+  async function onFileReject(control) {
+    if (!state.peerFingerprint) return;
+    const transfer = state.outgoingFileTransfers[control.fileId];
+    if (!transfer) return;
+    delete state.outgoingFileTransfers[control.fileId];
+    renderFileTransferStatus(control.fileId, t("fileTransfer.rejected", { name: transfer.name }));
+    return;
+  }
+
+  async function onFileChunk(control) {
+    if (!state.peerFingerprint) return;
+    // Only accepted for a fileId THIS side genuinely has an active
+    // assembler for -- a peer sending a file-chunk for a fileId that was
+    // never offered/accepted (or reusing another transfer's fileId to
+    // inject chunks into an in-progress assembly) is silently dropped.
+    const transfer = state.incomingFileTransfers[control.fileId];
+    if (!transfer) return;
+    let bytes;
+    try {
+      bytes = base64ToChunk(control.data);
+      transfer.assembler.addChunk(control.index, bytes);
+    } catch {
+      return; // malformed base64 or out-of-range index -- drop, not throw
+    }
+    const received = transfer.totalChunks - transfer.assembler.missingIndices().length;
+    renderFileTransferStatus(
+      control.fileId,
+      t("fileTransfer.progressReceiving", { name: transfer.name, received, total: transfer.totalChunks })
+    );
+    if (transfer.assembler.isComplete()) {
+      const buffer = transfer.assembler.assemble();
+      const hash = await computeFileHash(buffer);
+      if (hash === transfer.sha256) {
+        renderFileTransferDownload(control.fileId, transfer.name, transfer.mimeType, buffer);
+      } else {
+        // Explicit failure per spec: a hash mismatch must NEVER offer a
+        // download link for the corrupted/incomplete result.
+        renderFileTransferStatus(control.fileId, t("fileTransfer.hashMismatch", { name: transfer.name }));
+      }
+      delete state.incomingFileTransfers[control.fileId];
+    }
+    return;
+  }
+
+  const CONTROL_HANDLERS = {
+    "identity-announce": onIdentityAnnounce,
+    "device-list-announce": onDeviceListAnnounce,
+    "proof-set-announce": onProofSetAnnounce,
+    "push-subscription-announce": onPushSubscriptionAnnounce,
+    "recovery-share-announce": onRecoveryShareAnnounce,
+    "webrtc-call-offer": onWebrtcCallOffer,
+    "webrtc-call-answer": onWebrtcCallAnswer,
+    "file-offer": onFileOffer,
+    "file-accept": onFileAccept,
+    "file-reject": onFileReject,
+    "file-chunk": onFileChunk,
+    "group-member-joined": onGroupMemberJoined,
+    "group-message": onGroupMessage,
+    "safety-display-mode": onSafetyDisplayMode,
+    "mesh-relay-offer": onMeshRelay,
+    "mesh-relay-answer": onMeshRelay,
+  };
+  CONTROL_MESSAGE_TYPES = new Set(Object.keys(CONTROL_HANDLERS));
+  // Test hook (Section C1 drift guard), same convention as __spiritAppHashListener.
+  win.__spiritControlHandlers = CONTROL_HANDLERS;
 
   /**
    * One-shot announce sender for chat flows: fires once the channel is open

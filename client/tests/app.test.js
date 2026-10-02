@@ -9916,6 +9916,47 @@ describe("real-trigger unlock (Section X2, specs/phase5/test-fixture-fidelity.md
   });
 });
 
+// Section C1 (specs/phase5/core-dispatch.md): handleChatMessage is a
+// parse + lookup into a CONTROL_HANDLERS table; the type set is derived from
+// that table's keys (one source of truth).
+describe("Section C1: control-message dispatcher table", () => {
+  const KNOWN_TYPES = ["identity-announce", "device-list-announce", "proof-set-announce", "push-subscription-announce", "recovery-share-announce", "webrtc-call-offer", "webrtc-call-answer", "file-offer", "file-accept", "file-reject", "file-chunk", "group-member-joined", "group-message", "safety-display-mode", "mesh-relay-offer", "mesh-relay-answer"];
+
+  it("exposes exactly the 16 known control types, each backed by a handler function", () => {
+    initApp(document, { locale: "uk" });
+    const handlers = window.__spiritControlHandlers;
+    expect(handlers).toBeTruthy();
+    expect(Object.keys(handlers).sort()).toEqual([...KNOWN_TYPES].sort());
+    for (const type of KNOWN_TYPES) expect(typeof handlers[type]).toBe("function");
+  });
+
+  it("renders an unknown control type as plain chat text (unchanged behaviour)", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({ answer: JSON.stringify({ type: "answer", sdp: "A" }), ecdhPubkey: "peer-ecdh-b64" });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    verifyIdentityAnnounce.mockResolvedValue({ identityPublicKey: {}, identityPubkeyWire: "PEER", fingerprint: "peer-fp" });
+    let captured;
+    startAsInitiator.mockImplementation((opts) => { captured = opts; return { __fakePc: true }; });
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(captured).toBeDefined());
+    captured.onChannelOpen(fakeChannel());
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "nope", text: "x" }));
+    await captured.onMessage("ENC_UNKNOWN");
+    await vi.waitFor(() => expect(document.getElementById("chat-log").textContent).toContain('"type":"nope"'));
+  });
+});
+
 describe("Room-first RF5 (specs/ui/room-first.md): minimal header on the conversation route", () => {
   async function toConversation() {
     generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
