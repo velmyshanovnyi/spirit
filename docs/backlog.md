@@ -235,8 +235,7 @@ chat-send (sendSingleChatMessage/flush/sendChatMessage/sendGroupMessage, ~95 р�
 додали ~160 рядків UI-логіки). Разом R1–R9: 5095→3478 (−32%). Залишок — лише
 переплетене ядро (WebRTC/handleChatMessage/дзвінки/роутінг): подальший винос —
 cut-and-stitch, не verbatim; окремий підхід/спека. Вербатим-нотатка з R9:
-Enter у полі вводу викликає `sendChatMessage` і в груповому режимі (btn-send
-гілкує на `sendGroupMessage`) — дрібний pre-existing баг, кандидат на one-line фікс. Кандидата
+Enter у полі вводу викликав `sendChatMessage` і в груповому режимі — виправлено 2026-10-02 (`d84b99b`): спільний `submitMessageInput()` для btn-send і Enter. Кандидата
 «дзвінки/медіа» розвідано й відкладено: НЕ суцільний домен (renegotiation всередині
 handleChatMessage, video-dock у рендер-замиканні) — його винос буде cut-and-stitch,
 не verbatim-move; потребує окремого підходу.
@@ -455,7 +454,7 @@ git-історії) — перевірено на відсутність уні�
 
 ### [x] A10. Флейкі-тести під навантаженням — стануть шумом одразу після появи CI ✅ ЗАКРИТО 2026-09-19
 
-**Спостереження 2026-10-02:** `pow.test.js` «solves a moderately-high-difficulty challenge within a generous wall-clock bound» двічі впав лише під повним прогоном (CPU під навантаженням; 15–19 с), ізольовано 12/12. Кандидат на підняття wall-clock bound або `test.skipIf(process.env.CI...)`-подібний gate; поки — відомий flake-клас.
+**Спостереження 2026-10-02:** `pow.test.js` «solves a moderately-high-difficulty challenge within a generous wall-clock bound» двічі впав лише під повним прогоном (CPU під навантаженням; 15–19 с), ізольовано 12/12. Закрито 2026-10-02: wall-clock bound піднято до 30 с як backstop, а справжнім regression-guard став детермінований тест на одночасні `crypto.subtle.digest`-виклики (батчований solver тримає >1 у польоті; sequential-await — рівно 1; доведено прогоном з `batchSize: 1`).
 
 **Виправлено (Секції T1–T3 у `specs/phase5/test-stability.md`).** Керований стрес-прогін
 (busy-loop workers) відтворив 72 падіння і показав, що «ICE-флейк» — насправді

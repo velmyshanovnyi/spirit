@@ -2,7 +2,7 @@
 // proof-of-work crypto core for create_invite anti-Sybil protection. Pure
 // functions only -- no network, no wiring into signalingClient.js yet
 // (that's Section SR2).
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { buildPowChallenge, verifyPow, solvePow } from "../js/pow.js";
 
 // Cross-language test vectors: SHA-256("1000:testSenderKey:<nonce>"), leading
@@ -124,10 +124,41 @@ describe("solvePow", () => {
       // below raises vitest's own per-test timeout to match -- the 15000ms
       // assertion bound is meaningless if the test itself gets killed at
       // vitest's default 5000ms first (exactly what happened before this).
-      expect(elapsedMs).toBeLessThan(15000);
+      // Raised 15s -> 30s (2026-10-02): observed 15-19 s twice under a fully
+      // loaded local run while passing in isolation; the DETERMINISTIC
+      // batching guard below is now the real regression check, this
+      // wall-clock bound is only a backstop against a pathological slowdown.
+      expect(elapsedMs).toBeLessThan(30000);
     },
-    20000
+    40000
   );
+
+  // Deterministic regression guard for the same bug (2026-10-02): count how
+  // many crypto.subtle.digest calls are in flight at once. The batched solver
+  // keeps a whole batch outstanding; the sequential-await version this
+  // guards against never has more than one -- independent of CPU load.
+  it("dispatches candidate digests concurrently (never one-at-a-time), measured by in-flight digest calls", async () => {
+    const realDigest = crypto.subtle.digest.bind(crypto.subtle);
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const spy = vi.spyOn(crypto.subtle, "digest").mockImplementation(async (...args) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      try {
+        return await realDigest(...args);
+      } finally {
+        inFlight -= 1;
+      }
+    });
+    try {
+      const challenge = buildPowChallenge(1, "batching-guard-key");
+      const nonce = await solvePow(challenge, 4);
+      expect(await verifyPow(challenge, nonce, 4)).toBe(true);
+      expect(maxInFlight).toBeGreaterThan(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 
   // Backlog A1 (docs/backlog.md), live-measured on spirit.kolo.media
   // 2026-08-08: batching (the regression guard above) fixed total hash
