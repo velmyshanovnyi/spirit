@@ -1434,60 +1434,75 @@ describe("Створити/Увійти open the account screen as a modal over 
 
 });
 
-describe("welcome modal on first visit (Section H1)", () => {
-  it("shows the welcome modal on a fresh visit (no localStorage flag yet)", () => {
-    initApp(document, { locale: "uk" });
-    expect(document.getElementById("welcome-modal").hidden).toBe(false);
-    expect(document.getElementById("welcome-title").textContent).toBe("Ласкаво просимо до Spirit");
-  });
+// Room-first RF3 (specs/ui/room-first.md): the welcome modal (Section H1)
+// is gone -- its message lives in the "you're alone here" invite card on the
+// stage, which only the invite OWNER sees while no peer is connected.
+describe("Room-first RF3: invite card on the stage replaces the welcome modal", () => {
+  function fakeChannelWithClose() {
+    return { onopen: null, onmessage: null, onclose: null, send: vi.fn(), close: vi.fn() };
+  }
 
-  it("hides the modal and sets the seen-flag when the confirm button is clicked", () => {
-    initApp(document, { locale: "uk" });
-    document.getElementById("btn-welcome-confirm").click();
-
-    expect(document.getElementById("welcome-modal").hidden).toBe(true);
-    expect(localStorage.getItem("spirit.welcomeSeen")).toBe("1");
-  });
-
-  it("does not show the modal again once the seen-flag is already set", () => {
-    localStorage.setItem("spirit.welcomeSeen", "1");
-    initApp(document, { locale: "uk" });
-    expect(document.getElementById("welcome-modal").hidden).toBe(true);
-  });
-
-  it("does not show the modal for a genuinely fresh visitor arriving via an invite link (bug report 2026-07-17)", () => {
-    // Before this fix: a truly fresh browser/incognito session (no
-    // spirit.welcomeSeen flag at all) following an invite link got the
-    // welcome modal rendered ON TOP of the just-auto-joined chat (both are
-    // fixed-position overlays) -- from the visitor's point of view, the
-    // chat "didn't open" even though the P2P connection succeeded
-    // underneath, because the modal's backdrop covered it.
-    initApp(document, { locale: "uk", locationSearch: "?room=room-from-link&token=token-from-link" });
-    expect(document.getElementById("welcome-modal").hidden).toBe(true);
-  });
-
-  it("still initializes the whole app (fails open, shows the modal) if localStorage throws (exec review finding)", () => {
-    const original = window.localStorage.getItem;
-    vi.spyOn(window.localStorage, "getItem").mockImplementation(() => {
-      throw new Error("SecurityError: storage blocked");
+  async function ownerLobby() {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room-xyz", inviteToken: "tok-xyz" });
+    let captured;
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return { close: vi.fn() };
     });
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-quick-chat").click();
+    await vi.waitFor(() => expect(captured).toBeDefined());
+    await vi.waitFor(() => expect(document.getElementById("room-invite-card").hidden).toBe(false));
+    return captured;
+  }
 
-    expect(() => initApp(document, { locale: "uk" })).not.toThrow();
-    expect(document.getElementById("welcome-modal").hidden).toBe(false);
-    // Other init steps (unrelated to the modal) must still have run.
-    expect(document.getElementById("lang-select").value).toBe("uk");
-
-    window.localStorage.getItem = original;
+  it("no welcome modal exists any more, on a fresh visit or otherwise", () => {
+    initApp(document, { locale: "uk" });
+    expect(document.getElementById("welcome-modal")).toBeNull();
+    expect(document.getElementById("btn-welcome-confirm")).toBeNull();
   });
 
-  it("does not throw when confirming while localStorage.setItem throws (exec review finding)", () => {
-    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
-      throw new Error("SecurityError: storage blocked");
-    });
+  it("the owner's lobby shows the card with the invite link (room + token) and the alone-here copy", async () => {
+    await ownerLobby();
+    const link = document.getElementById("room-invite-link").textContent;
+    expect(link).toContain("room=room-xyz");
+    expect(link).toContain("token=tok-xyz");
+    expect(document.getElementById("room-invite-card").textContent).toContain(t("room.aloneTitle"));
+    expect(t("room.aloneTitle")).not.toBe("room.aloneTitle");
+  });
 
+  it("the card's copy button copies the same invite link the toolbar icon does", async () => {
+    await ownerLobby();
+    document.getElementById("btn-room-copy-invite").click();
+    expect(document.getElementById("invite-link-display").textContent).toContain("room=room-xyz");
+  });
+
+  it("hides the card once the channel opens, and shows it again when the connection is torn down", async () => {
+    const captured = await ownerLobby();
+    const channel = fakeChannelWithClose();
+    captured.onChannelOpen(channel);
+    expect(document.getElementById("room-invite-card").hidden).toBe(true);
+    captured.onChannelClose();
+    expect(document.getElementById("room-invite-card").hidden).toBe(false);
+  });
+
+  it("a joiner never sees the card (it does not own the invite)", async () => {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    getOffer.mockResolvedValue({ offer: JSON.stringify({ type: "offer", sdp: "OFFER_SDP" }), ecdhPubkey: "peer-ecdh-b64" });
+    startAsJoiner.mockImplementation(() => ({ __fakePc: true }));
     initApp(document, { locale: "uk" });
-    expect(() => document.getElementById("btn-welcome-confirm").click()).not.toThrow();
-    expect(document.getElementById("welcome-modal").hidden).toBe(true);
+    document.getElementById("btn-generate").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001sender-fp"));
+    document.getElementById("room-id").value = "room1";
+    document.getElementById("invite-token").value = "tok1";
+    document.getElementById("btn-join").click();
+    await vi.waitFor(() => expect(visibleScreens()).toEqual(["conversation"]));
+    expect(document.getElementById("room-invite-card").hidden).toBe(true);
   });
 });
 

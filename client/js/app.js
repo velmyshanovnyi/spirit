@@ -343,38 +343,8 @@ export function initApp(doc, options) {
     revealAppChrome();
   }
 
-  // Section H1 (specs/ui/chat-first-redesign.md): a first-time visitor sees
-  // a brief welcome + quick-start modal exactly once (localStorage flag),
-  // never again on subsequent visits. Bug report 2026-07-17: an invite-link
-  // visitor is joining someone ELSE's chat, not exploring the homepage cold
-  // -- showing this modal renders ON TOP of the just-auto-joined chat
-  // (both are fixed-position overlays) and made it look like the chat never
-  // opened at all, so it's suppressed entirely for that case regardless of
-  // the localStorage flag.
-  const welcomeModal = doc.getElementById("welcome-modal");
-  if (welcomeModal) {
-    // localStorage can throw (private-mode/blocked site data) -- matches the
-    // guarded pattern already used everywhere else in this codebase (theme.js,
-    // i18n.js, the inline pre-paint script in index.html). Unguarded here
-    // would take down the WHOLE app's init, not just the modal.
-    let alreadySeen = false;
-    try {
-      alreadySeen = doc.defaultView.localStorage.getItem("spirit.welcomeSeen") === "1";
-    } catch {
-      // Storage unavailable -- fail open (show the modal every visit rather
-      // than crash init); harmless since it's just a one-time hint.
-    }
-    welcomeModal.hidden = alreadySeen || cameFromInviteLink;
-    doc.getElementById("btn-welcome-confirm")?.addEventListener("click", () => {
-      welcomeModal.hidden = true;
-      try {
-        doc.defaultView.localStorage.setItem("spirit.welcomeSeen", "1");
-      } catch {
-        // Storage unavailable -- nothing to persist; the modal will simply
-        // reappear next visit, which is an acceptable degraded UX.
-      }
-    });
-  }
+  // Room-first RF3: the first-visit welcome modal (Section H1) is gone --
+  // its message lives in the invite card on the stage (renderInviteCard).
 
   const state = {
     identityKeyPair: null,
@@ -939,7 +909,23 @@ export function initApp(doc, options) {
     if (!bar) return;
     bar.hidden = !state.isInviteOwner;
     renderRoomChip();
+    renderInviteCard();
   }
+  // Room-first RF3 (specs/ui/room-first.md): the owner's "you're alone
+  // here" card on the stage -- visible while this side owns the invite and
+  // no data channel is open; re-rendered on channel open / teardown.
+  function renderInviteCard() {
+    const card = el("room-invite-card");
+    if (!card) return;
+    const roomId = el("room-id").value;
+    const inviteToken = el("invite-token").value;
+    const show = !!state.isInviteOwner && !state.channel && !!roomId && !!inviteToken;
+    card.hidden = !show;
+    if (show) el("room-invite-link").textContent = buildInviteLinkText(roomId, inviteToken);
+  }
+  el("btn-room-copy-invite").addEventListener("click", (event) => {
+    if (copyInviteLink()) showCopiedTooltip(event.currentTarget);
+  });
   // Room-first RF1 (specs/ui/room-first.md): short room id + E2EE lock in
   // the toolbar. #room-id is filled by both the initiator (createInvite)
   // and the joiner (invite-link prefill) before the lobby renders.
@@ -2444,6 +2430,7 @@ export function initApp(doc, options) {
       // reconnect-and-resync share the exact same queuing path as
       // "never connected yet".
       state.channel = null;
+      renderInviteCard(); // Room-first RF3: alone again -- the owner's card returns
       if (state.localMediaPreviewTimeoutId) {
         clearTimeout(state.localMediaPreviewTimeoutId);
         state.localMediaPreviewTimeoutId = null;
@@ -2471,6 +2458,7 @@ export function initApp(doc, options) {
         if (ownerConnectionIdAtWireTime !== null && state.activeConnectionId !== ownerConnectionIdAtWireTime) return;
         state.channel = channel;
         setStatus(t("status.connected"));
+        renderInviteCard(); // Room-first RF3: a peer is here -- drop the "alone" card
         // Section RF9: the session key may already have been derived before
         // the channel finished opening (or may not be -- see the other
         // flush call site after onSessionReady below); only actually sends

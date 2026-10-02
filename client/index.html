@@ -135,15 +135,6 @@
     </div>
   </div>
 
-  <div id="welcome-modal" hidden class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
-    <div class="modal-card">
-      <h2 id="welcome-title" data-i18n="welcome.title">Ласкаво просимо до Spirit</h2>
-      <p id="welcome-body" data-i18n="welcome.body">Анонімний, наскрізно зашифрований P2P-чат.</p>
-      <div class="btn-row">
-        <button id="btn-welcome-confirm" type="button" class="btn-primary" data-i18n="welcome.confirm">Зрозуміло</button>
-      </div>
-    </div>
-  </div>
 
   <!-- User follow-up (2026-07-31, updated 2026-08-03): replaces the blank
        gap that remained after suppressing the account modal (see
@@ -648,6 +639,17 @@
         <div id="room-stage" class="room-stage">
           <div id="room-stage-placeholder" class="room-stage-placeholder" aria-hidden="true">
             <svg width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path></svg>
+          </div>
+          <!-- Room-first RF3: the invite OWNER's "you're alone here" card,
+               shown while no peer is connected (replaces the welcome modal;
+               app.js's renderInviteCard). -->
+          <div id="room-invite-card" class="room-invite-card" hidden>
+            <h3 data-i18n="room.aloneTitle">Поки що ви тут самі</h3>
+            <p data-i18n="room.aloneBody">Поділіться посиланням — хто його відкриє, одразу потрапить у цю наскрізно зашифровану кімнату. Без установки, без реєстрації.</p>
+            <div class="room-invite-row">
+              <div id="room-invite-link" class="room-invite-link"></div>
+              <button id="btn-room-copy-invite" type="button" class="btn-room btn-room-copy" aria-label="Скопіювати запрошення" data-i18n-title="btn.copyInvite" title="Скопіювати запрошення"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg></button>
+            </div>
           </div>
           <div id="video-status" class="status" aria-live="polite"></div>
         </div>

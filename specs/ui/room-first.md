@@ -103,17 +103,21 @@
 
 ## Секція RF3: invite-картка «Поки що ви тут самі»
 
-- `#room-invite-card` на сцені: заголовок, пояснення, пілюля з
-  посиланням (`#invite-link-display`, текст скорочений CSS-ом), кнопка
-  копіювати (той самий обробник, що `btn-invite-from-chat`), опційно QR
-  (наявний lazy `qr.js`) за тапом.
-- Видима, коли `state.isInviteOwner && !channelOpen`; ховається у
-  `afterChannelOpen`; знову з'являється після leave.
-- Welcome-модалка (`#welcome-modal`) більше не показується: її текст
-  («Анонімний, наскрізно зашифрований P2P-чат») переїжджає у картку.
-- [ ] **Tests**: `app.test.js` — після `enterConversationLobby({ownsInvite:true})` картка видима з посиланням, що містить room/token; після відкриття каналу — `hidden`; у joiner-а (ownsInvite:false) картки нема; welcome-modal не показується на свіжому візиті.
-- [ ] **Impl**: markup, CSS, `renderInviteBar` → `renderInviteCard`, видалення welcome-гейту (`spirit.welcomeSeen` лишається читатись як no-op для сумісності — або прибрати з коментарем).
-- [ ] **Exec review**: iter1.
+- `#room-invite-card` на сцені: заголовок `room.aloneTitle`, пояснення
+  `room.aloneBody` (замість тексту welcome-модалки), пілюля з посиланням
+  (`#room-invite-link`, текст скорочений CSS-ом), кнопка `btn-room-copy-invite`
+  (той самий `copyInviteLink` + tooltip, що й `btn-invite-from-chat`). QR —
+  не в цій секції.
+- `renderInviteCard()`: видима, коли `state.isInviteOwner && !state.channel`
+  і є room/token; викликається з `renderInviteBar` (lobby), з `onChannelOpen`
+  (ховає) і з `handleConnectionTornDown` (повертає — власник знову сам);
+  після leave — через lobby.
+- Welcome-модалка (`#welcome-modal`, Section H1) видаляється з markup, JS
+  (гейт `spirit.welcomeSeen` прибрано; прапорець у localStorage просто
+  ігнорується) та i18n (`welcome.*` з усіх 11 локалей).
+- [x] **Tests**: `app.test.js` — після `enterConversationLobby({ownsInvite:true})` картка видима з посиланням, що містить room/token; після відкриття каналу — `hidden`; у joiner-а (ownsInvite:false) картки нема; welcome-modal не показується на свіжому візиті.
+- [x] **Impl**: markup, CSS, `renderInviteBar` → `renderInviteCard`, видалення welcome-гейту (`spirit.welcomeSeen` лишається читатись як no-op для сумісності — або прибрати з коментарем).
+- [x] **Exec review**: iter1 — [reviews/room-first-RF3-iter1.md](../reviews/room-first-RF3-iter1.md). PASS, 0 знахідок; жива перевірка — в артефакті.
 
 ## Секція RF4: чат-шухляда
 

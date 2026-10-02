@@ -118,7 +118,7 @@ export function initServerConfigUI({ doc, el, t, withBusyButton }) {
   // browser/device-level setting (which signaling node this machine talks
   // to), independent of which Spirit account is currently active, same
   // storage tier as spirit.theme/spirit.locale. Guarded try/catch on every
-  // access matches the pattern already used for spirit.welcomeSeen above:
+  // access matches the guarded pattern used across this codebase (theme.js, i18n.js):
   // storage can throw (private-mode/blocked site data) or hold malformed
   // JSON (e.g. hand-edited or corrupted by another script) -- either case
   // must fail open to an empty list, never take down the whole Server
@@ -142,7 +142,7 @@ export function initServerConfigUI({ doc, el, t, withBusyButton }) {
     } catch {
       // Storage unavailable -- the in-memory list still rendered for this
       // page view, but it won't persist across reloads. Acceptable
-      // degraded UX, matches spirit.welcomeSeen's fail-open policy.
+      // degraded UX, same fail-open policy as the other localStorage readers.
     }
   }
 
