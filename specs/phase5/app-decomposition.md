@@ -210,3 +210,30 @@ passwordGenerator.js, mnemonic.js, keyfile.js, `exportPrivateKeyScalar`/
 - [x] **Tests**: наявні профільні сценарії `app.test.js` (Секції 17/18, F2, G1, H3/H4, backup) без змін і зелені; новий `client/tests/profileUI.test.js` — модуль існує, init повертає `refreshProfileSelector`, селектор рендерить збережені профілі MRU-першими та перемикає login/create-блоки (RED до створення).
 - [x] **Impl**: новий `client/js/profileUI.js`; `client/js/app.js` — два блоки замінено одним викликом init між initIdentityVerificationUI і initRecoveryUI; імпорти прунено.
 - [x] **Exec review**: iter1 — [reviews/app-decomposition-R7-iter1.md](../reviews/app-decomposition-R7-iter1.md). PASS, 0 знахідок (1 info-нотатка: orphan-коментар R6 видалено навмисне); жива перевірка — в артефакті.
+
+## Секція R8: push-нотифікації → `client/js/notificationsUI.js`
+
+Обсяг (~70 рядків, два блоки app.js + module-scope хелпер): (1)
+`renderNotificationsCard` + стартовий виклик; (2) `enableNotifications`
+(c8-ignore runtime glue: Notification/serviceWorker/PushManager) + обробник
+`notifications-enabled`. Module-scope `ownPushSubscriptionKey` переїжджає в
+модуль і експортується (app.js імпортує — один уживаний колсайт у
+wireChannelCallbacks/announce, без дубля; прийом R6).
+
+Межа: назовні лише `renderNotificationsCard` (6 прямих викликів в
+identity-establishing/clearing точках + передача за значенням у
+initProfileUI та initRecoveryUI) — її повертає `initNotificationsUI(...)`.
+
+TDZ-аналіз: залежності модуля — лише doc/el/t/state; init ставиться на місце
+теперішньої hoisted-функції (~972, перед initIdentityVerificationUI), тож
+обидві передачі за значенням (~992, ~1010) і стартовий виклик бачать уже
+створену const. Усередині `enableNotifications` використовує `state.channel`/
+`state.sessionKey` через ін'єктований `state` і `encryptMessage` (імпорт e2ee.js).
+
+Імпорти app.js, що пруняться: `buildPushSubscribeOptions`,
+`serializeSubscriptionForAnnounce` (pushSubscription.js; `parsePushSubscriptionAnnounce`
+лишається), vapidKeys.js (цілком).
+
+- [x] **Tests**: наявні сценарії `app.test.js` (PN4 visibility) без змін і зелені; новий `client/tests/notificationsUI.test.js` — модуль існує, `ownPushSubscriptionKey` експортується, init повертає `renderNotificationsCard`, картка ховається без vaultKey і показується з ним; change-обробник без Notification API знімає чекбокс і пише notSupported (RED до створення).
+- [x] **Impl**: новий `client/js/notificationsUI.js`; `client/js/app.js` — два блоки й хелпер замінено одним викликом init; імпорти прунено.
+- [x] **Exec review**: iter1 — [reviews/app-decomposition-R8-iter1.md](../reviews/app-decomposition-R8-iter1.md). PASS, 0 знахідок; жива перевірка — в артефакті.

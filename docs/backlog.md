@@ -227,9 +227,11 @@ app.js 4306→4093. **Секція R5 (той самий день):** екран
 `client/js/identityVerificationUI.js`; app.js 3869→3707. **Секція R7 (2026-10-02):**
 profile/account-обробники — селектор профілів (MRU), create/login-перемикач,
 portable-login, unlock, create, backup mnemonic/keyfile/skip (~215 рядків) →
-`client/js/profileUI.js`; app.js 3707→3493. Разом R1–R7: 5095→3493
-(−31%). Залишок — переплетене ядро (WebRTC/handleChatMessage/дзвінки/роутінг) +
-два дрібні кластери (notifications, chat-send). Кандидата
+`client/js/profileUI.js`; app.js 3707→3493. **Секція R8 (2026-10-02):**
+push-нотифікації — картка + enable-флоу (~70 рядків) →
+`client/js/notificationsUI.js`; app.js 3493→3418. Разом R1–R8: 5095→3418
+(−33%). Залишок — переплетене ядро (WebRTC/handleChatMessage/дзвінки/роутінг) +
+один дрібний кластер (chat-send). Кандидата
 «дзвінки/медіа» розвідано й відкладено: НЕ суцільний домен (renegotiation всередині
 handleChatMessage, video-dock у рендер-замиканні) — його винос буде cut-and-stitch,
 не verbatim-move; потребує окремого підходу.

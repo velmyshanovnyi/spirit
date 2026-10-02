@@ -16,8 +16,7 @@ import {
   updateContactProofSet,
   updateContactPushSubscription
 } from "./contacts.js";
-import { buildPushSubscribeOptions, serializeSubscriptionForAnnounce, parsePushSubscriptionAnnounce } from "./pushSubscription.js";
-import { VAPID_PUBLIC_KEY_RAW_BASE64URL } from "./vapidKeys.js";
+import { parsePushSubscriptionAnnounce } from "./pushSubscription.js";
 import { sendPushNotification } from "./pushSend.js";
 import { appendMessage, listMessages, listConversations } from "./historyStore.js";
 import { parseRecoveryShareAnnounce } from "./recoveryShare.js";import { computeSharedSafetyNumber, hexToEmoji } from "./safetyNumber.js";import { getSetting } from "./settingsRegistry.js";
@@ -39,6 +38,7 @@ import { initImportedContactsUI } from "./importedContactsUI.js";
 import { initContactsUI } from "./contactsUI.js";
 import { initIdentityVerificationUI, ownProofSetKey } from "./identityVerificationUI.js";
 import { initProfileUI } from "./profileUI.js";
+import { initNotificationsUI, ownPushSubscriptionKey } from "./notificationsUI.js";
 import { initFileTransferUI } from "./fileTransferUI.js";
 import { isAdvancedModeUnlocked, isFeatureEnabled } from "./advancedMode.js";
 import { initAdvancedModeUI } from "./advancedModeUI.js";
@@ -79,10 +79,6 @@ const ADVANCED_ROUTES = ["profile", "settings", "node", "room", "manage", "histo
 // Per-profile own device list record key in the "profile" store (Section 15:
 // multiple accounts each maintain their own list).
 const ownDeviceListKey = (profileId) => `deviceList:${profileId}`;
-// Per-profile own proof set (Section C, specs/phase2c/identity-verification.md).
-// Per-profile own push subscription (Section PN4, specs/phase5/push-notifications.md).
-const ownPushSubscriptionKey = (profileId) => `pushSubscription:${profileId}`;
-
 const DEFAULT_ICE_TIMEOUT_MS = 15000;
 const DEFAULT_ANSWER_WAIT_TIMEOUT_MS = 5 * 60 * 1000; // matches the signaling node's default session TTL
 export function initApp(doc, options) {
@@ -964,17 +960,9 @@ export function initApp(doc, options) {
   }
   renderGuestQuickActions(); // set the correct initial visibility on load
 
-  // Section PN4 (specs/phase5/push-notifications.md): the notifications
-  // toggle only makes sense for a permanent profile (vaultKey present) --
-  // ephemeral "spirits" have nowhere to persist a subscription. Same
-  // call-site pattern as renderGuestQuickActions: called at every
-  // identity-establishing/clearing point.
-  function renderNotificationsCard() {
-    const card = el("notifications-card");
-    if (!card) return;
-    card.hidden = !(state.identityKeyPair && state.identityKeyPair.vaultKey);
-  }
-  renderNotificationsCard();
+  // Section R8: push-notifications card/toggle. Returns the hoisted-style
+  // const that initProfileUI/initRecoveryUI below take by value.
+  const { renderNotificationsCard } = initNotificationsUI({ doc, el, t, state });
   // Section R6: before initRecoveryUI (which takes resetOwnProofsState by
   // value, synchronously). checkContactProofs is a const created later by
   // initContactsUI -- hence the lazy thunk (click/interval-time only).
@@ -2813,69 +2801,6 @@ export function initApp(doc, options) {
   el("session-ttl-hours").addEventListener("change", () => {
     put("profile", "settings:sessionTtlHours", readSessionTtlHours()).catch(() => {});
   });
-
-  // Section PN4 (specs/phase5/push-notifications.md): enabling push
-  // notifications. Mostly untested runtime glue -- Notification,
-  // navigator.serviceWorker and PushManager don't exist in jsdom (same split
-  // as sw.js in PN3: pure helpers in pushSubscription.js are tested, this
-  // wiring isn't). Permanent-profile only (gated by vaultKey, same as
-  // renderNotificationsCard's own visibility).
-  /* c8 ignore start */
-  async function enableNotifications() {
-    const checkbox = el("notifications-enabled");
-    const setNotificationsStatus = (text) => {
-      el("notifications-status").textContent = text;
-    };
-    if (!state.identityKeyPair || !state.identityKeyPair.vaultKey) {
-      if (checkbox) checkbox.checked = false;
-      return;
-    }
-    if (!("Notification" in doc.defaultView) || !("serviceWorker" in doc.defaultView.navigator)) {
-      setNotificationsStatus(t("notifications.notSupported"));
-      if (checkbox) checkbox.checked = false;
-      return;
-    }
-    try {
-      const permission = await doc.defaultView.Notification.requestPermission();
-      if (permission !== "granted") {
-        setNotificationsStatus(t("notifications.permissionDenied"));
-        if (checkbox) checkbox.checked = false;
-        return;
-      }
-      const registration = await doc.defaultView.navigator.serviceWorker.ready;
-      // Avoid double-subscribing (and rotating the endpoint/keys for no
-      // reason) if this profile already has an active push subscription.
-      let subscription = await registration.pushManager.getSubscription();
-      if (!subscription) {
-        subscription = await registration.pushManager.subscribe(
-          buildPushSubscribeOptions(VAPID_PUBLIC_KEY_RAW_BASE64URL)
-        );
-      }
-      const serialized = serializeSubscriptionForAnnounce(subscription);
-      if (!serialized) {
-        setNotificationsStatus(t("status.error", { msg: "invalid subscription" }));
-        if (checkbox) checkbox.checked = false;
-        return;
-      }
-      const { endpoint, keys } = serialized;
-      await put("profile", ownPushSubscriptionKey(state.senderKey), { endpoint, keys });
-      if (state.channel && state.sessionKey) {
-        state.channel.send(
-          await encryptMessage(state.sessionKey, JSON.stringify({ type: "push-subscription-announce", endpoint, keys }))
-        );
-      }
-      setNotificationsStatus(t("notifications.enabled"));
-    } catch (err) {
-      setNotificationsStatus(t("status.error", { msg: err.message }));
-      if (checkbox) checkbox.checked = false;
-    }
-  }
-  el("notifications-enabled")?.addEventListener("change", () => {
-    if (el("notifications-enabled").checked) {
-      enableNotifications();
-    }
-  });
-  /* c8 ignore stop */
 
   /**
    * Section F6 (instant conversation lobby, 2026-07-17): land on the
