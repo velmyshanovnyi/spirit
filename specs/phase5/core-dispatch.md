@@ -48,9 +48,19 @@ app.js-помічники `renderFileOfferBanner`, `sendFileChunks`,
 outgoing/incomingFileTransfers, channel, sessionKey, peerFingerprint),
 `encryptMessage`, `chunkToBase64`/`base64ToChunk`/`computeFileHash`/`readFileChunk`,
 `noteIncomingForDrawer` (ін'єкція).
-- [ ] **Tests**: наявні FT-сценарії без змін; `fileTransferUI.test.js` — таблиця має 4 ключі, `file-reject` для невідомого fileId — no-op (RED).
-- [ ] **Impl**: перенос + DI; app.js прунить `chunkToBase64`/`base64ToChunk`/`computeFileHash`/`readFileChunk`-імпорти, якщо більше не вживаються.
-- [ ] **Exec review**: iter1.
+Уточнення перед кодом: переноситься весь файловий домен app.js —
+`formatFileSize`, `renderFileTransferStatus`, `renderFileOfferBanner`,
+`renderFileTransferDownload`, `waitForBufferedAmountLow`, `sendFileChunks`
+і 4 обробники (усі споживачі цих помічників — усередині домену; grep).
+Init-виклик `initFileTransferUI` переїжджає з кінця initApp на місце
+помічників (~1775) — ПЕРЕД таблицею `CONTROL_HANDLERS` (const), яка робить
+`...fileControlHandlers`; усі DI-залежності (`setDynamicText` 591,
+`noteIncomingForDrawer` 967) визначені вище. Нові ін'єкції: `setDynamicText`,
+`noteIncomingForDrawer`; `renderFileTransferStatus` більше не ін'єктується
+(тепер усередині модуля). app.js прунить імпорт `fileTransfer.js` повністю.
+- [x] **Tests**: наявні FT-сценарії `app.test.js` без змін і зелені; новий `client/tests/fileTransferUI.test.js` — init повертає `fileControlHandlers` із 4 ключами-функціями; `file-reject` для невідомого fileId — no-op; `file-offer` для верифікованого пера рендерить банер із назвою і кличе `noteIncomingForDrawer` (RED до створення).
+- [x] **Impl**: перенос + DI в `fileTransferUI.js`; `app.js` — блок помічників + 4 обробники замінено init-викликом, таблиця spread-ить обробники; імпорт `fileTransfer.js` прунено.
+- [x] **Exec review**: iter1 — [reviews/core-dispatch-C2-iter1.md](../reviews/core-dispatch-C2-iter1.md). PASS; 3 коментар-посилання оновлено; жива перевірка — в артефакті.
 
 ## Секція C3: домен «групи/mesh» → `client/js/groupMesh.js` (розширення) або новий `groupChatHandlers.js`
 
