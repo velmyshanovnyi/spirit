@@ -31,5 +31,13 @@ files-reviewed:
 
 Tests: app + i18n + profileUI — 418/418. Author full suite: 1060/1060.
 
-## Author's live verification
-(filled in after deploy)
+## Author's live verification (2026-10-02; 12 files deployed, byte-identical on both hosts)
+First attempt surfaced the F1 navigation-cache bug (stale index.html served
+from HTTP cache through the SW) — fixed as deploy-freshness Section F2
+before this could be verified. With fresh documents:
+- **kolomedi** (fresh tab): portable create → `#backup-key-exports` hidden,
+  mnemonic button not rendered, `#backup-portable-hint` visible with the
+  Ukrainian text, skip button visible, login string shown.
+- **kibr**: random create → exports visible, hint hidden, mnemonic = 24 words;
+  then a portable create in the SAME session → exports hidden, hint visible
+  (state resets per confirm, as the reviewer reasoned). No console errors.
