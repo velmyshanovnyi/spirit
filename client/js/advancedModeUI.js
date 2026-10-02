@@ -4,7 +4,7 @@ import { AdminAuthError } from "./adminAuth.js";
 /**
  * Section SM2+SM3 (specs/ui/simplified-ephemeral-mode.md): elements that
  * belong to the "advanced" bucket -- hidden by default, restored once
- * unlocked. Call/camera/mic controls (#header-call-controls,
+ * unlocked. Call/camera/mic controls (#room-controls,
  * #floating-video) are deliberately NOT in this list (user decision
  * 2026-07-31: a call is part of the ephemeral session itself, not
  * messenger-specific functionality).

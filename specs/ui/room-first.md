@@ -49,20 +49,57 @@
 - [x] **Impl**: markup + CSS; док/андок — наявний `applyVideoDockMode` (RF21) з дефолтом `docked` (реєстр: `docked` = options[0]); `renderRoomChip()`.
 - [x] **Exec review**: iter1 — [reviews/room-first-RF1-iter1.md](../reviews/room-first-RF1-iter1.md): 2 знахідки, виправлено; iter2 — [reviews/room-first-RF1-iter2.md](../reviews/room-first-RF1-iter2.md): PASS; жива перевірка — в iter2.
 
-## Секція RF2: панель керування (4 кнопки) замість header call-controls
+## Секція RF2: панель керування (mic / camera / вийти) замість header call-controls
 
-- `#header-call-controls` з header прибирається; `#btn-toggle-mic`/
-  `#btn-toggle-camera` переїжджають у `#room-controls` (круглі, 60px,
-  inline SVG замість emoji, `aria-pressed`). Нові `#btn-room-chat`
-  (toggle шухляди + бейдж `#room-chat-unread`) і `#btn-room-leave`.
-- `btn-start-call` видаляється; обробники mic/camera: якщо
-  `!state.localStream` → `acquireLocalStream()` (той самий шлях) з
-  потрібним треком увімкненим, інший — вимкненим.
-- `#btn-room-leave`: зупиняє локальні треки, закриває pc/канал через
-  наявний reset-шлях, створює новий invite → `enterConversationLobby`.
-- [ ] **Tests**: `app.test.js` — mic-тап без стріму викликає `getUserMedia` один раз і вмикає лише audio; camera-тап — лише video; leave скидає `state.pc/channel` і показує нову invite-картку з ІНШИМ room id; `#btn-start-call` відсутній у DOM (видалити/оновити старі асерти).
-- [ ] **Impl**: markup, CSS, `app.js` обробники (переважно перейменування колсайтів), i18n-ключі `room.leave`, `room.chat`.
-- [ ] **Exec review**: iter1.
+Поведінкові рішення (погоджено з користувачем 2026-10-02 перед кодом; це
+єдине місце, де RF-серія змінює не лише розкладку):
+
+- `#header-call-controls` і `btn-start-call` зникають. Нова панель
+  `#room-controls` під сценою: `btn-toggle-mic`, `btn-toggle-camera` (ті самі
+  id, круглі, inline SVG, `aria-pressed`), `btn-room-leave`. Кнопка «Чат» —
+  у RF4 разом із шухлядою.
+- **Авто-дзвінок власника invite** (уточнено після review iter1): тригер —
+  обробник `identity-announce`, у момент, коли пер ВЕРИФІКОВАНО
+  (`state.peerFingerprint` щойно встановлено) і `state.isInviteOwner &&
+  state.localStream` (F6-прев'ю вже є). Перед offer-ом очікується
+  `state.ownAnnouncePromise` (announcer повертає свій in-flight promise), тож
+  пер ніколи не отримає offer раніше за наш announce (інакше відхилив би його
+  через відсутній peerFingerprint). `state.isInviteOwner` переустановлюється
+  в `initiateChatSession` ПІСЛЯ `resetActiveConnection()` (проксі-поле
+  живе в peer-entry, який reset видаляє). Надсилається той самий
+  `webrtc-call-offer`, що раніше робив `btn-start-call`. Лише власник → без
+  glare; joiner додає свої треки у наявному обробнику offer-а.
+- `startCall()` має guard на `sessionKey` і прапорець `state.callOfferSent`
+  (не `localTracksAddedToPeer`): невдалий offer скидає прапорець, тож
+  наступний тап повторює спробу замість «мертвого» дзвінка. Обидва прапорці
+  (+ `ownAnnouncePromise`) глобальні, тому `initiateChatSession` скидає їх
+  поруч із `resetActiveConnection()` — A3-шлях «нова сесія поверх живої» не
+  проходить через teardown (review iter2). `autoStartOwnerCall` має guard
+  по `activeConnectionId` через `await` announce-промісу.
+- **Тап mic/camera без стріму** = `previewLocalMedia()` з увімкненим лише
+  цим видом треку (інший — `enabled=false`); якщо канал відкритий, пер
+  верифікований і offer ще не надсилався — одразу `startCall()`. Тап зі
+  стрімом = toggle треку (як зараз). Кнопки завжди enabled (initial-disable
+  і enable-on-open зникають; після розриву каналу — лишаються enabled, стан
+  inactive).
+- Residual (review iter1, F2): якщо joiner тапне mic/camera в той самий
+  ~RTT, поки owner-offer у дорозі, обидві сторони в `have-local-offer`
+  (glare) → `status.error`; завдяки retry-прапорцю повторний тап лікує.
+  Вікно потребує тапу користувача саме в цю мить — прийнято як residual.
+- **«Вийти з кімнати»** (`btn-room-leave`): спільний з logout teardown
+  (`teardownMediaAndConnection()`: таймер прев'ю, close channel/pc, stop
+  tracks, reset guard/overlay/safety hint, `resetActiveConnection`) БЕЗ
+  скидання ідентичності, потім `initiateChatSession()` → нова кімната з
+  новим посиланням (і для ефемерного, і для збереженого акаунта).
+- Design-settings: order-item `headerCallControls` видаляється (3 пункти
+  лишаються; i18n-ключ `designSettings.headerControlsOrder.item.headerCallControls`
+  прибирається з усіх 11 локалей); visibility-setting `callControls`
+  переназначається на `#room-controls` (тексти label/description оновлено).
+- i18n: `room.leave` в усіх 11 локалях.
+
+- [x] **Tests**: `app.test.js` — `#btn-start-call` відсутній, `#room-controls` містить mic/camera/leave, кнопки enabled до з'єднання; camera-тап без стріму → `getUserMedia` один раз, лише video-трек enabled, call-offer надіслано; подальший mic-тап вмикає audio без повторного `getUserMedia`; власник з прев'ю при `onChannelOpen` надсилає offer без кліку (`addLocalMediaTracks` ×1); leave → `channel.close`/`pc.close`, треки `stop`, `createInvite` вдруге, `#room-id-display` змінився; RF19 order-тест на 3 пункти; `designSettingsRegistry.test.js` — permutation із 3 ключів; локальна парність (i18n.test.js) з `room.leave` і без `item.headerCallControls`.
+- [x] **Impl**: `client/index.html`, `client/css/style.css`, `client/js/app.js`, `client/js/designSettingsRegistry.js`, `client/js/advancedModeUI.js` (коментар), `client/js/i18n.js` + `locales/*.js`.
+- [x] **Exec review**: iter1 — [reviews/room-first-RF2-iter1.md](../reviews/room-first-RF2-iter1.md) FAIL (announce/sessionKey race → тригер перенесено на верифікацію пера, retry-прапорець); iter2 — [reviews/room-first-RF2-iter2.md](../reviews/room-first-RF2-iter2.md) FAIL (A3-шлях не скидав прапорці, guard по connection-id); iter3 — [reviews/room-first-RF2-iter3.md](../reviews/room-first-RF2-iter3.md) PASS; жива перевірка — в iter3.
 
 ## Секція RF3: invite-картка «Поки що ви тут самі»
 

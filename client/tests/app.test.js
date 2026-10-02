@@ -1188,7 +1188,7 @@ describe("Section RF14: design settings panel", () => {
 
   it("Section RF19: moving a header-controls order item up/down applies the new inline order to the real elements", () => {
     initApp(document, { locale: "uk" });
-    // Default order: headerCallControls, langSelect, themeToggle, settingsGear.
+    // Default order (since room-first RF2): langSelect, themeToggle, settingsGear.
     const moveUpBtn = document.querySelector(
       '[data-order-setting-key="headerControlsOrder"][data-order-item-key="themeToggle"][data-order-move="up"]'
     );
@@ -1199,12 +1199,13 @@ describe("Section RF14: design settings panel", () => {
 
     moveUpBtn.click();
 
-    // themeToggle swapped with langSelect -> new order: headerCallControls,
-    // themeToggle, langSelect, settingsGear (indices 0,1,2,3).
-    expect(document.getElementById("header-call-controls").style.order).toBe("0");
-    expect(document.getElementById("theme-toggle").style.order).toBe("1");
-    expect(document.getElementById("lang-select").style.order).toBe("2");
-    expect(document.querySelector(".settings-wrap").style.order).toBe("3");
+    // themeToggle swapped with langSelect -> new order: themeToggle,
+    // langSelect, settingsGear (indices 0,1,2).
+    // Room-first RF2: the call controls left the header, so the order list
+    // has three items -- themeToggle moved up past langSelect.
+    expect(document.getElementById("theme-toggle").style.order).toBe("0");
+    expect(document.getElementById("lang-select").style.order).toBe("1");
+    expect(document.querySelector(".settings-wrap").style.order).toBe("2");
   });
 });
 
@@ -1322,8 +1323,18 @@ describe("settings menu replacing the top nav (Section H2)", () => {
     initApp(document, { locale: "uk" });
     document.getElementById("btn-quick-chat").click();
     await vi.waitFor(() => expect(captured).toBeDefined());
+    // Room-first RF2 (iter2): the invite owner auto-starts the call once the
+    // peer's announce is verified, when the lobby preview stream exists --
+    // no button click.
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({ answer: JSON.stringify({ type: "answer", sdp: "A" }), ecdhPubkey: "peer-ecdh-b64" });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    verifyIdentityAnnounce.mockResolvedValue({ identityPublicKey: {}, identityPubkeyWire: "PEER", fingerprint: "peer-fp" });
     captured.onChannelOpen(fakeChannel());
-    document.getElementById("btn-start-call").click();
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
     await vi.waitFor(() => expect(addLocalMediaTracks).toHaveBeenCalledWith(pc1, stream));
     expect(addLocalMediaTracks).toHaveBeenCalledTimes(1);
 
@@ -1342,7 +1353,9 @@ describe("settings menu replacing the top nav (Section H2)", () => {
     document.getElementById("btn-quick-chat").click();
     await vi.waitFor(() => expect(captured2).toBeDefined());
     captured2.onChannelOpen(fakeChannel());
-    document.getElementById("btn-start-call").click();
+    await captured2.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured2.onMessage("ENCRYPTED_ANNOUNCE");
     await vi.waitFor(() => expect(addLocalMediaTracks).toHaveBeenCalledWith(pc2, stream));
     expect(addLocalMediaTracks).toHaveBeenCalledTimes(2);
   });
@@ -6310,8 +6323,17 @@ describe("instant conversation lobby: local camera/mic preview while waiting (Se
     document.getElementById("btn-quick-chat").click();
     await vi.waitFor(() => expect(document.getElementById("video-local").srcObject).toBe(stream));
 
+    // Room-first RF2 (iter2): the owner auto-starts the call once the peer
+    // is verified (session key derived, announce received).
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({ answer: JSON.stringify({ type: "answer", sdp: "A" }), ecdhPubkey: "peer-ecdh-b64" });
+    deriveSessionKey.mockResolvedValue({ __tag: "session-key" });
+    createIdentityAnnounce.mockResolvedValue({ type: "identity-announce" });
+    verifyIdentityAnnounce.mockResolvedValue({ identityPublicKey: {}, identityPubkeyWire: "PEER", fingerprint: "peer-fp" });
     captured.onChannelOpen(fakeChannel());
-    document.getElementById("btn-start-call").click();
+    await captured.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
 
     await vi.waitFor(() => expect(addLocalMediaTracks).toHaveBeenCalledWith(pc, stream));
     expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
@@ -6562,6 +6584,14 @@ describe("video call (Section V2)", () => {
   // Calls are only auto-answered for a peer whose identity has already been
   // verified via identity-announce (mirrors the chat-text gate in
   // handleChatMessage) -- this drives that verification first.
+  // Room-first RF2 (iter2): the owner's auto-call fires only once the
+  // peer's identity-announce is verified -- drive exactly that.
+  async function verifyPeerAnnounce(captured) {
+    verifyIdentityAnnounce.mockResolvedValue({ identityPublicKey: {}, identityPubkeyWire: "PEER", fingerprint: "peer-fp" });
+    decryptMessage.mockResolvedValueOnce(JSON.stringify({ type: "identity-announce", identityPubkey: "PEER", signature: "S" }));
+    await captured.onMessage("ENCRYPTED_ANNOUNCE");
+  }
+
   async function establishedVerifiedInitiatorChat() {
     verifyIdentityAnnounce.mockResolvedValue({ identityPublicKey: {}, identityPubkeyWire: "PEER", fingerprint: "peer-fp" });
     const session = await establishedInitiatorChat();
@@ -6570,16 +6600,16 @@ describe("video call (Section V2)", () => {
     return session;
   }
 
-  it("disables the call/camera/mic controls until the chat channel connects, then enables them", async () => {
-    initApp(document, { locale: "uk" });
-    for (const id of ["btn-start-call", "btn-toggle-camera", "btn-toggle-mic"]) {
-      expect(document.getElementById(id).disabled).toBe(true);
-    }
-
+  it("Room-first RF2: mic/camera/leave live in #room-controls, are enabled before any connection, and btn-start-call is gone", async () => {
     await establishedInitiatorChat();
-    for (const id of ["btn-start-call", "btn-toggle-camera", "btn-toggle-mic"]) {
+    const controls = document.getElementById("room-controls");
+    expect(controls).not.toBeNull();
+    for (const id of ["btn-toggle-mic", "btn-toggle-camera", "btn-room-leave"]) {
+      expect(controls.contains(document.getElementById(id))).toBe(true);
       expect(document.getElementById(id).disabled).toBe(false);
     }
+    expect(document.getElementById("btn-start-call")).toBeNull();
+    expect(document.getElementById("header-call-controls")).toBeNull();
   });
 
   it("registers onRemoteTrack when the peer connection is created", async () => {
@@ -6587,20 +6617,100 @@ describe("video call (Section V2)", () => {
     expect(typeof captured.onRemoteTrack).toBe("function");
   });
 
-  it("clicking Дзвінок requests camera+mic, shows local video, and sends an encrypted call offer", async () => {
+  it("Room-first RF2: tapping the camera with no stream yet requests media, enables ONLY the video track, shows local video and sends an encrypted call offer", async () => {
+    const localTracks = [fakeTrack("video"), fakeTrack("audio")];
+    const stream = fakeStream(localTracks);
+    // The lobby's automatic preview (F6) is denied here, so the camera tap
+    // below is the FIRST acquisition -- the branch under test.
+    navigator.mediaDevices.getUserMedia.mockRejectedValueOnce(new Error("NotAllowed")).mockResolvedValue(stream);
+    createRenegotiationOffer.mockResolvedValue({ type: "offer", sdp: "RENEG_OFFER" });
+
+    const { channel, pc } = await establishedVerifiedInitiatorChat();
+    await vi.waitFor(() => expect(document.getElementById("video-status").textContent).toContain("NotAllowed"));
+    document.getElementById("btn-toggle-camera").click();
+
+    await vi.waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(document.getElementById("video-local").srcObject).toBe(stream));
+    // The per-kind enable runs after previewLocalMedia resolves -- poll.
+    await vi.waitFor(() => expect(localTracks[1].enabled).toBe(false));
+    expect(localTracks[0].enabled).toBe(true);
+    await vi.waitFor(() => expect(addLocalMediaTracks).toHaveBeenCalledWith(pc, stream));
+    const expected = JSON.stringify({ type: "webrtc-call-offer", sdp: { type: "offer", sdp: "RENEG_OFFER" } });
+    await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith(`ENC(${expected})`));
+  });
+
+  it("Room-first RF2 (iter2): the owner auto-offers only AFTER the peer's announce is verified, and after its own announce was sent -- exactly one offer", async () => {
     const localTracks = [fakeTrack("video"), fakeTrack("audio")];
     const stream = fakeStream(localTracks);
     navigator.mediaDevices.getUserMedia.mockResolvedValue(stream);
     createRenegotiationOffer.mockResolvedValue({ type: "offer", sdp: "RENEG_OFFER" });
 
-    const { channel, pc } = await establishedInitiatorChat();
-    document.getElementById("btn-start-call").click();
-
-    await vi.waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({ video: true, audio: true }));
+    const { captured, channel, pc } = await establishedInitiatorChat();
     await vi.waitFor(() => expect(document.getElementById("video-local").srcObject).toBe(stream));
+    const offerPayload = `ENC(${JSON.stringify({ type: "webrtc-call-offer", sdp: { type: "offer", sdp: "RENEG_OFFER" } })})`;
+    // Channel open + session key derived, preview stream present -- but the
+    // peer is not verified yet: NO offer may have gone out.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(channel.send.mock.calls.map(([payload]) => payload)).not.toContain(offerPayload);
+    expect(addLocalMediaTracks).not.toHaveBeenCalled();
+
+    await verifyPeerAnnounce(captured);
+
+    await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith(offerPayload));
     expect(addLocalMediaTracks).toHaveBeenCalledWith(pc, stream);
-    const expected = JSON.stringify({ type: "webrtc-call-offer", sdp: { type: "offer", sdp: "RENEG_OFFER" } });
-    await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith(`ENC(${expected})`));
+    const payloads = channel.send.mock.calls.map(([payload]) => payload);
+    const announceIndex = payloads.indexOf(`ENC(${JSON.stringify({ type: "identity-announce" })})`);
+    expect(announceIndex).toBeGreaterThanOrEqual(0);
+    expect(announceIndex).toBeLessThan(payloads.indexOf(offerPayload));
+    expect(payloads.filter((payload) => payload === offerPayload)).toHaveLength(1);
+  });
+
+  it("Room-first RF2 (iter3): a SECOND session started while the first call is live (A3 path, no logout/leave) offers again on the new pc", async () => {
+    const localTracks = [fakeTrack("video"), fakeTrack("audio")];
+    const stream = fakeStream(localTracks);
+    navigator.mediaDevices.getUserMedia.mockResolvedValue(stream);
+    createRenegotiationOffer.mockResolvedValue({ type: "offer", sdp: "RENEG_OFFER" });
+
+    const first = await establishedInitiatorChat();
+    await vi.waitFor(() => expect(document.getElementById("video-local").srcObject).toBe(stream));
+    await verifyPeerAnnounce(first.captured);
+    await vi.waitFor(() => expect(addLocalMediaTracks).toHaveBeenCalledWith(first.pc, stream));
+
+    // Second session on top of the live one (btn-initiate again).
+    let captured2;
+    const pc2 = { __fakePc: "second" };
+    const channel2 = fakeChannel();
+    startAsInitiator.mockImplementationOnce((opts) => {
+      captured2 = opts;
+      return pc2;
+    });
+    document.getElementById("btn-initiate").click();
+    await vi.waitFor(() => expect(captured2).toBeDefined());
+    captured2.onChannelOpen(channel2);
+    await captured2.onLocalOfferReady({ type: "offer", sdp: "OFFER_SDP" });
+    await verifyPeerAnnounce(captured2);
+
+    const offerPayload = `ENC(${JSON.stringify({ type: "webrtc-call-offer", sdp: { type: "offer", sdp: "RENEG_OFFER" } })})`;
+    await vi.waitFor(() => expect(channel2.send).toHaveBeenCalledWith(offerPayload));
+    expect(addLocalMediaTracks).toHaveBeenCalledWith(pc2, stream);
+  });
+
+  it("Room-first RF2 (iter2): a failed offer is retryable -- the next mic/camera tap offers again instead of staying dead", async () => {
+    const localTracks = [fakeTrack("video"), fakeTrack("audio")];
+    const stream = fakeStream(localTracks);
+    navigator.mediaDevices.getUserMedia.mockRejectedValueOnce(new Error("NotAllowed")).mockResolvedValue(stream);
+    createRenegotiationOffer.mockRejectedValueOnce(new Error("boom")).mockResolvedValue({ type: "offer", sdp: "RENEG_OFFER" });
+
+    const { channel } = await establishedVerifiedInitiatorChat();
+    await vi.waitFor(() => expect(document.getElementById("video-status").textContent).toContain("NotAllowed"));
+    document.getElementById("btn-toggle-camera").click();
+    await vi.waitFor(() => expect(document.getElementById("video-status").textContent).toContain("boom"));
+    const offerPayload = `ENC(${JSON.stringify({ type: "webrtc-call-offer", sdp: { type: "offer", sdp: "RENEG_OFFER" } })})`;
+    expect(channel.send).not.toHaveBeenCalledWith(offerPayload);
+
+    document.getElementById("btn-toggle-mic").click();
+    await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith(offerPayload));
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(2); // preview (denied) + first tap; the retry reused the stream
   });
 
   it("auto-answers an incoming call offer with its own media and an encrypted call answer", async () => {
@@ -6665,36 +6775,42 @@ describe("video call (Section V2)", () => {
     navigator.mediaDevices.getUserMedia.mockResolvedValue(stream);
     createRenegotiationOffer.mockResolvedValue({ type: "offer", sdp: "RENEG_OFFER" });
 
-    await establishedInitiatorChat();
-    document.getElementById("btn-start-call").click();
-    await vi.waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1));
-    expect(document.getElementById("btn-start-call").classList.contains("active")).toBe(true);
-    expect(document.getElementById("btn-toggle-camera").classList.contains("active")).toBe(true);
-    expect(document.getElementById("btn-toggle-mic").classList.contains("active")).toBe(true);
+    navigator.mediaDevices.getUserMedia.mockRejectedValueOnce(new Error("NotAllowed")).mockResolvedValue(stream);
+    await establishedVerifiedInitiatorChat();
+    await vi.waitFor(() => expect(document.getElementById("video-status").textContent).toContain("NotAllowed"));
+    // Room-first RF2: first tap acquires media with only the tapped kind on.
+    document.getElementById("btn-toggle-mic").click();
+    await vi.waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(document.getElementById("btn-toggle-mic").classList.contains("active")).toBe(true));
+    expect(document.getElementById("btn-toggle-mic").getAttribute("aria-pressed")).toBe("true");
+    await vi.waitFor(() => expect(localTracks[0].enabled).toBe(false));
+    expect(localTracks[1].enabled).toBe(true);
+    expect(document.getElementById("btn-toggle-camera").classList.contains("active")).toBe(false);
 
     document.getElementById("btn-toggle-camera").click();
-    expect(localTracks[0].enabled).toBe(false);
-    expect(document.getElementById("btn-toggle-camera").classList.contains("active")).toBe(false);
+    await vi.waitFor(() => expect(localTracks[0].enabled).toBe(true));
+    expect(document.getElementById("btn-toggle-camera").classList.contains("active")).toBe(true);
     document.getElementById("btn-toggle-mic").click();
-    expect(localTracks[1].enabled).toBe(false);
+    await vi.waitFor(() => expect(localTracks[1].enabled).toBe(false));
     expect(document.getElementById("btn-toggle-mic").classList.contains("active")).toBe(false);
-    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
+    expect(document.getElementById("btn-toggle-mic").getAttribute("aria-pressed")).toBe("false");
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(2);
   });
 
-  it("disables the call controls and stops local tracks when the channel closes", async () => {
+  it("stops local tracks when the channel closes; mic/camera stay enabled (tap = re-acquire) but inactive (Room-first RF2)", async () => {
     const localTracks = [fakeTrack("video"), fakeTrack("audio")];
     const stream = fakeStream(localTracks);
     navigator.mediaDevices.getUserMedia.mockResolvedValue(stream);
     createRenegotiationOffer.mockResolvedValue({ type: "offer", sdp: "RENEG_OFFER" });
 
     const { captured } = await establishedInitiatorChat();
-    document.getElementById("btn-start-call").click();
+    document.getElementById("btn-toggle-camera").click();
     await vi.waitFor(() => expect(document.getElementById("video-local").srcObject).toBe(stream));
 
     captured.onChannelClose();
 
-    for (const id of ["btn-start-call", "btn-toggle-camera", "btn-toggle-mic"]) {
-      expect(document.getElementById(id).disabled).toBe(true);
+    for (const id of ["btn-toggle-camera", "btn-toggle-mic"]) {
+      expect(document.getElementById(id).disabled).toBe(false);
       expect(document.getElementById(id).classList.contains("active")).toBe(false);
     }
     for (const track of localTracks) {
@@ -6706,7 +6822,7 @@ describe("video call (Section V2)", () => {
     navigator.mediaDevices.getUserMedia.mockRejectedValue(new Error("Permission denied"));
 
     await establishedInitiatorChat();
-    document.getElementById("btn-start-call").click();
+    document.getElementById("btn-toggle-camera").click();
 
     await vi.waitFor(() => expect(document.getElementById("video-status").textContent).toContain("Permission denied"));
   });
@@ -6728,21 +6844,18 @@ describe("Section RF4: fixed conversation toolbar + floating, draggable video wi
 
     expect(document.getElementById("conversation-toolbar").hidden).toBe(true);
     expect(document.getElementById("floating-video").hidden).toBe(true);
-    expect(document.getElementById("header-call-controls").hidden).toBe(true);
     expect(document.body.classList.contains("conversation-toolbar-visible")).toBe(false);
 
     location.hash = "#/conversation";
     window.dispatchEvent(new Event("hashchange"));
     expect(document.getElementById("conversation-toolbar").hidden).toBe(false);
     expect(document.getElementById("floating-video").hidden).toBe(false);
-    expect(document.getElementById("header-call-controls").hidden).toBe(false);
     expect(document.body.classList.contains("conversation-toolbar-visible")).toBe(true);
 
     location.hash = "#/history";
     window.dispatchEvent(new Event("hashchange"));
     expect(document.getElementById("conversation-toolbar").hidden).toBe(true);
     expect(document.getElementById("floating-video").hidden).toBe(true);
-    expect(document.getElementById("header-call-controls").hidden).toBe(true);
     expect(document.body.classList.contains("conversation-toolbar-visible")).toBe(false);
   });
 
@@ -9724,6 +9837,42 @@ describe("Room-first RF1 (specs/ui/room-first.md): room stage + toolbar room id"
     location.hash = "#/profile";
     window.dispatchEvent(new Event("hashchange"));
     expect(stage.contains(document.getElementById("video-local"))).toBe(false);
+  });
+
+  it("Room-first RF2: leaving the room tears the session down (channel/pc closed, tracks stopped) and opens a NEW room with a new invite, keeping the identity", async () => {
+    const localTracks = [{ kind: "video", enabled: true, stop: vi.fn() }, { kind: "audio", enabled: true, stop: vi.fn() }];
+    const stream = { getTracks: () => localTracks };
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getUserMedia: vi.fn().mockResolvedValue(stream) },
+      configurable: true
+    });
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValueOnce({ roomId: "aaaa1111", inviteToken: "tok-a" }).mockResolvedValueOnce({ roomId: "bbbb2222", inviteToken: "tok-b" });
+    let captured;
+    const pc = { close: vi.fn() };
+    startAsInitiator.mockImplementation((opts) => {
+      captured = opts;
+      return pc;
+    });
+
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-quick-chat").click();
+    await vi.waitFor(() => expect(document.getElementById("room-id-display").textContent).toBe("aaaa"));
+    await vi.waitFor(() => expect(captured).toBeDefined());
+    const channel = { ...fakeChannel(), close: vi.fn() };
+    captured.onChannelOpen(channel);
+    await vi.waitFor(() => expect(document.getElementById("video-local").srcObject).toBe(stream));
+
+    document.getElementById("btn-room-leave").click();
+
+    await vi.waitFor(() => expect(document.getElementById("room-id-display").textContent).toBe("bbbb"));
+    expect(channel.close).toHaveBeenCalled();
+    expect(pc.close).toHaveBeenCalled();
+    for (const track of localTracks) expect(track.stop).toHaveBeenCalled();
+    expect(createInvite).toHaveBeenCalledTimes(2);
+    expect(document.getElementById("account-login-block").hidden).toBe(true); // identity kept -- not a logout
   });
 
   it("shows the first 4 characters of the room id in the toolbar once the lobby has an invite", async () => {

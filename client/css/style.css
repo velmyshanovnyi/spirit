@@ -1079,16 +1079,41 @@ body.account-modal-suppressed [data-screen="account"].modal-screen {
 
 /* Call/camera/mic icons moved into the global header itself (Section
    RF6) -- a plain inline flex span among the header's other controls. */
-.header-call-controls {
+/* Room-first RF2 (specs/ui/room-first.md): the room's control bar --
+   round 60px mic / camera toggles and a red "leave" button under the
+   stage (replaces the former .header-call-controls icons). */
+.room-controls {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: 18px;
+  padding: var(--space-3) 0 var(--space-4);
 }
-
-.header-call-controls .btn-icon.active {
+.btn-room {
+  width: 60px;
+  height: 60px;
+  min-width: 60px;
+  padding: 0;
+  border-radius: 30px;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.btn-room.active {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-contrast);
+}
+.btn-room-leave {
+  background: #d84c4c;
+  border-color: #d84c4c;
+  color: #ffffff;
+}
+.btn-room-leave:hover {
+  background: #c23d3d;
+  border-color: #c23d3d;
 }
 
 /* The video call window floats over the ENTIRE page (not confined to the

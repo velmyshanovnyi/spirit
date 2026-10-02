@@ -1193,10 +1193,6 @@ export function initApp(doc, options) {
     if (toolbar) toolbar.hidden = !visible;
     const floatingVideo = el("floating-video");
     if (floatingVideo) floatingVideo.hidden = !visible;
-    // Section RF6: call/camera/mic icons moved into the global header
-    // itself (still gated on the same route check as the toolbar above).
-    const headerCallControls = el("header-call-controls");
-    if (headerCallControls) headerCallControls.hidden = !visible;
     doc.body.classList.toggle("conversation-toolbar-visible", visible);
     // Re-measure now that .hidden just changed -- a hidden element reports
     // offsetHeight 0, so this only produces a meaningful value once shown.
@@ -1554,7 +1550,10 @@ export function initApp(doc, options) {
     router.navigate("conversation");
   });
 
-  el("btn-logout")?.addEventListener("click", () => {
+  // Room-first RF2: the media + connection half of logout, shared with
+  // "leave the room" (btn-room-leave). Identity/session handling stays in
+  // the two callers.
+  function teardownMediaAndConnection() {
     if (state.localMediaPreviewTimeoutId) {
       clearTimeout(state.localMediaPreviewTimeoutId);
       state.localMediaPreviewTimeoutId = null;
@@ -1564,27 +1563,30 @@ export function initApp(doc, options) {
     if (state.localStream) {
       for (const track of state.localStream.getTracks()) track.stop();
     }
-    forgetSession();
-    state.identityKeyPair = null;
-    state.senderKey = null;
-    state.nickname = null;
     state.localStream = null;
     updateCallButtonStates();
     el("video-remote").hidden = true;
     el("video-remote").srcObject = null;
     hideSafetyNumberHint();
+    resetActiveConnection();
+    state.localTracksAddedToPeer = false;
+    state.callOfferSent = false;
+  }
+
+  el("btn-logout")?.addEventListener("click", () => {
+    teardownMediaAndConnection();
+    forgetSession();
+    state.identityKeyPair = null;
+    state.senderKey = null;
+    state.nickname = null;
     // Section GC0: deletes the active state.peers entry outright (pc,
     // channel, sessionKey, sessionEcdhWires, sendChainKey, receiveChainKey,
     // peerFingerprint, peerIdentityPublicKey, isInviteOwner all go with it)
     // instead of nulling each field individually -- avoids leaving a stale
     // all-null entry behind in the Map (exec review requirement for this
     // section).
-    resetActiveConnection();
-    // exec review finding: without this, a fresh post-logout session could
-    // inherit stale flags from the ended one -- e.g. acquireLocalStream()'s
-    // one-time addLocalMediaTracks guard staying "already added" and silently
-    // skipping media on the NEW peer connection.
-    state.localTracksAddedToPeer = false;
+    // (resetActiveConnection + the addLocalMediaTracks-guard reset -- an
+    // earlier exec review finding -- now live in teardownMediaAndConnection.)
     setDynamicText(el("pub-key-display"), "");
     renderGuestQuickActions();
     renderNotificationsCard();
@@ -1849,17 +1851,18 @@ export function initApp(doc, options) {
   // Reflects real on/off state on the icon call-controls (.active, styled in
   // style.css) rather than leaving them looking identical whether camera/mic
   // are live or not -- a plain :hover/:focus ring isn't enough to tell.
-  // btn-start-call is "active" once there's a local stream at all (a call is
-  // underway or at least being previewed); camera/mic reflect their own
-  // track.enabled.
+  // camera/mic reflect their own track.enabled (room-first RF2: there is no
+  // separate "call" button any more).
   function updateCallButtonStates() {
     const hasStream = !!state.localStream;
-    el("btn-start-call")?.classList.toggle("active", hasStream);
     const tracks = hasStream ? state.localStream.getTracks() : [];
     const videoEnabled = tracks.some((track) => track.kind === "video" && track.enabled);
     const audioEnabled = tracks.some((track) => track.kind === "audio" && track.enabled);
+    // Room-first RF2: the toggles are real toggle buttons (aria-pressed).
     el("btn-toggle-camera")?.classList.toggle("active", videoEnabled);
+    el("btn-toggle-camera")?.setAttribute("aria-pressed", String(videoEnabled));
     el("btn-toggle-mic")?.classList.toggle("active", audioEnabled);
+    el("btn-toggle-mic")?.setAttribute("aria-pressed", String(audioEnabled));
   }
 
   // Section F6 (instant conversation lobby, 2026-07-17): local camera/mic
@@ -1893,8 +1896,8 @@ export function initApp(doc, options) {
   // camera+mic to the peer, once a chat channel exists to renegotiate over.
   // Reuses whatever previewLocalMedia() already acquired rather than
   // prompting getUserMedia a second time, and only ever adds tracks to the
-  // peer connection once (a second btn-start-call click must not duplicate
-  // tracks on the same pc).
+  // peer connection once (a second startCall() must not duplicate tracks on
+  // the same pc).
   async function acquireLocalStream() {
     const stream = await previewLocalMedia();
     if (stream && !state.localTracksAddedToPeer) {
@@ -1985,6 +1988,11 @@ export function initApp(doc, options) {
       }
       state.peerFingerprint = verified.fingerprint;
       state.peerIdentityPublicKey = verified.identityPublicKey;
+      // Room-first RF2: the invite owner offers the call now that the peer
+      // is verified (only this side offers -- no glare; the joiner adds its
+      // own tracks while answering). Without a preview stream nothing
+      // happens until the first mic/camera tap.
+      if (state.isInviteOwner && state.localStream) void autoStartOwnerCall();
       let continuity = "";
       // Section P4 (security-hardening.md): a peer verified for the first
       // time -- either a brand-new profile-mode contact, or ANY peer in
@@ -2320,10 +2328,15 @@ export function initApp(doc, options) {
    * AND the session key + ECDH wires exist, whichever completes last.
    */
   function makeIdentityAnnouncer() {
-    let announced = false;
-    return async () => {
-      if (announced || !state.channel || !state.sessionKey || !state.sessionEcdhWires) return;
-      announced = true;
+    let inFlight = null;
+    // Returns the same in-flight promise on every call after the first real
+    // one (Room-first RF2): callers store it as state.ownAnnouncePromise and
+    // the owner's auto-call awaits it, whichever of afterChannelOpen /
+    // onSessionReady happened to trigger the actual send.
+    return () => {
+      if (inFlight) return inFlight;
+      if (!state.channel || !state.sessionKey || !state.sessionEcdhWires) return Promise.resolve();
+      inFlight = (async () => {
       try {
         const announce = await createIdentityAnnounce(
           state.identityKeyPair.privateKey,
@@ -2359,6 +2372,8 @@ export function initApp(doc, options) {
       } catch (err) {
         setStatus(t("status.error", { msg: err.message })); // afterChannelOpen path is detached; nothing upstream catches
       }
+      })();
+      return inFlight;
     };
   }
 
@@ -2429,9 +2444,6 @@ export function initApp(doc, options) {
       // reconnect-and-resync share the exact same queuing path as
       // "never connected yet".
       state.channel = null;
-      for (const id of ["btn-start-call", "btn-toggle-camera", "btn-toggle-mic"]) {
-        el(id).disabled = true;
-      }
       if (state.localMediaPreviewTimeoutId) {
         clearTimeout(state.localMediaPreviewTimeoutId);
         state.localMediaPreviewTimeoutId = null;
@@ -2441,6 +2453,7 @@ export function initApp(doc, options) {
         state.localStream = null;
       }
       state.localTracksAddedToPeer = false;
+      state.callOfferSent = false;
       updateCallButtonStates();
       // Section RF5: hides the small remote-video corner overlay again --
       // otherwise it'd sit there as an empty dark box once the stream
@@ -2458,9 +2471,6 @@ export function initApp(doc, options) {
         if (ownerConnectionIdAtWireTime !== null && state.activeConnectionId !== ownerConnectionIdAtWireTime) return;
         state.channel = channel;
         setStatus(t("status.connected"));
-        for (const id of ["btn-start-call", "btn-toggle-camera", "btn-toggle-mic"]) {
-          el(id).disabled = false;
-        }
         // Section RF9: the session key may already have been derived before
         // the channel finished opening (or may not be -- see the other
         // flush call site after onSessionReady below); only actually sends
@@ -2929,6 +2939,18 @@ export function initApp(doc, options) {
     // record who they actually meant to dial -- checked against whoever's
     // identity-announce actually arrives, below.
     ensureActivePeer().expectedFingerprint = expectedFingerprint;
+    // Room-first RF2: the lobby set isInviteOwner on the entry that
+    // resetActiveConnection() just deleted -- re-assert it on the fresh one
+    // (the owner's auto-call and renderInviteBar both read it).
+    state.isInviteOwner = true;
+    // Exec review (RF2 iter2): these three are GLOBAL, not per-peer, and a
+    // new session started on top of a live one (this A3 path) never goes
+    // through teardownMediaAndConnection/handleConnectionTornDown -- the
+    // torn-down handler of the OLD connection bails on its stale-id guard.
+    // Without this reset the new room's call would be silently dead.
+    state.callOfferSent = false;
+    state.localTracksAddedToPeer = false;
+    state.ownAnnouncePromise = null;
     const announce = makeIdentityAnnouncer();
     startInitiatorSession({
       senderKey,
@@ -2942,10 +2964,14 @@ export function initApp(doc, options) {
       // without afterChannelOpen, so this default is unaffected there.
       channelOptions: {
         afterChannelOpen: () => {
-          announce();
+          // Room-first RF2: the owner's auto-call awaits this promise (see
+          // autoStartOwnerCall) so the offer never overtakes the announce.
+          state.ownAnnouncePromise = announce();
         }
       },
-      onSessionReady: announce
+      onSessionReady: () => {
+        state.ownAnnouncePromise = announce();
+      }
     });
   }
 
@@ -3103,37 +3129,83 @@ export function initApp(doc, options) {
     router
   });
 
-  // Disabled until a chat channel connects (enabled in wireChannelCallbacks'
-  // onChannelOpen) -- there is no peer connection to add tracks to yet.
-  for (const id of ["btn-start-call", "btn-toggle-camera", "btn-toggle-mic"]) {
-    el(id).disabled = true;
-  }
-
-  withBusyButton(el("btn-start-call"), async () => {
+  // Room-first RF2 (specs/ui/room-first.md): the former btn-start-call body
+  // -- adds the local tracks to the peer connection and sends the
+  // renegotiation offer. Called by onChannelOpen (owner with a preview
+  // stream) and by the first mic/camera tap once a channel is open.
+  async function startCall() {
+    // sessionKey guard (exec review iter1): a channel can be open before the
+    // key is derived; encrypting with an undefined key would throw and the
+    // call would look dead. callOfferSent (not localTracksAddedToPeer) gates
+    // re-entry so a FAILED offer stays retryable from the next tap.
+    if (!state.channel || !state.pc || !state.sessionKey || state.callOfferSent) return;
+    state.callOfferSent = true;
     try {
       await acquireLocalStream();
       const offer = await createRenegotiationOffer(state.pc);
       state.channel.send(await encryptMessage(state.sessionKey, JSON.stringify({ type: "webrtc-call-offer", sdp: offer })));
       updateCallButtonStates();
     } catch (err) {
+      state.callOfferSent = false;
       setVideoStatus(t("status.error", { msg: err.message }));
     }
-  });
+  }
 
+  // Room-first RF2 (exec review iter1): the invite owner's automatic offer.
+  // Triggered from the identity-announce handler once the PEER is verified
+  // -- which proves both session keys exist and the peer processed the
+  // channel in order -- and only after our OWN announce went out (the
+  // announcer's in-flight promise), so the peer never sees an offer before
+  // our announce and rejects it for lack of a peerFingerprint.
+  async function autoStartOwnerCall() {
+    // Stale-write guard (exec review RF2 iter2): if the room was switched
+    // while the announce was in flight, don't offer on the NEW connection
+    // (its peer isn't verified yet and would reject the offer).
+    const connectionIdAtStart = state.activeConnectionId;
+    try {
+      await state.ownAnnouncePromise;
+    } catch {
+      // the announce path reports its own failure; still try the offer
+    }
+    if (state.activeConnectionId !== connectionIdAtStart) return;
+    await startCall();
+  }
+
+  // Room-first RF2: one handler for both toggles. No stream yet -> acquire
+  // media with ONLY the tapped kind enabled (the other stays muted until
+  // its own tap); stream present -> flip that kind. Either way, if a
+  // channel is open and the tracks were never added, this tap also starts
+  // the call.
+  async function onMediaToggle(kind) {
+    if (!state.localStream) {
+      const stream = await previewLocalMedia();
+      if (!stream) return;
+      for (const track of stream.getTracks()) track.enabled = track.kind === kind;
+    } else {
+      for (const track of state.localStream.getTracks()) {
+        if (track.kind === kind) track.enabled = !track.enabled;
+      }
+    }
+    updateCallButtonStates();
+    // Only offer to a VERIFIED peer (the peer rejects offers before it has a
+    // peerFingerprint). Before verification the owner's auto-call covers it;
+    // a joiner that tapped early offers on its next tap.
+    if (state.channel && state.pc && state.peerFingerprint && !state.callOfferSent) await startCall();
+  }
   el("btn-toggle-camera").addEventListener("click", () => {
-    if (!state.localStream) return;
-    for (const track of state.localStream.getTracks()) {
-      if (track.kind === "video") track.enabled = !track.enabled;
-    }
-    updateCallButtonStates();
+    void onMediaToggle("video");
+  });
+  el("btn-toggle-mic").addEventListener("click", () => {
+    void onMediaToggle("audio");
   });
 
-  el("btn-toggle-mic").addEventListener("click", () => {
-    if (!state.localStream) return;
-    for (const track of state.localStream.getTracks()) {
-      if (track.kind === "audio") track.enabled = !track.enabled;
-    }
-    updateCallButtonStates();
+  // Room-first RF2: "leave the room" -- same media/connection teardown as
+  // logout (shared below), but the identity stays and a NEW room with a
+  // fresh invite opens immediately, for ephemeral and saved accounts alike.
+  withBusyButton(el("btn-room-leave"), async () => {
+    teardownMediaAndConnection();
+    state.peerFingerprint = null;
+    await initiateChatSession();
   });
 
   // Section RF9: actually encrypts+transmits ONE message over the current

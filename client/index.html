@@ -45,16 +45,6 @@
       <button id="btn-quick-login" type="button" class="btn-link" data-i18n="quick.login">Увійти</button>
     </div>
     <div class="header-controls">
-      <!-- Section RF6 (follow-up mockup): call/camera/mic icons live in the
-           global header itself, right next to lang/theme, instead of their
-           own row underneath -- shown only on the conversation route via
-           app.js's setConversationChromeVisible (same route gate as
-           #conversation-toolbar below, just a different DOM location). -->
-      <span id="header-call-controls" class="header-call-controls" hidden>
-        <button id="btn-start-call" type="button" class="btn-icon" aria-label="Дзвінок" data-i18n-title="video.startCall" title="Дзвінок">📞</button>
-        <button id="btn-toggle-camera" type="button" class="btn-icon" aria-label="Камера" data-i18n-title="video.toggleCamera" title="Камера">🎥</button>
-        <button id="btn-toggle-mic" type="button" class="btn-icon" aria-label="Мікрофон" data-i18n-title="video.toggleMic" title="Мікрофон">🎤</button>
-      </span>
       <select id="lang-select" aria-label="Language"></select>
       <button id="theme-toggle" type="button" class="btn-icon" data-i18n-title="theme.toggle" aria-label="Theme">◐</button>
       <div class="settings-wrap">
@@ -660,6 +650,17 @@
             <svg width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path></svg>
           </div>
           <div id="video-status" class="status" aria-live="polite"></div>
+        </div>
+        <!-- Room-first RF2 (specs/ui/room-first.md): the room's control bar
+             -- mic / camera toggles (same ids as the former header icons,
+             so app.js's updateCallButtonStates keeps working) and "leave".
+             No "start call" button: the invite owner auto-offers on channel
+             open when a preview stream exists; otherwise the first mic or
+             camera tap acquires media and starts the call. -->
+        <div id="room-controls" class="room-controls">
+          <button id="btn-toggle-mic" type="button" class="btn-room" aria-pressed="false" aria-label="Мікрофон" data-i18n-title="video.toggleMic" title="Мікрофон"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0"></path><path d="M12 18v3"></path></svg></button>
+          <button id="btn-toggle-camera" type="button" class="btn-room" aria-pressed="false" aria-label="Камера" data-i18n-title="video.toggleCamera" title="Камера"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="13" height="10" rx="2"></rect><path d="M16 10l5-3v10l-5-3"></path></svg></button>
+          <button id="btn-room-leave" type="button" class="btn-room btn-room-leave" aria-label="Вийти з кімнати" data-i18n-title="room.leave" title="Вийти з кімнати"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12"></path><path d="M18 6 6 18"></path></svg></button>
         </div>
 
         <!-- Section GC3 (specs/phase4/group-chats.md), design point 5: a

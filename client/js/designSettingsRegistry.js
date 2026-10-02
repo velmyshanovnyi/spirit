@@ -221,7 +221,6 @@ export const DESIGN_SETTINGS = [
     // actual DOM order for these elements exactly, so "no override" naturally
     // renders identically to this list, no special-casing needed on reset.
     items: [
-      { key: "headerCallControls", labelKey: "designSettings.headerControlsOrder.item.headerCallControls", selector: "#header-call-controls" },
       { key: "langSelect", labelKey: "designSettings.headerControlsOrder.item.langSelect", selector: "#lang-select" },
       { key: "themeToggle", labelKey: "designSettings.headerControlsOrder.item.themeToggle", selector: "#theme-toggle" },
       { key: "settingsGear", labelKey: "designSettings.headerControlsOrder.item.settingsGear", selector: ".settings-wrap" }
@@ -233,7 +232,9 @@ export const DESIGN_SETTINGS = [
     labelKey: "designSettings.callControls.label",
     descriptionKey: "designSettings.callControls.description",
     type: "boolean",
-    selector: "#header-call-controls"
+    // Room-first RF2: the call controls moved from the header into the
+    // conversation card's own control bar.
+    selector: "#room-controls"
   },
   {
     key: "sidebarSearch",

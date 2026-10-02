@@ -249,12 +249,12 @@ describe("Section RF19: layout edit mode -- header controls order", () => {
   });
 
   it("setDesignSetting persists a valid permutation and rejects an invalid one", () => {
-    const validOrder = ["themeToggle", "langSelect", "settingsGear", "headerCallControls"];
+    const validOrder = ["themeToggle", "langSelect", "settingsGear"]; // Room-first RF2: call controls left the header
     expect(setDesignSetting("headerControlsOrder", validOrder)).toBe(true);
     expect(getDesignSetting("headerControlsOrder")).toEqual(validOrder);
 
     expect(setDesignSetting("headerControlsOrder", ["langSelect", "themeToggle"])).toBe(false); // wrong length
-    expect(setDesignSetting("headerControlsOrder", ["langSelect", "themeToggle", "settingsGear", "notReal"])).toBe(false); // unknown item key
+    expect(setDesignSetting("headerControlsOrder", ["langSelect", "themeToggle", "notReal"])).toBe(false); // unknown item key
   });
 
   it("applyDesignSettings sets inline order per item when overridden, removes it on reset", () => {
@@ -264,28 +264,23 @@ describe("Section RF19: layout edit mode -- header controls order", () => {
     themeNode.id = "theme-toggle";
     const gearNode = document.createElement("div");
     gearNode.className = "settings-wrap";
-    const callNode = document.createElement("span");
-    callNode.id = "header-call-controls";
-    document.body.append(langNode, themeNode, gearNode, callNode);
+    document.body.append(langNode, themeNode, gearNode);
 
-    setDesignSetting("headerControlsOrder", ["themeToggle", "langSelect", "settingsGear", "headerCallControls"]);
+    setDesignSetting("headerControlsOrder", ["themeToggle", "langSelect", "settingsGear"]);
     applyDesignSettings(document);
     expect(themeNode.style.order).toBe("0");
     expect(langNode.style.order).toBe("1");
     expect(gearNode.style.order).toBe("2");
-    expect(callNode.style.order).toBe("3");
 
     resetDesignSetting("headerControlsOrder");
     applyDesignSettings(document);
     expect(themeNode.style.order).toBe("");
     expect(langNode.style.order).toBe("");
     expect(gearNode.style.order).toBe("");
-    expect(callNode.style.order).toBe("");
 
     document.body.removeChild(langNode);
     document.body.removeChild(themeNode);
     document.body.removeChild(gearNode);
-    document.body.removeChild(callNode);
   });
 });
 
