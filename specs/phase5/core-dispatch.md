@@ -112,14 +112,42 @@ ensureLocalGroupRecord, broadcastGroupMemberJoined }`; таблиця робит
 
 ## Секція C5: домен «дзвінок/медіа» → новий `client/js/callUI.js`
 
-Обробники `webrtc-call-offer`/`webrtc-call-answer` + `previewLocalMedia`,
-`acquireLocalStream`, `updateCallButtonStates`, `startCall`, `autoStartOwnerCall`,
-`onMediaToggle`, `setVideoStatus`, `teardownMediaAndConnection`(?) — межа
-визначається ПІСЛЯ C1 (частина цього ще сплетена з wireChannelCallbacks /
-logout). Окремий підрозділ спеки перед стартом.
-- [ ] **Tests**: —
-- [ ] **Impl**: —
-- [ ] **Exec review**: —
+Межа (визначена після C1–C4, 2026-10-03). Verbatim переносяться:
+`setVideoStatus`, `updateCallButtonStates`, `previewLocalMedia`,
+`acquireLocalStream`, `onWebrtcCallOffer`, `onWebrtcCallAnswer`, `startCall`,
+`autoStartOwnerCall`, `onMediaToggle` і два click-обробники mic/camera.
+Модуль імпортує `addLocalMediaTracks`/`createRenegotiationOffer`/
+`createRenegotiationAnswer`/`applyRenegotiationAnswer` (webrtc.js) та
+`encryptMessage`; DI: `doc, el, t, state`.
+
+Точки зчеплення, що лишаються в app.js: `teardownMediaAndConnection`
+(logout/leave) і `handleConnectionTornDown` (wireChannelCallbacks) — обидва
+містять ОДИН І ТОЙ САМИЙ продубльований шматок (clear preview-timer, stop
+tracks, `localStream=null`, скинути `localTracksAddedToPeer`/`callOfferSent`,
+`updateCallButtonStates`, сховати/обнулити `#video-remote`). Єдина
+не-verbatim зміна секції: цей шматок стає `stopLocalMedia()` у модулі і
+викликається з обох місць (дедуплікація; у torn-down порядок дій той самий, у
+teardown два прапорці скидаються раніше, ніж hideSafetyNumberHint/
+resetActiveConnection — неспостережно: все синхронне, ті функції прапорців не
+читають, прапорці не per-peer — review iter1;
+teardown додатково робить close channel/pc + hideSafetyNumberHint +
+resetActiveConnection — лишається в app.js). `enterConversationLobby`
+(F6-прев'ю з таймером) і `onRemoteTrack` (у стартах сесій) — в app.js,
+викликають повернені `previewLocalMedia`.
+
+`initCallUI({ doc, el, t, state })` повертає `{ callControlHandlers,
+previewLocalMedia, acquireLocalStream, updateCallButtonStates, stopLocalMedia,
+setVideoStatus, autoStartOwnerCall }`. Init — на місце `setVideoStatus`
+(~1762): перед `initChatSend` (бере `setVideoStatus`), перед таблицею,
+перед `teardownMediaAndConnection`? — НІ: teardown (~1616) визначений РАНІШЕ
+як hoisted function і викликає `stopLocalMedia` лише з click-обробників —
+TDZ немає (const існує на момент кліку). `onIdentityAnnounce` кличе
+`autoStartOwnerCall` (повернений const) — з повідомлень. Після C5 таблиця:
+`identity-announce` + три spread-и.
+
+- [x] **Tests**: наявні call/media-сценарії `app.test.js` (RF2 iter1–3, RF4-video, auto-answer, denied) без змін і зелені; новий `client/tests/callUI.test.js` — таблиця з 2 ключами; `webrtc-call-offer` без верифікованого пера → `video-status` = incomingRejected і `getUserMedia` не викликано; `stopLocalMedia` зупиняє треки, обнуляє `localStream`, скидає обидва прапорці, ховає `#video-remote` (RED до створення).
+- [x] **Impl**: новий модуль; `app.js` — блоки замінено init-викликом; teardown/torn-down використовують `stopLocalMedia`; 4 webrtc-імпорти прунено.
+- [x] **Exec review**: iter1 — [reviews/core-dispatch-C5-iter1.md](../reviews/core-dispatch-C5-iter1.md). PASS, 0 знахідок; жива перевірка — в артефакті.
 
 ## Лишається в ядрі app.js
 

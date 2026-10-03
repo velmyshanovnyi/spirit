@@ -212,7 +212,7 @@ footer і feature-флаги).
 
 ---
 
-### [~] A4. `app.js` — God object на 4921 рядок
+### [x] A4. `app.js` — God object на 4921 рядок ✅ ЗАКРИТО 2026-10-03 (5095→2916, 14 модулів)
 
 **Прогрес 2026-09-18 (Секція R1, `specs/phase5/app-decomposition.md`):** recovery-домен
 (картка Shamir-setup + outbox часток + відновлення з часток, ~330 рядків) винесено в
@@ -235,9 +235,12 @@ chat-send (sendSingleChatMessage/flush/sendChatMessage/sendGroupMessage, ~95 р�
 додали ~160 рядків UI-логіки). Разом R1–R9: 5095→3478 (−32%). **Етап 2 — `specs/phase5/core-dispatch.md`
 (2026-10-03):** C1 таблиця диспетчера замість if-ланцюга handleChatMessage;
 C2 файли → `fileTransferUI.js`; C3 групи/mesh → `groupChatHandlers.js`;
-C4 анонси контакту → `peerAnnouncements.js`. app.js 3478→3087 (разом від
-старту: −39%). Лишається C5 (дзвінок/медіа — межа уточнюється) і справжнє
-ядро (identity-announce, сесії, ratchet, wireChannelCallbacks, роутінг). Вербатим-нотатка з R9:
+C4 анонси контакту → `peerAnnouncements.js`; C5 дзвінок/медіа → `callUI.js`
+(+ дедуплікований `stopLocalMedia`). app.js 3478→2916 (разом від старту
+5095→2916, **−43%**). Спека core-dispatch закрита. У таблиці диспетчера
+лишився лише `identity-announce` — справжнє ядро (сесії, ratchet,
+wireChannelCallbacks, роутінг). A4 можна вважати завершеним; подальший
+розпил ядра — лише за новою мотивацією (напр. ratchet-рефакторинг для P2). Вербатим-нотатка з R9:
 Enter у полі вводу викликав `sendChatMessage` і в груповому режимі — виправлено 2026-10-02 (`d84b99b`): спільний `submitMessageInput()` для btn-send і Enter. Кандидата
 «дзвінки/медіа» розвідано й відкладено: НЕ суцільний домен (renegotiation всередині
 handleChatMessage, video-dock у рендер-замиканні) — його винос буде cut-and-stitch,
