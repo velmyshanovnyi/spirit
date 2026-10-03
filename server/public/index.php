@@ -14,6 +14,7 @@ require __DIR__ . '/../library/Cors.php';
 require __DIR__ . '/../library/RateLimiter.php';
 require __DIR__ . '/../library/Pow.php';
 require __DIR__ . '/../library/PowNonceStore.php';
+require __DIR__ . '/../library/TurnCredentialProvider.php';
 require __DIR__ . '/../library/SignalingController.php';
 
 use Spirit\SignalingController;

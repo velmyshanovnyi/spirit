@@ -84,6 +84,20 @@ $config = [
     // used to derive or brute-force the admin password.
     'ADMIN_TOKEN_SECRET' => '',
     'ADMIN_TOKEN_TTL_SECONDS' => 900,
+
+    // Section I2 (specs/phase5/ice-servers.md): Cloudflare Realtime TURN.
+    // Both empty = disabled (get_ice_servers returns an empty list and the
+    // client runs on its static STUN + Open Relay list). The real key id /
+    // API token live ONLY in config.secrets.php (gitignored) -- same rule
+    // as the admin credentials above.
+    'CLOUDFLARE_TURN_KEY_ID' => '',
+    'CLOUDFLARE_TURN_API_TOKEN' => '',
+    // Credential lifetime requested from Cloudflare; the node re-generates
+    // at half of it, the client refreshes on the same half-TTL rule.
+    'ICE_CREDENTIAL_TTL_SECONDS' => 86400,
+    // Ephemeral cache (one generated pair + expiry) -- same tier as
+    // ratelimit.json / pow_spent.json, no user data.
+    'ICE_CACHE_FILE' => $dataDir . '/ice_credentials.json',
 ];
 
 // Optional per-deployment secrets overlay, gitignored (server/*.secrets.php)

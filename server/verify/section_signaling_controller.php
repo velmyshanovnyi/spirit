@@ -19,6 +19,7 @@ require __DIR__ . '/../library/Storage.php';
 require __DIR__ . '/../library/InviteManager.php';
 require __DIR__ . '/../library/RateLimiter.php';
 require __DIR__ . '/../library/PowNonceStore.php';
+require __DIR__ . '/../library/TurnCredentialProvider.php';
 require __DIR__ . '/../library/Pow.php';
 require __DIR__ . '/../library/Cors.php';
 require __DIR__ . '/../library/SignalingController.php';
@@ -224,6 +225,17 @@ try {
     $logContents = is_file($logFile) ? file_get_contents($logFile) : '';
     $results['C5_rate_limit_429_is_logged'] = $rateLimitedResult['status'] === 429
         && strpos($logContents, 'rate_limited') !== false;
+
+    // Section I2 (specs/phase5/ice-servers.md): get_ice_servers is a public,
+    // rate-limited, lock-free action; with the committed defaults (no
+    // Cloudflare keys) it degrades to an empty list with HTTP 200, and it
+    // still demands sender_key like every other action.
+    $iceController = new SignalingController(freshConfig($dataDir));
+    $ice = $iceController->handle('POST', null, '203.0.113.8', ['action' => 'get_ice_servers', 'sender_key' => 'ice-sender']);
+    $results['I2_get_ice_servers_unconfigured_is_200_empty'] = $ice['status'] === 200
+        && $ice['body'] === ['iceServers' => [], 'expiresAt' => null];
+    $iceNoSender = $iceController->handle('POST', null, '203.0.113.8', ['action' => 'get_ice_servers']);
+    $results['I2_get_ice_servers_requires_sender_key'] = $iceNoSender['status'] === 400;
 
     $results['all_passed'] = !in_array(false, $results, true);
 } finally {

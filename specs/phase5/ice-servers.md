@@ -61,10 +61,10 @@ STUN і один опційний TURN; екран «Вузол» має пол�
   з `{ ttl }`, кеш у файлі до половини TTL; повертає `{ iceServers:
   [{urls, username, credential}], expiresAt }`. Без ключів / помилка
   мережі → `{ iceServers: [], expiresAt: null }` (деградація, HTTP 200).
-- `index.php`: `action=get_ice_servers` (GET, rate-limited як інші).
-- [ ] **Tests**: `server/verify/` PHP-тести: провайдер без ключів → порожньо; з mock-транспортом → кеш-хіт у межах half-TTL, промах після; помилка транспорту → порожньо без винятку.
-- [ ] **Impl**: library + index.php + config; деплой у `spirit/` на обох хостах; секрети — поза git, вписуються вручну після отримання від користувача.
-- [ ] **Exec review**: iter1.
+- `index.php`: `action=get_ice_servers` (POST з `sender_key`, як усі дії; rate-limited; поза database-lock, як `fetch_proof`).
+- [x] **Tests**: `server/verify/` PHP-тести: провайдер без ключів → порожньо; з mock-транспортом → кеш-хіт у межах half-TTL, промах після; помилка транспорту → порожньо без винятку.
+- [x] **Impl**: library + index.php + config; деплой у `spirit/` на обох хостах; секрети — поза git, вписуються вручну після отримання від користувача.
+- [x] **Exec review**: iter1 — [reviews/ice-servers-I2-iter1.md](../reviews/ice-servers-I2-iter1.md). PASS; 2 LOW (shape `issuedAt`, GET→POST у спеці) виправлено; живий ендпойнт — в артефакті.
 
 ## Секція I3: клієнт тягне креденшели й оновлює на половині TTL
 

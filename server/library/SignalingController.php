@@ -17,6 +17,7 @@ class SignalingController
     private Storage $storage;
     private InviteManager $inviteManager;
     private RateLimiter $rateLimiter;
+    private TurnCredentialProvider $turnCredentials;
     private PowNonceStore $powNonceStore;
 
     public function __construct(array $config)
@@ -42,6 +43,16 @@ class SignalingController
         $this->powNonceStore = new PowNonceStore(
             $config['POW_SPENT_FILE'],
             2 * $config['POW_WINDOW_SECONDS']
+        );
+
+        // Section I2 (specs/phase5/ice-servers.md): short-lived Cloudflare
+        // TURN credentials; unset keys (the committed default) = disabled,
+        // get_ice_servers then answers with an empty list.
+        $this->turnCredentials = new TurnCredentialProvider(
+            (string) ($config['CLOUDFLARE_TURN_KEY_ID'] ?? ''),
+            (string) ($config['CLOUDFLARE_TURN_API_TOKEN'] ?? ''),
+            (int) ($config['ICE_CREDENTIAL_TTL_SECONDS'] ?? 86400),
+            (string) ($config['ICE_CACHE_FILE'] ?? ($config['POW_SPENT_FILE'] . '.ice.json'))
         );
     }
 
@@ -116,6 +127,14 @@ class SignalingController
 
         if ($action === 'fetch_proof') {
             return $this->handleFetchProof($input, $clientIp);
+        }
+
+        // Section I2: stateless w.r.t. database.json (own ephemeral cache
+        // file, own flock-free tmp+rename write) -- like fetch_proof, it must
+        // NOT be serialized behind the signaling lock below, since it may
+        // make a (bounded, 10s) vendor HTTPS call.
+        if ($action === 'get_ice_servers') {
+            return ['status' => 200, 'body' => $this->turnCredentials->getIceServers()];
         }
 
         // Stricter bucket only for room-creating actions, and only checked
