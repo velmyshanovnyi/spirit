@@ -34,3 +34,22 @@ AbortSignal, then `create_invite`; the nodes answer the degraded empty shape
 connections keep the 3-entry static list. No console errors. The full
 Cloudflare path (relay candidates from turn.cloudflare.com) is pending the
 user's Key ID / API Token in config.secrets.php on both hosts.
+
+## Author's live verification with the real Cloudflare keys (2026-10-03, later the same day)
+Keys for the Cloudflare Realtime TURN app "spirit" written to
+`spirit/config.secrets.php` on both hosts (FTP, outside git).
+- Direct vendor call: HTTP 201 (the provider accepts any 2xx), response has
+  TWO entries -- a credential-less `stun:` entry and the TURN entry; the
+  normaliser keeps only the TURN one (as the harness's mixed case predicted).
+- `get_ice_servers` on kolomedi and kibr: 1 entry, 6 transports, 64-char
+  username/credential, `expiresAt` = now + 24 h.
+- Fresh tab on each host: the client fetched and stored the pair
+  (`spirit.iceCredential`, expires in 24 h); relay-only `RTCPeerConnection`
+  with that pair → **8 (kolomedi) / 9 (kibr) `relay` candidates from
+  turn.cloudflare.com**, mostly relayProtocol tcp (the pane blocks UDP) --
+  i.e. the primary relay works even on a UDP-restricted network.
+- Reload on kibr: the stored pair survived, `currentRtcConfig`'s list has 4
+  entries with Cloudflare at index 2 (behind the two STUNs, ahead of Open
+  Relay), and a new room sent NO re-fetch (before half-TTL) -- the half-TTL
+  rule holds end-to-end. No console errors.
+

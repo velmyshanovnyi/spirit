@@ -371,6 +371,10 @@ server-url/stun-url, прихований передзаповнений google-
 обох хостах). Щоб увімкнути: вписати `CLOUDFLARE_TURN_KEY_ID` /
 `CLOUDFLARE_TURN_API_TOKEN` у `spirit/config.secrets.php` на kolomedi й kibr
 (поза git) — код/деплой не потребують змін. Open Relay лишається запасним.
+**Увімкнено 2026-10-03:** ключі вписано на обох хостах; живо — 8/9
+`relay`-кандидатів з `turn.cloudflare.com` (relayProtocol tcp у пейні),
+пара переживає reload, повторний запит до half-TTL не йде. Основний релей
+працює; A12 лишається відкритим лише щодо Open Relay як запасного.
 
 **Доповнення 2026-10-03 (ice-servers I1):** перевірено ще й СТАТИЧНУ пару
 `openrelayproject/openrelayproject` на `openrelay.metered.ca` (:80, :443,
