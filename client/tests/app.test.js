@@ -122,9 +122,11 @@ vi.mock("../js/webrtc.js", () => ({
   // Real (non-mocked) implementation -- Section P1(a) coverage below asserts
   // on its actual output as it flows into startAsInitiator/startAsJoiner
   // calls, mirroring buildRtcConfig's own unit tests in rtcConfig.test.js.
-  buildRtcConfig: vi.fn((stunUrl, { forceTurnRelay = false, turnUrl = "", turnUsername = "", turnCredential = "" } = {}) => {
-    const config = { iceServers: [{ urls: stunUrl }] };
-    if (turnUrl) config.iceServers.push({ urls: turnUrl, username: turnUsername, credential: turnCredential });
+  buildRtcConfig: vi.fn((stunUrlOrServers, { forceTurnRelay = false, turnUrl = "", turnUsername = "", turnCredential = "" } = {}) => {
+    // Section I1 (specs/phase5/ice-servers.md): same overload as the real one --
+    // an iceServers ARRAY passes through, a string is the legacy single-STUN form.
+    const config = Array.isArray(stunUrlOrServers) ? { iceServers: stunUrlOrServers } : { iceServers: [{ urls: stunUrlOrServers }] };
+    if (!Array.isArray(stunUrlOrServers) && turnUrl) config.iceServers.push({ urls: turnUrl, username: turnUsername, credential: turnCredential });
     if (forceTurnRelay) config.iceTransportPolicy = "relay";
     return config;
   })
@@ -169,6 +171,13 @@ import {
   importPrivateKeyRaw
 } from "../js/identity.js";
 import { t } from "../js/i18n.js";
+// Section I1 (specs/phase5/ice-servers.md): the default ICE list every
+// connection path now sends -- two public STUN servers + the Open Relay
+// fallback (Cloudflare TURN joins once Section I3 fetches a credential).
+const DEFAULT_ICE_SERVERS = [
+  { urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun.cloudflare.com:3478" },
+  { urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443", "turn:openrelay.metered.ca:443?transport=tcp"], username: "openrelayproject", credential: "openrelayproject" }
+];
 import { createPermanentProfile, exportRawIdentity, listProfiles, loadPermanentProfile, setNickname, getNickname, adoptScalarIdentity } from "../js/profile.js";
 import { deriveAccountMaterial, generateAccountName } from "../js/deterministicIdentity.js";
 import { generateStrongPassword } from "../js/passwordGenerator.js";
@@ -527,7 +536,7 @@ describe("force-turn-relay toggle (Section P1(a), specs/phase5/security-hardenin
     document.getElementById("btn-initiate").click();
 
     await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
-    expect(captured.rtcConfig).toEqual({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+    expect(captured.rtcConfig).toEqual({ iceServers: DEFAULT_ICE_SERVERS });
     expect("iceTransportPolicy" in captured.rtcConfig).toBe(false);
   });
 
@@ -554,7 +563,7 @@ describe("force-turn-relay toggle (Section P1(a), specs/phase5/security-hardenin
 
     await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
     expect(captured.rtcConfig).toEqual({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      iceServers: DEFAULT_ICE_SERVERS,
       iceTransportPolicy: "relay"
     });
   });
@@ -578,7 +587,7 @@ describe("force-turn-relay toggle (Section P1(a), specs/phase5/security-hardenin
     await vi.waitFor(() => expect(startAsJoiner).toHaveBeenCalled());
     const [opts] = startAsJoiner.mock.calls[0];
     expect(opts.rtcConfig).toEqual({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      iceServers: DEFAULT_ICE_SERVERS,
       iceTransportPolicy: "relay"
     });
   });
@@ -660,12 +669,11 @@ describe("TURN preset selector (free public relay)", () => {
     preset.dispatchEvent(new Event("change"));
     await vi.waitFor(() => expect(document.getElementById("turn-credential").value).not.toBe(""));
 
-    expect(document.getElementById("turn-url").value).toBe("turn:staticauth.openrelay.metered.ca:443?transport=tcp");
-    // username embeds a future unix-timestamp expiry -- assert the SHAPE
-    // (":spirit" suffix, numeric prefix), not an exact value (it depends on
-    // the real clock at test time).
-    expect(document.getElementById("turn-username").value).toMatch(/^\d+:spirit$/);
-    expect(document.getElementById("turn-credential").value.length).toBeGreaterThan(0);
+    // Section I1 (specs/phase5/ice-servers.md): the preset is the static
+    // public pair the user supplied (the HMAC endpoint never answered, A12).
+    expect(document.getElementById("turn-url").value).toBe("turn:openrelay.metered.ca:443?transport=tcp");
+    expect(document.getElementById("turn-username").value).toBe("openrelayproject");
+    expect(document.getElementById("turn-credential").value).toBe("openrelayproject");
   });
 
   it("selecting 'custom' does not overwrite whatever is currently in the three TURN fields", () => {
@@ -695,25 +703,19 @@ describe("TURN preset selector (free public relay)", () => {
     expect(preset.value).toBe("custom");
   });
 
-  it("re-selecting the preset regenerates a fresh (different) credential rather than reusing the last one", async () => {
+  it("re-selecting the preset after 'custom' restores the static pair (Section I1: no per-selection regeneration any more)", async () => {
     initApp(document, { locale: "uk" });
     const preset = document.getElementById("turn-preset");
-    const usernameEl = document.getElementById("turn-username");
-
     preset.value = "metered-openrelay";
     preset.dispatchEvent(new Event("change"));
-    await vi.waitFor(() => expect(usernameEl.value).not.toBe(""));
-    const firstUsername = usernameEl.value;
-
-    // Force a different expiry by advancing the clock, then re-select.
-    vi.useFakeTimers();
-    vi.advanceTimersByTime(60_000);
+    document.getElementById("turn-username").value = "edited";
     preset.value = "custom";
     preset.dispatchEvent(new Event("change"));
+    expect(document.getElementById("turn-username").value).toBe("edited"); // custom leaves fields alone
     preset.value = "metered-openrelay";
     preset.dispatchEvent(new Event("change"));
-    vi.useRealTimers();
-    await vi.waitFor(() => expect(usernameEl.value).not.toBe(firstUsername));
+    expect(document.getElementById("turn-username").value).toBe("openrelayproject");
+    expect(document.getElementById("turn-credential").value).toBe("openrelayproject");
   });
 });
 
@@ -797,7 +799,7 @@ describe("multi-node signaling UI (specs/phase4/multi-node-ui.md)", () => {
   // own header comment says the old static-credential pair was rejected
   // for). Selecting a preset-backed saved node must regenerate a FRESH
   // credential instead of restoring the stale one.
-  it("selecting a saved node that used the free TURN preset regenerates a FRESH credential instead of restoring the stale one", async () => {
+  it("selecting a saved node that used the free TURN preset restores the preset's static pair, not whatever stale values were saved", async () => {
     localStorage.setItem(
       "spirit.signalingNodes",
       JSON.stringify([
@@ -807,9 +809,6 @@ describe("multi-node signaling UI (specs/phase4/multi-node-ui.md)", () => {
           serverUrl: "https://c.example/index.php",
           stunUrl: "stun:c.example:19302",
           turnPreset: "metered-openrelay",
-          // Deliberately a long-expired credential (unix epoch 0) -- if this
-          // ever gets restored verbatim, it's a stale value the test can
-          // catch by checking it does NOT survive.
           turnUrl: "turn:staticauth.openrelay.metered.ca:443?transport=tcp",
           turnUsername: "0:spirit",
           turnCredential: "STALE-EXPIRED-VALUE",
@@ -820,20 +819,10 @@ describe("multi-node signaling UI (specs/phase4/multi-node-ui.md)", () => {
     initApp(document, { locale: "uk" });
 
     document.querySelector('[data-signaling-node-select="node-c"]').click();
-
-    // Wait for the POSITIVE condition (the async fill completing), not for
-    // "not equal to the stale value" -- the field is simply empty ("",
-    // the fixture's own default) during the async gap, since selecting a
-    // saved node never auto-fills on page load, only on click. "not equal
-    // to a specific stale string" would trivially and immediately pass on
-    // that empty intermediate state, checking nothing.
-    await vi.waitFor(() => expect(document.getElementById("turn-username").value).not.toBe(""));
-    expect(document.getElementById("turn-credential").value).not.toBe("STALE-EXPIRED-VALUE");
-    expect(document.getElementById("turn-username").value).toMatch(/^\d+:spirit$/);
-    // The regenerated username's embedded expiry must be in the future.
-    const expiry = Number(document.getElementById("turn-username").value.split(":")[0]);
-    expect(expiry).toBeGreaterThan(Date.now() / 1000);
-    expect(document.getElementById("turn-preset").value).toBe("metered-openrelay");
+    await vi.waitFor(() => expect(document.getElementById("turn-preset").value).toBe("metered-openrelay"));
+    expect(document.getElementById("turn-url").value).toBe("turn:openrelay.metered.ca:443?transport=tcp");
+    expect(document.getElementById("turn-username").value).toBe("openrelayproject");
+    expect(document.getElementById("turn-credential").value).toBe("openrelayproject");
   });
 
   it("selecting a saved node with a CUSTOM (non-preset) TURN config restores it verbatim, unchanged", () => {

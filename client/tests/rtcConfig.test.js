@@ -2,6 +2,16 @@ import { describe, it, expect } from "vitest";
 import { buildRtcConfig } from "../js/webrtc.js";
 
 describe("buildRtcConfig", () => {
+  // Section I1 (specs/phase5/ice-servers.md): an iceServers ARRAY as the
+  // first argument is passed through as-is (the string form stays for
+  // backwards compatibility with the call sites below).
+  it("accepts a ready-made iceServers array as the first argument and passes it through unchanged", () => {
+    const servers = [{ urls: "stun:a" }, { urls: ["turn:b:80", "turn:b:443"], username: "u", credential: "p" }];
+    expect(buildRtcConfig(servers)).toEqual({ iceServers: servers });
+    expect(buildRtcConfig(servers, { forceTurnRelay: true })).toEqual({ iceServers: servers, iceTransportPolicy: "relay" });
+    expect(buildRtcConfig(servers).iceServers).toBe(servers);
+  });
+
   it("defaults to a plain iceServers config with no iceTransportPolicy key at all", () => {
     const config = buildRtcConfig("stun:stun.l.google.com:19302");
     expect(config).toEqual({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });

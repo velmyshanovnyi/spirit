@@ -32,6 +32,7 @@ import { initChatSend } from "./chatSend.js";
 import { initGroupChatHandlers } from "./groupChatHandlers.js";
 import { initPeerAnnouncements } from "./peerAnnouncements.js";
 import { initCallUI } from "./callUI.js";
+import { buildIceServers } from "./iceServers.js";
 import { initFileTransferUI } from "./fileTransferUI.js";
 import { isAdvancedModeUnlocked, isFeatureEnabled } from "./advancedMode.js";
 import { initAdvancedModeUI } from "./advancedModeUI.js";
@@ -376,6 +377,10 @@ export function initApp(doc, options) {
     // instead of being blocked outright -- drained the moment a channel +
     // session key are both available again (flushPendingOutgoingMessages).
     pendingOutgoingMessages: [],
+    // Section I1/I3 (specs/phase5/ice-servers.md): { username, credential }
+    // for Cloudflare TURN once fetched from the signaling node; null = not
+    // (yet) available -> connections run on STUN + Open Relay only.
+    cloudflareTurnCredential: null,
     // Section RF10: "peer" shows each side's independently-verified fingerprint
     // of the OTHER party (asymmetric, the original behavior); "shared" shows
     // one order-independent value derived from BOTH fingerprints together
@@ -1706,13 +1711,23 @@ export function initApp(doc, options) {
   // was previously the same 1-line expression copy-pasted at 8 separate
   // call sites (each only reading stun-url/force-turn-relay), now also
   // reading the new turn-url/turn-username/turn-credential fields.
+  // Section I1 (specs/phase5/ice-servers.md): two public STUN servers,
+  // Cloudflare TURN (once Section I3 has fetched a short-lived credential
+  // into state.cloudflareTurnCredential), the node screen's own TURN
+  // fields, and the Open Relay public fallback -- every connection path
+  // (initiator, joiner, device linking, group mesh) reads this one function.
   function currentRtcConfig() {
-    return buildRtcConfig(el("stun-url").value, {
-      forceTurnRelay: el("force-turn-relay").checked,
-      turnUrl: el("turn-url").value,
-      turnUsername: el("turn-username").value,
-      turnCredential: el("turn-credential").value
+    const iceServers = buildIceServers({
+      stunUrl: el("stun-url").value,
+      cloudflareCredential: state.cloudflareTurnCredential,
+      customTurn: {
+        turnUrl: el("turn-url").value,
+        turnUsername: el("turn-username").value,
+        turnCredential: el("turn-credential").value
+      },
+      includeOpenRelay: true
     });
+    return buildRtcConfig(iceServers, { forceTurnRelay: el("force-turn-relay").checked });
   }
 
   function armIceTimeout() {

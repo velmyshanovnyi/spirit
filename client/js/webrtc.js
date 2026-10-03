@@ -11,9 +11,15 @@ const DATA_CHANNEL_LABEL = "spirit-chat-stream";
 // broke every connection (no TURN candidates could ever be gathered).
 // turnUrl/turnUsername/turnCredential add a SECOND iceServers entry
 // alongside the STUN one, only when a TURN URL is actually given.
-export function buildRtcConfig(stunUrl, { forceTurnRelay = false, turnUrl = "", turnUsername = "", turnCredential = "" } = {}) {
-  const config = { iceServers: [{ urls: stunUrl }] };
-  if (turnUrl) {
+// Section I1 (specs/phase5/ice-servers.md): the first argument is either a
+// ready-made iceServers ARRAY (what app.js's currentRtcConfig sends now,
+// built by iceServers.js) or, for backwards compatibility, a single STUN
+// url string with the optional TURN fields below.
+export function buildRtcConfig(stunUrlOrServers, { forceTurnRelay = false, turnUrl = "", turnUsername = "", turnCredential = "" } = {}) {
+  const config = Array.isArray(stunUrlOrServers)
+    ? { iceServers: stunUrlOrServers }
+    : { iceServers: [{ urls: stunUrlOrServers }] };
+  if (!Array.isArray(stunUrlOrServers) && turnUrl) {
     config.iceServers.push({ urls: turnUrl, username: turnUsername, credential: turnCredential });
   }
   if (forceTurnRelay) config.iceTransportPolicy = "relay";

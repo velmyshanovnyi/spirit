@@ -366,6 +366,14 @@ server-url/stun-url, прихований передзаповнений google-
 
 ### [ ] A12. 🟠 TURN-пресет "Open Relay Project" не підтверджено як реально робочий
 
+**Доповнення 2026-10-03 (ice-servers I1):** перевірено ще й СТАТИЧНУ пару
+`openrelayproject/openrelayproject` на `openrelay.metered.ca` (:80, :443,
+:443?transport=tcp; relay-only policy, 20 с) з обох хостів у browser-пейні —
+**0 кандидатів**, тоді як обидва STUN дають `srflx` за секунди. Той самий
+патерн, що й для HMAC-ендпойнта. Open Relay тепер — лише запасний запис у
+списку ICE (iceServers.js), основний релей — Cloudflare TURN (I2/I3, потребує
+ключів). Остаточна відповідь «пейн чи вендор» — лише з реального браузера.
+
 **Докази.** Реалізацію (`client/js/turnCredentials.js`,
 `specs/reviews/turn-preset-iter1.md`) було свідомо позначено як таку, що
 потребує живої перевірки проти реального `staticauth.openrelay.metered.ca`

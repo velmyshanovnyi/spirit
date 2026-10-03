@@ -7,7 +7,6 @@
 // initial renderSignalingNodesList() call runs inside init at the same
 // point in initApp's sequence as before the extraction.
 import { adminLogin, getAdminConfig } from "./adminAuth.js";
-import { computeTurnRestCredential } from "./turnCredentials.js";
 
 // Order controls display order in the read-only admin panel.
 const ADMIN_CONFIG_FIELDS = [
@@ -80,31 +79,28 @@ export function initServerConfigUI({ doc, el, t, withBusyButton }) {
   // match a known preset" sync on manual edits (unlike stun-url above) --
   // any manual edit to any of the three TURN fields just flips to "custom",
   // since a freshly-typed value can never coincidentally equal a live HMAC.
+  // Section I1 (specs/phase5/ice-servers.md): the Open Relay preset is the
+  // vendor's STATIC public pair (user-supplied target config, 2026-10-03);
+  // the earlier HMAC "staticauth" endpoint never answered (backlog A12).
+  // Note the same relay is ALSO always present as the last entry of the
+  // ICE list (iceServers.js) -- this preset only matters if the user wants
+  // it in the explicit TURN fields, e.g. together with "force TURN relay".
+  // computeTurnRestCredential (turnCredentials.js) stays available for a
+  // user's own Metered account with a shared secret ("custom" fields).
   const TURN_PRESETS = {
     "metered-openrelay": {
-      // Port 443 (not 80): the vendor's own docs highlight 443 specifically
-      // for bypassing restrictive/corporate firewalls that only allow
-      // HTTPS-shaped traffic; ?transport=tcp on top of that covers networks
-      // that additionally block UDP outright. buildRtcConfig's turn-url
-      // field only holds one URI, so this is the single most broadly-
-      // compatible choice rather than the bare default.
-      url: "turn:staticauth.openrelay.metered.ca:443?transport=tcp",
-      // Published by Metered specifically for this no-signup use (their own
-      // documented example use case: embedding directly in an app like
-      // Nextcloud Talk, as opposed to their per-account API-key endpoint,
-      // which requires signup and is NOT reproduced here). Not a secret
-      // Spirit is leaking -- it's the vendor's own public, shared value.
-      sharedSecret: "openrelayprojectsecret"
+      url: "turn:openrelay.metered.ca:443?transport=tcp",
+      username: "openrelayproject",
+      credential: "openrelayproject"
     }
   };
-  el("turn-preset")?.addEventListener("change", async () => {
+  el("turn-preset")?.addEventListener("change", () => {
     const preset = el("turn-preset").value;
     const def = TURN_PRESETS[preset];
     if (!def) return; // "custom" (or any future unrecognized value): leave the three fields untouched
     el("turn-url").value = def.url;
-    const { username, credential } = await computeTurnRestCredential(def.sharedSecret);
-    el("turn-username").value = username;
-    el("turn-credential").value = credential;
+    el("turn-username").value = def.username;
+    el("turn-credential").value = def.credential;
   });
   for (const turnFieldId of ["turn-url", "turn-username", "turn-credential"]) {
     el(turnFieldId)?.addEventListener("input", () => {
@@ -202,11 +198,10 @@ export function initServerConfigUI({ doc, el, t, withBusyButton }) {
       turnUrl: el("turn-url").value,
       turnUsername: el("turn-username").value,
       turnCredential: el("turn-credential").value,
-      // Exec review finding 2 (specs/reviews/turn-preset-iter1.md): a preset
-      // like "metered-openrelay" produces a credential that EXPIRES
-      // (turnCredentials.js's HMAC embeds a TTL) -- recording WHICH preset
-      // was active lets the select-node handler below regenerate a fresh
-      // one instead of silently restoring a possibly-stale value. "custom"
+      // Exec review finding 2 (specs/reviews/turn-preset-iter1.md): recording
+      // WHICH preset was active lets the select-node handler below restore
+      // the preset's CURRENT values (Section I1: a static pair; before that a
+      // TTL-stamped HMAC) instead of whatever was saved at the time. "custom"
       // (or an older saved node with no turnPreset field at all, from
       // before this existed) means "just restore the raw fields verbatim",
       // unchanged from the original behavior.
@@ -241,9 +236,8 @@ export function initServerConfigUI({ doc, el, t, withBusyButton }) {
         if (el("turn-preset")) el("turn-preset").value = def ? node.turnPreset : "custom";
         if (def) {
           el("turn-url").value = def.url;
-          const { username, credential } = await computeTurnRestCredential(def.sharedSecret);
-          el("turn-username").value = username;
-          el("turn-credential").value = credential;
+          el("turn-username").value = def.username;
+          el("turn-credential").value = def.credential;
         } else {
           el("turn-url").value = node.turnUrl ?? "";
           el("turn-username").value = node.turnUsername ?? "";
