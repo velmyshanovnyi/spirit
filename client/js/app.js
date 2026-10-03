@@ -43,7 +43,7 @@ import {
   applyRemoteAnswer,
   buildRtcConfig
 } from "./webrtc.js";
-import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer } from "./signalingClient.js";
+import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer, getIceServers } from "./signalingClient.js";
 import { deriveSessionKey, encryptMessage, decryptMessage } from "./e2ee.js";
 import { deriveRootKey, deriveInitialChainKeys, ratchetStep } from "./ratchet.js";
 import {
@@ -1717,6 +1717,10 @@ export function initApp(doc, options) {
   // fields, and the Open Relay public fallback -- every connection path
   // (initiator, joiner, device linking, group mesh) reads this one function.
   function currentRtcConfig() {
+    // Section I3: EVERY connection path (initiator, joiner, device linking,
+    // group invite, mesh) builds its config here -- so this is the one
+    // place that guarantees a refresh gets scheduled (review iter1 F1).
+    ensureIceCredential();
     const iceServers = buildIceServers({
       stunUrl: el("stun-url").value,
       cloudflareCredential: state.cloudflareTurnCredential,
@@ -1729,6 +1733,62 @@ export function initApp(doc, options) {
     });
     return buildRtcConfig(iceServers, { forceTurnRelay: el("force-turn-relay").checked });
   }
+
+  // Section I3 (specs/phase5/ice-servers.md): Cloudflare TURN credential
+  // lifecycle. Stored (ephemeral, with expiry) in localStorage so a reload
+  // keeps using it; refreshed from the node when missing or past HALF its
+  // TTL (the node regenerates on the same rule). Fire-and-forget: the
+  // connection that triggers the refresh may still run on STUN + Open Relay
+  // -- every later one gets Cloudflare. Any failure leaves the current
+  // value alone (a stale-but-unexpired one is still worth using).
+  const ICE_CREDENTIAL_STORAGE_KEY = "spirit.iceCredential";
+  function loadStoredIceCredential() {
+    try {
+      const raw = localStorage.getItem(ICE_CREDENTIAL_STORAGE_KEY);
+      const stored = raw ? JSON.parse(raw) : null;
+      if (!stored || typeof stored.username !== "string" || typeof stored.credential !== "string") return null;
+      if (!Number.isFinite(stored.expiresAt) || stored.expiresAt <= Date.now() / 1000) return null;
+      return stored;
+    } catch {
+      return null;
+    }
+  }
+  function applyIceCredential(stored) {
+    state.cloudflareTurnCredential = stored ? { username: stored.username, credential: stored.credential } : null;
+  }
+  let iceCredentialRefreshInFlight = null;
+  function ensureIceCredential() {
+    if (!state.senderKey) return;
+    const stored = loadStoredIceCredential();
+    if (stored) {
+      applyIceCredential(stored);
+      const halfLife = stored.issuedAt + (stored.expiresAt - stored.issuedAt) / 2;
+      if (Date.now() / 1000 < halfLife) return;
+    }
+    if (iceCredentialRefreshInFlight) return;
+    iceCredentialRefreshInFlight = (async () => {
+      try {
+        // 15 s timeout (review iter1 F2): a hung node must not pin the
+        // in-flight guard for the tab's lifetime.
+        const signal = typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(15000) : undefined;
+        const { iceServers, expiresAt } = await getIceServers(el("server-url").value, { senderKey: state.senderKey }, { signal });
+        const entry = iceServers.find((s) => s && typeof s.username === "string" && typeof s.credential === "string");
+        if (!entry || !Number.isFinite(expiresAt)) return;
+        const record = { username: entry.username, credential: entry.credential, urls: entry.urls, issuedAt: Math.floor(Date.now() / 1000), expiresAt };
+        try {
+          localStorage.setItem(ICE_CREDENTIAL_STORAGE_KEY, JSON.stringify(record));
+        } catch {
+          // best effort -- this tab still benefits via state below
+        }
+        applyIceCredential(record);
+      } catch {
+        // offline / degraded node: keep whatever we had
+      } finally {
+        iceCredentialRefreshInFlight = null;
+      }
+    })();
+  }
+  applyIceCredential(loadStoredIceCredential()); // startup: an unexpired stored pair serves the very first connection
 
   function armIceTimeout() {
     let settled = false;

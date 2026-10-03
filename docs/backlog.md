@@ -366,6 +366,12 @@ server-url/stun-url, прихований передзаповнений google-
 
 ### [ ] A12. 🟠 TURN-пресет "Open Relay Project" не підтверджено як реально робочий
 
+**Стан 2026-10-03:** основний релей тепер — Cloudflare Realtime TURN через
+`specs/phase5/ice-servers.md` (I1–I3 закриті, деградований режим живий на
+обох хостах). Щоб увімкнути: вписати `CLOUDFLARE_TURN_KEY_ID` /
+`CLOUDFLARE_TURN_API_TOKEN` у `spirit/config.secrets.php` на kolomedi й kibr
+(поза git) — код/деплой не потребують змін. Open Relay лишається запасним.
+
 **Доповнення 2026-10-03 (ice-servers I1):** перевірено ще й СТАТИЧНУ пару
 `openrelayproject/openrelayproject` на `openrelay.metered.ca` (:80, :443,
 :443?transport=tcp; relay-only policy, 20 с) з обох хостів у browser-пейні —

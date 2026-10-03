@@ -136,7 +136,10 @@ vi.mock("../js/signalingClient.js", () => ({
   createOffer: vi.fn(),
   getOffer: vi.fn(),
   submitAnswer: vi.fn(),
-  pollForAnswer: vi.fn()
+  pollForAnswer: vi.fn(),
+  // Section I3: resolves to the degraded shape unless a test says otherwise
+  // -- every connection path triggers a refresh, so the default must be inert.
+  getIceServers: vi.fn(async () => ({ iceServers: [], expiresAt: null }))
 }));
 vi.mock("../js/pushSend.js", () => ({
   sendPushNotification: vi.fn()
@@ -239,7 +242,7 @@ import {
   createRenegotiationAnswer,
   applyRenegotiationAnswer
 } from "../js/webrtc.js";
-import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer } from "../js/signalingClient.js";
+import { createInvite, createOffer, getOffer, submitAnswer, pollForAnswer, getIceServers } from "../js/signalingClient.js";
 import { sendPushNotification } from "../js/pushSend.js";
 import { encryptMessage, decryptMessage, deriveSessionKey } from "../js/e2ee.js";
 import { deriveRootKey, deriveInitialChainKeys, ratchetStep } from "../js/ratchet.js";
@@ -9908,6 +9911,103 @@ describe("real-trigger unlock (Section X2, specs/phase5/test-fixture-fidelity.md
 // Section C1 (specs/phase5/core-dispatch.md): handleChatMessage is a
 // parse + lookup into a CONTROL_HANDLERS table; the type set is derived from
 // that table's keys (one source of truth).
+// Section I3 (specs/phase5/ice-servers.md): the client fetches a short-lived
+// Cloudflare TURN credential from the signaling node and refreshes it on the
+// half-TTL rule; connections built before it lands run on STUN + Open Relay.
+describe("Section I3: Cloudflare TURN credential refresh", () => {
+  const CF_ENTRY = { urls: ["turn:turn.cloudflare.com:3478?transport=udp"], username: "cf-u", credential: "cf-c" };
+  // The node only supplies the credential PAIR; the client owns the transport
+  // list (iceServers.js CLOUDFLARE_TURN_URLS, all six), so that is what the
+  // connection carries regardless of which urls the node echoed.
+  const CF_URLS_ALL_SIX = [
+    "turn:turn.cloudflare.com:3478?transport=udp", "turn:turn.cloudflare.com:3478?transport=tcp",
+    "turns:turn.cloudflare.com:5349?transport=tcp", "turn:turn.cloudflare.com:443?transport=udp",
+    "turn:turn.cloudflare.com:80?transport=tcp", "turns:turn.cloudflare.com:443?transport=tcp"
+  ];
+
+  async function quickChatCapturing() {
+    generateIdentityKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("identity-pub") });
+    fingerprint.mockResolvedValue("sender-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    let captured;
+    startAsInitiator.mockImplementation((opts) => { captured = opts; return { __fakePc: true }; });
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-quick-chat").click();
+    await vi.waitFor(() => expect(captured).toBeDefined());
+    return captured;
+  }
+
+  it("asks the signaling node for ICE servers with the sender key once an identity exists, and the NEXT connection carries the Cloudflare entry", async () => {
+    const future = Math.floor(Date.now() / 1000) + 86400;
+    getIceServers.mockResolvedValue({ iceServers: [CF_ENTRY], expiresAt: future });
+    const first = await quickChatCapturing();
+    await vi.waitFor(() => expect(getIceServers).toHaveBeenCalledWith("spirit/public/index.php", { senderKey: "sender-fp" }, expect.objectContaining({ signal: expect.any(AbortSignal) })));
+    // the credential is stored for later sessions too (ephemeral, with expiry)
+    await vi.waitFor(() => expect(JSON.parse(localStorage.getItem("spirit.iceCredential")).expiresAt).toBe(future));
+    void first;
+    let second;
+    startAsInitiator.mockImplementation((opts) => { second = opts; return { __fakePc: "2" }; });
+    document.getElementById("btn-room-leave").click();
+    await vi.waitFor(() => expect(second).toBeDefined());
+    expect(second.rtcConfig.iceServers[2]).toEqual({ urls: CF_URLS_ALL_SIX, username: "cf-u", credential: "cf-c" });
+    expect(second.rtcConfig.iceServers).toHaveLength(4); // 2 STUN + Cloudflare + Open Relay
+  });
+
+  it("restores an unexpired stored credential at startup, so even the FIRST connection uses Cloudflare, and does not re-fetch before half-TTL", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    localStorage.setItem("spirit.iceCredential", JSON.stringify({ username: "st-u", credential: "st-c", urls: CF_ENTRY.urls, issuedAt: now - 100, expiresAt: now + 86300 }));
+    const captured = await quickChatCapturing();
+    expect(captured.rtcConfig.iceServers[2]).toEqual({ urls: CF_URLS_ALL_SIX, username: "st-u", credential: "st-c" });
+    expect(getIceServers).not.toHaveBeenCalled();
+  });
+
+  it("re-fetches when the stored credential is past half its TTL", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    localStorage.setItem("spirit.iceCredential", JSON.stringify({ username: "old", credential: "old", urls: CF_ENTRY.urls, issuedAt: now - 50000, expiresAt: now + 36400 }));
+    getIceServers.mockResolvedValue({ iceServers: [CF_ENTRY], expiresAt: now + 86400 });
+    await quickChatCapturing();
+    await vi.waitFor(() => expect(getIceServers).toHaveBeenCalled());
+    await vi.waitFor(() => expect(JSON.parse(localStorage.getItem("spirit.iceCredential")).username).toBe("cf-u"));
+  });
+
+  it("a connection path that never enters the lobby (device linking) still triggers the refresh (review iter1 F1)", async () => {
+    createPermanentProfile.mockResolvedValue({ privateKey: { __tag: "profile-priv" }, publicKey: fakePublicKey("profile-pub"), vaultKey: { __tag: "vault-key" } });
+    fingerprint.mockResolvedValue("profile-fp");
+    generateEcdhKeyPair.mockResolvedValue({ privateKey: {}, publicKey: fakePublicKey("ecdh-pub") });
+    createInvite.mockResolvedValue({ roomId: "room1", inviteToken: "tok1" });
+    createOffer.mockResolvedValue(undefined);
+    pollForAnswer.mockResolvedValue({ answer: null, ecdhPubkey: null });
+    startAsInitiator.mockImplementation(() => ({ __fakePc: true }));
+    initApp(document, { locale: "uk" });
+    document.getElementById("btn-create-profile").click();
+    document.getElementById("profile-passphrase").value = "pass";
+    document.getElementById("btn-profile-confirm").click();
+    await vi.waitFor(() => expect(document.getElementById("pub-key-display").textContent).toBe("spirit0001profile-fp"));
+    expect(getIceServers).not.toHaveBeenCalled();
+    document.getElementById("link-passphrase").value = "my passphrase";
+    document.getElementById("btn-link-device").click();
+    await vi.waitFor(() => expect(startAsInitiator).toHaveBeenCalled());
+    await vi.waitFor(() => expect(getIceServers).toHaveBeenCalledWith("spirit/public/index.php", { senderKey: "profile-fp" }, expect.objectContaining({ signal: expect.any(AbortSignal) })));
+  });
+
+  it("a hung node request does not block later refreshes: the client passes a timeout signal (review iter1 F2)", async () => {
+    getIceServers.mockImplementation(() => new Promise(() => {})); // never settles
+    await quickChatCapturing();
+    await vi.waitFor(() => expect(getIceServers).toHaveBeenCalled());
+    // the call itself must carry an abort signal so the underlying fetch can time out
+    expect(getIceServers.mock.calls[0][2]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("a failing node or a degraded (empty) answer leaves connections on STUN + Open Relay without throwing", async () => {
+    getIceServers.mockRejectedValue(new Error("offline"));
+    const captured = await quickChatCapturing();
+    await vi.waitFor(() => expect(getIceServers).toHaveBeenCalled());
+    expect(captured.rtcConfig.iceServers).toHaveLength(3);
+    expect(localStorage.getItem("spirit.iceCredential")).toBeNull();
+  });
+});
+
 describe("Section C1: control-message dispatcher table", () => {
   const KNOWN_TYPES = ["identity-announce", "device-list-announce", "proof-set-announce", "push-subscription-announce", "recovery-share-announce", "webrtc-call-offer", "webrtc-call-answer", "file-offer", "file-accept", "file-reject", "file-chunk", "group-member-joined", "group-message", "safety-display-mode", "mesh-relay-offer", "mesh-relay-answer"];
 

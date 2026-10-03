@@ -18,6 +18,7 @@ import {
   checkAnswer,
   pollForAnswer,
   fetchProof,
+  getIceServers,
   SignalingError,
   POW_WINDOW_SECONDS
 } from "../js/signalingClient.js";
@@ -126,6 +127,31 @@ describe("createOffer", () => {
         })
       })
     );
+  });
+});
+
+// Section I3 (specs/phase5/ice-servers.md)
+describe("getIceServers", () => {
+  it("posts action=get_ice_servers with the sender key and returns { iceServers, expiresAt }", async () => {
+    mockFetchOnce(200, { iceServers: [{ urls: ["turn:turn.cloudflare.com:3478?transport=udp"], username: "u", credential: "c" }], expiresAt: 1700000000 });
+    const result = await getIceServers(BASE_URL, { senderKey: "sk" });
+    expect(global.fetch).toHaveBeenCalledWith(BASE_URL, expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ action: "get_ice_servers", sender_key: "sk" })
+    }));
+    expect(result).toEqual({ iceServers: [{ urls: ["turn:turn.cloudflare.com:3478?transport=udp"], username: "u", credential: "c" }], expiresAt: 1700000000 });
+  });
+
+  it("forwards an abort signal to fetch (so a hung node can be timed out)", async () => {
+    mockFetchOnce(200, { iceServers: [], expiresAt: null });
+    const controller = new AbortController();
+    await getIceServers(BASE_URL, { senderKey: "sk" }, { signal: controller.signal });
+    expect(global.fetch.mock.calls[0][1].signal).toBe(controller.signal);
+  });
+
+  it("returns the degraded empty shape untouched (node without Cloudflare keys)", async () => {
+    mockFetchOnce(200, { iceServers: [], expiresAt: null });
+    expect(await getIceServers(BASE_URL, { senderKey: "sk" })).toEqual({ iceServers: [], expiresAt: null });
   });
 });
 

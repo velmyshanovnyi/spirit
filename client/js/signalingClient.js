@@ -118,6 +118,17 @@ export async function submitAnswer(baseUrl, { senderKey, roomId, inviteToken, sd
  * SSRF-hardened (server/library/SignalingController.php); this client just
  * maps the wire shape.
  */
+/**
+ * Section I3 (specs/phase5/ice-servers.md): short-lived Cloudflare TURN
+ * credential(s) from the node (Section I2). The degraded shape
+ * `{ iceServers: [], expiresAt: null }` is a valid answer, not an error.
+ * @returns {Promise<{ iceServers: Array<{urls: string|string[], username: string, credential: string}>, expiresAt: number|null }>}
+ */
+export async function getIceServers(baseUrl, { senderKey }, { signal } = {}) {
+  const data = await apiRequest(baseUrl, { action: "get_ice_servers", sender_key: senderKey }, { signal });
+  return { iceServers: Array.isArray(data.iceServers) ? data.iceServers : [], expiresAt: data.expiresAt ?? null };
+}
+
 export async function fetchProof(baseUrl, { senderKey, targetUrl }) {
   const data = await apiRequest(baseUrl, { action: "fetch_proof", sender_key: senderKey, target_url: targetUrl });
   return { body: data.body, contentType: data.content_type };

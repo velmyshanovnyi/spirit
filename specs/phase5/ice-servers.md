@@ -69,14 +69,18 @@ STUN і один опційний TURN; екран «Вузол» має пол�
 ## Секція I3: клієнт тягне креденшели й оновлює на половині TTL
 
 - `signalingClient.js`: `getIceServers(serverUrl)`.
-- app.js: при старті і в `currentRtcConfig()` якщо `expiresAt - now <
-  TTL/2` → async refresh (не блокує поточне з'єднання: використовується
-  наявний кеш або статичний список); результат у
-  `state.cloudflareTurnCredential` + `localStorage` (`spirit.iceCredential`,
-  ефемерно, з expiresAt). Помилка → лишаємо статичний список.
-- [ ] **Tests**: `app.test.js` — mock `getIceServers`: перший `currentRtcConfig` без креденшелів, після resolve — Cloudflare-запис присутній; прострочення → повторний запит; помилка → без Cloudflare, без винятку.
-- [ ] **Impl**: клієнт; жива перевірка на обох хостах — ICE-кандидати типу `relay` з `turn.cloudflare.com` (після вписаних секретів).
-- [ ] **Exec review**: iter1.
+- app.js: при старті застосовується збережена непрострочена пара
+  (`localStorage` `spirit.iceCredential`, ефемерно, з `issuedAt`/`expiresAt`);
+  `ensureIceCredential()` — ПЕРШИЙ рядок `currentRtcConfig()`, тобто кожен
+  шлях з'єднання (ініціатор, joiner, F4 auto-join, device linking, групові
+  інвайти, mesh — усі будують конфіг саме тут) планує async refresh, якщо
+  пари нема або минуло ≥ TTL/2; refresh не блокує поточне з'єднання (воно
+  може йти на STUN + Open Relay, наступне — з Cloudflare); один in-flight
+  запит із 15-с `AbortSignal.timeout`; результат у `state.cloudflareTurnCredential`
+  + localStorage. Помилка/деградована відповідь → лишаємо поточне значення.
+- [x] **Tests**: `app.test.js` — mock `getIceServers`: перший `currentRtcConfig` без креденшелів, після resolve — Cloudflare-запис присутній; прострочення → повторний запит; помилка → без Cloudflare, без винятку.
+- [x] **Impl**: клієнт (деградований режим перевірено живо на обох хостах; `relay`-кандидати з `turn.cloudflare.com` — після вписаних секретів, див. артефакт iter2).
+- [x] **Exec review**: iter1 — [reviews/ice-servers-I3-iter1.md](../reviews/ice-servers-I3-iter1.md) FAIL (тригер не покривав device-linking/групи/mesh; без таймауту) — виправлено; iter2 — [reviews/ice-servers-I3-iter2.md](../reviews/ice-servers-I3-iter2.md) PASS.
 
 ## Порядок
 
